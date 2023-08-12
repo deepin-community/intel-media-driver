@@ -26,33 +26,33 @@
 //!
 
 #include "codechal_common.h"
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 #include "codechal_debug.h"
 #include "mos_solo_generic.h"
 #include "codechal_setting.h"
 
 Codechal::Codechal(
-    CodechalHwInterface    *hwInterface,
+    CodechalHwInterfaceNext *hwInterface,
     CodechalDebugInterface *debugInterface)
 {
     CODECHAL_PUBLIC_FUNCTION_ENTER;
-
-    CODECHAL_PUBLIC_CHK_NULL_NO_STATUS_RETURN(hwInterface);
-    CODECHAL_PUBLIC_CHK_NULL_NO_STATUS_RETURN(hwInterface->GetOsInterface());
-    MOS_UNUSED(debugInterface);
-
-    m_hwInterface       = hwInterface;
-    m_osInterface       = hwInterface->GetOsInterface();
-
-    if (m_hwInterface->bEnableVdboxBalancingbyUMD && m_osInterface->bEnableVdboxBalancing)
+    if (hwInterface)
     {
-        m_hwInterface->m_getVdboxNodeByUMD = true;
-    }
+        CODECHAL_PUBLIC_CHK_NULL_NO_STATUS_RETURN(hwInterface->GetOsInterface());
+        MOS_UNUSED(debugInterface);
 
+        m_hwInterface = hwInterface;
+        m_osInterface = hwInterface->GetOsInterface();
+
+        m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+        ;
+    }
 #if USE_CODECHAL_DEBUG_TOOL
-    CODECHAL_PUBLIC_CHK_NULL_NO_STATUS_RETURN(debugInterface);
-    m_debugInterface    = debugInterface;
-#endif // USE_CODECHAL_DEBUG_TOOL
+        CODECHAL_PUBLIC_CHK_NULL_NO_STATUS_RETURN(debugInterface);
+        m_debugInterface = debugInterface;
+#endif  // USE_CODECHAL_DEBUG_TOOL
+
+
 }
 
 Codechal::~Codechal()
@@ -126,14 +126,11 @@ MOS_STATUS Codechal::Allocate(CodechalSetting *codecHalSettings)
             m_statusReportDebugInterface->Initialize(m_hwInterface, codecHalSettings->codecFunction));
     }
 
-    MOS_USER_FEATURE_VALUE_DATA userFeatureData;
-    MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_NULL_HW_ACCELERATION_ENABLE_ID,
-        &userFeatureData,
-        m_osInterface->pOsContext);
-    nullHWAccelerationEnable.Value = userFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        nullHWAccelerationEnable.Value,
+        __MEDIA_USER_FEATURE_VALUE_NULL_HW_ACCELERATION_ENABLE,
+        MediaUserSetting::Group::Device);
 
     m_useNullHw[MOS_GPU_CONTEXT_VIDEO]         =
         (nullHWAccelerationEnable.CodecGlobal || nullHWAccelerationEnable.CtxVideo);
@@ -202,6 +199,12 @@ void Codechal::Destroy()
 }
 
 MOS_STATUS Codechal::ResolveMetaData(PMOS_RESOURCE pInput, PMOS_RESOURCE pOutput)
+{
+    return MOS_STATUS_SUCCESS;
+}
+
+MOS_STATUS Codechal::ReportErrorFlag(PMOS_RESOURCE pMetadataBuffer, uint32_t size,
+                                     uint32_t offset, uint32_t flag)
 {
     return MOS_STATUS_SUCCESS;
 }

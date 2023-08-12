@@ -65,11 +65,18 @@ public:
     // Decode SFC enabling
     bool                    sfcEnablingHinted = false;     //!< Applies to decode only, application may request field sfc.
     bool                    sfcInUseHinted = false;        //!< Applies to decode only, application may request sfc engine.
-    bool                    enableCodecMmc = true;        //!< Applies to both of decode and encode, to indicate if codec MMC could be enabled by default
+    bool                    enableCodecMmc = true;         //!< Applies to both of decode and encode, to indicate if codec MMC could be enabled by default
     bool                    secureMode = false;            //!< secure decoder is required if enabled
 
     // HEVC Encode only
-    bool                     isSCCEnabled = false;          //!< Flag to indicate if HEVC SCC is enabled.
+    bool                    isSCCEnabled = false;          //!< Flag to indicate if HEVC SCC is enabled.
+
+    bool                    isMmcEnabled = false;          //!< Flag to indicate if Mmc is enabled
+    
+    bool                    isRenderHalNeeded = false;     //!< Flag to indicate if RenderHal is needed
+
+    uint32_t                reservedMode = 0;
+
 
     //!
     //! \brief    Destructor 
@@ -90,6 +97,8 @@ public:
     //! \brief    Create CodechalSetting instance 
     //!
     static CodechalSetting *CreateCodechalSetting();
+
+MEDIA_CLASS_DEFINE_END(CodechalSetting)
 };
 
 #endif

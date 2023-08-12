@@ -30,52 +30,50 @@
 #include "igcodeckrn_g9.h"
 #endif
 
-extern template class MediaInterfacesFactory<MhwInterfaces>;
-extern template class MediaInterfacesFactory<MmdDevice>;
-extern template class MediaInterfacesFactory<CodechalDevice>;
-extern template class MediaInterfacesFactory<CMHalDevice>;
-extern template class MediaInterfacesFactory<MosUtilDevice>;
-extern template class MediaInterfacesFactory<VphalDevice>;
-extern template class MediaInterfacesFactory<RenderHalDevice>;
-extern template class MediaInterfacesFactory<Nv12ToP010Device>;
-extern template class MediaInterfacesFactory<DecodeHistogramDevice>;
+extern template class MediaFactory<uint32_t, MhwInterfaces>;
+extern template class MediaFactory<uint32_t, MmdDevice>;
+extern template class MediaFactory<uint32_t, CodechalDevice>;
+extern template class MediaFactory<uint32_t, CMHalDevice>;
+extern template class MediaFactory<uint32_t, VphalDevice>;
+extern template class MediaFactory<uint32_t, RenderHalDevice>;
+extern template class MediaFactory<uint32_t, Nv12ToP010Device>;
+extern template class MediaFactory<uint32_t, DecodeHistogramDevice>;
 
 #define PLATFORM_INTEL_GLK 16
 #define GENX_SKL           5
 #define GENX_BXT           6
 
 static bool glkRegisteredVphal =
-    MediaInterfacesFactory<VphalDevice>::
-    RegisterHal<VphalInterfacesG9Glk>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, VphalDevice>::
+    Register<VphalInterfacesG9Glk>((uint32_t)IGFX_GEMINILAKE);
 
 MOS_STATUS VphalInterfacesG9Glk::Initialize(
     PMOS_INTERFACE  osInterface,
-    PMOS_CONTEXT    osDriverContext,
     bool            bInitVphalState,
-    MOS_STATUS      *eStatus)
+    MOS_STATUS      *eStatus,
+    bool            clearViewMode)
 {
-    m_vphalState = MOS_New(
+    m_vpBase = MOS_New(
         VphalState,
         osInterface,
-        osDriverContext,
         eStatus);
 
     return *eStatus;
 }
 
 static bool glkRegisteredMhw =
-    MediaInterfacesFactory<MhwInterfaces>::
-    RegisterHal<MhwInterfacesG9Kbl>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, MhwInterfaces>::
+    Register<MhwInterfacesG9Kbl>((uint32_t)IGFX_GEMINILAKE);
 
-#ifdef _MMC_SUPPORTED
+#if defined(_MMC_SUPPORTED) && defined(ENABLE_KERNELS) && !defined(_FULL_OPEN_SOURCE)
 static bool glkRegisteredMmd =
-    MediaInterfacesFactory<MmdDevice>::
-    RegisterHal<MmdDeviceG9Kbl>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, MmdDevice>::
+    Register<MmdDeviceG9Kbl>((uint32_t)IGFX_GEMINILAKE);
 #endif
 
 static bool glkRegisteredNv12ToP010 =
-    MediaInterfacesFactory<Nv12ToP010Device>::
-    RegisterHal<Nv12ToP010DeviceG9Glk>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, Nv12ToP010Device>::
+    Register<Nv12ToP010DeviceG9Glk>((uint32_t)IGFX_GEMINILAKE);
 
 MOS_STATUS Nv12ToP010DeviceG9Glk::Initialize(
     PMOS_INTERFACE            osInterface)
@@ -92,8 +90,8 @@ MOS_STATUS Nv12ToP010DeviceG9Glk::Initialize(
 }
 
 static bool glkRegisteredCodecHal =
-    MediaInterfacesFactory<CodechalDevice>::
-    RegisterHal<CodechalInterfacesG9Glk>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, CodechalDevice>::
+    Register<CodechalInterfacesG9Glk>((uint32_t)IGFX_GEMINILAKE);
 
 MOS_STATUS CodechalInterfacesG9Glk::Initialize(
     void *standardInfo,
@@ -318,6 +316,23 @@ MOS_STATUS CodechalInterfacesG9Glk::Initialize(
         }
         else
 #endif
+#ifdef _VP8_ENCODE_SUPPORTED
+        if (info->Mode == CODECHAL_ENCODE_MODE_VP8)
+        {
+            // Setup encode interface functions
+            encoder = MOS_New(Encode::Vp8, hwInterface, debugInterface, info);
+            if (encoder == nullptr)
+            {
+                CODECHAL_PUBLIC_ASSERTMESSAGE("VP8 Encode allocation failed!");
+                return MOS_STATUS_INVALID_PARAMETER;
+            }
+            else
+            {
+                m_codechalDevice = encoder;
+            }
+        }
+        else
+#endif
         {
             CODECHAL_PUBLIC_ASSERTMESSAGE("Unsupported encode function requested.");
             return MOS_STATUS_INVALID_PARAMETER;
@@ -343,8 +358,8 @@ MOS_STATUS CodechalInterfacesG9Glk::Initialize(
 }
 
 static bool glkRegisteredCMHal =
-    MediaInterfacesFactory<CMHalDevice>::
-    RegisterHal<CMHalInterfacesG9Glk>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, CMHalDevice>::
+    Register<CMHalInterfacesG9Glk>((uint32_t)IGFX_GEMINILAKE);
 
 MOS_STATUS CMHalInterfacesG9Glk::Initialize(CM_HAL_STATE *pCmState)
 {
@@ -391,18 +406,15 @@ MOS_STATUS CMHalInterfacesG9Glk::Initialize(CM_HAL_STATE *pCmState)
     pGen9Device->OverwriteSteppingTable(CmSteppingInfo_GLK, sizeof(CmSteppingInfo_GLK)/sizeof(const char *));
     return MOS_STATUS_SUCCESS;
 }
-static bool glkRegisteredMosUtil =
-    MediaInterfacesFactory<MosUtilDevice>::
-    RegisterHal<MosUtilDeviceG9Kbl>((uint32_t)IGFX_GEMINILAKE);
 
 static bool glkRegisteredRenderHal =
-    MediaInterfacesFactory<RenderHalDevice>::
-    RegisterHal<RenderHalInterfacesG9Kbl>((uint32_t)IGFX_GEMINILAKE);
+    MediaFactory<uint32_t, RenderHalDevice>::
+    Register<RenderHalInterfacesG9Kbl>((uint32_t)IGFX_GEMINILAKE);
     
 
 static bool glkRegisteredDecodeHistogram =
-MediaInterfacesFactory<DecodeHistogramDevice>::
-RegisterHal<DecodeHistogramDeviceG9Glk>((uint32_t)IGFX_GEMINILAKE);
+MediaFactory<uint32_t, DecodeHistogramDevice>::
+Register<DecodeHistogramDeviceG9Glk>((uint32_t)IGFX_GEMINILAKE);
 
 MOS_STATUS DecodeHistogramDeviceG9Glk::Initialize(
     CodechalHwInterface       *hwInterface,

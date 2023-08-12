@@ -30,7 +30,7 @@
 #include "vphal.h"
 #include "vphal_render_renderstate.h"
 #include "vphal_render_common.h"
-#include "mhw_render.h"
+#include "mhw_render_legacy.h"
 
 //!
 //! \brief Compositing buffers
@@ -338,6 +338,12 @@ public:
     bool IsNeeded(
         PCVPHAL_RENDER_PARAMS  pcRenderParams,
         RenderpassData         *pRenderPassData);
+
+    void PrintCurbeData(MEDIA_OBJECT_KA2_STATIC_DATA *pWalkerStatic);
+
+    void PrintWalkerParas(PMHW_GPGPU_WALKER_PARAMS pWalkerParams);
+
+    void PrintSamplerParams(PMHW_SAMPLER_STATE_PARAM pSamplerParams);
 
     //!
     //! \brief    set Report data
@@ -699,6 +705,34 @@ protected:
         PMHW_SAMPLER_TYPE                   pSamplerType);
 
     //!
+    //! \brief    Update SamplerStateParams associated with a surface state for composite
+    //! \param    [in] pSamplerStateParams
+    //!           Pointer to SamplerStateParams
+    //! \param    [in] pEntry
+    //!           Pointer to Surface state
+    //! \param    [in] pRenderData
+    //!           Pointer to RenderData
+    //! \param    [in] uLayerNum
+    //!           Layer total number
+    //! \param    [in] SamplerFilterMode
+    //!           SamplerFilterMode to be set
+    //! \param    [out] pSamplerIndex
+    //!           Pointer to Sampler Index
+    //! \param    [out] pSurface
+    //!           point to Surface
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise MOS_STATUS_UNKNOWN
+    //!
+    virtual MOS_STATUS SetSamplerFilterMode(
+        PMHW_SAMPLER_STATE_PARAM       &pSamplerStateParams,
+        PRENDERHAL_SURFACE_STATE_ENTRY  pEntry,
+        PVPHAL_RENDERING_DATA_COMPOSITE pRenderData,
+        uint32_t                        uLayerNum,
+        MHW_SAMPLER_FILTER_MODE         SamplerFilterMode,
+        int32_t                        *pSamplerIndex,
+        PVPHAL_SURFACE                  pSource);
+
+    //!
     //! \brief    Check whether the 3Dsampler use for Y plane
     //! \param    [in] SamplerID
     //!           sampler ID
@@ -743,6 +777,12 @@ protected:
         return MOS_STATUS_SUCCESS;
     }
 
+    MOS_STATUS IntermediateAllocation(PVPHAL_SURFACE &pIntermediate,
+        PMOS_INTERFACE                               pOsInterface,
+        uint32_t                                     dwTempWidth,
+        uint32_t                                     dwTempHeight,
+        PVPHAL_SURFACE                               pTarget);
+
     //!
     //! \brief    Prepare phases for composite and allocate intermediate buffer for rendering
     //! \param    [in] pcRenderParams
@@ -779,7 +819,8 @@ protected:
     //!
     bool AddCompLayer(
         PVPHAL_COMPOSITE_PARAMS     pComposite,
-        PVPHAL_SURFACE              pSource);
+        PVPHAL_SURFACE              pSource,
+        bool                        bDisableAvsSampler);
 
     //!
     //! \brief    Adds render target layer for composite
@@ -834,6 +875,20 @@ protected:
     //!
     virtual bool SubmitStates(
         PVPHAL_RENDERING_DATA_COMPOSITE     pRenderingData);
+
+    virtual bool IsDisableAVSSampler(
+        int32_t         iSources,
+        bool            isTargetY);
+
+    //!
+    //! \brief    Decompress the Surface
+    //! \details  Decompress the interlaced Surface which is in the RC compression mode
+    //! \param    [in,out] pSource
+    //!           Pointer to Source Surface
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //!
+    virtual MOS_STATUS DecompressInterlacedSurf(PVPHAL_SURFACE pSource);
 
 private:
     //!
@@ -1085,6 +1140,15 @@ private:
     //!
     bool IsSamplerLumakeySupported(PVPHAL_SURFACE pSrc);
 
+    //!
+    //! \brief    Get intermediate surface output
+    //! \param    pOutput
+    //!           [in] Pointer to Intermediate Output Surface
+    //! \return   PVPHAL_SURFACE
+    //!           Return the chose output
+    //!
+    virtual MOS_STATUS GetIntermediateOutput(PVPHAL_SURFACE &output);
+
     // Procamp
     int32_t                         m_iMaxProcampEntries;
     int32_t                         m_iProcampVersion;
@@ -1151,8 +1215,11 @@ protected:
 
     static const int                AVS_CACHE_SIZE = 4;           //!< AVS coefficients cache size
     AvsCoeffsCache<AVS_CACHE_SIZE>  m_AvsCoeffsCache;             //!< AVS coefficients calculation is expensive, add cache to mitigate
-    VPHAL_SURFACE                   m_Intermediate;               //!< Intermediate surface (multiple phase / constriction support)
-    VPHAL_SURFACE                   m_Intermediate2;              //!< Rotation output intermediate surface
+    VPHAL_SURFACE                   m_Intermediate  = {};         //!< Intermediate surface (multiple phase / constriction support)
+    VPHAL_SURFACE                   m_Intermediate1 = {};         //!< Intermediate surface (multiple phase / constriction support)
+    VPHAL_SURFACE                   m_Intermediate2 = {};         //!< Rotation output intermediate surface
+    
+    VPHAL_SURFACE                   m_AuxiliarySyncSurface = {};  //!< This Auxiliary surface is used to sync engine workload
 
     Kdll_State                      *m_pKernelDllState = nullptr; //!< Compositing Kernel DLL/Search state
     RENDERHAL_KERNEL_PARAM          m_KernelParams = {0};

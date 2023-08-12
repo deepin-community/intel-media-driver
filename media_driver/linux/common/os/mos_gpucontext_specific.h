@@ -29,6 +29,7 @@
 
 #include "mos_gpucontext.h"
 #include "mos_graphicsresource_specific.h"
+#include "mos_oca_interface_specific.h"
 
 #define ENGINE_INSTANCE_SELECT_ENABLE_MASK                   0xFF
 #define ENGINE_INSTANCE_SELECT_COMPUTE_INSTANCE_SHIFT        16
@@ -175,6 +176,15 @@ public:
     uint32_t   GetGpuStatusTag() { return m_GPUStatusTag; }
 
     //!
+    //! \brief    Get i915 ctx
+    //! \param    [in] ctxNodeIndex
+    //!           ctx index in array
+    //! \return   MOS_LINUX_CONTEXT
+    //!           mos linux ctx in array of ctxNodeIndex
+    //!
+    MOS_LINUX_CONTEXT* GetI915Context(uint32_t ctxNodeIndex){return ctxNodeIndex < (MAX_ENGINE_INSTANCE_NUM+1) ?  m_i915Context[ctxNodeIndex] : nullptr;}
+
+    //!
     //! \brief    Increment GPU status tag
     //!
     void       IncrementGpuStatusTag();
@@ -235,6 +245,7 @@ protected:
     bool SelectEngineInstanceByUser(struct i915_engine_class_instance *engineMap,
         uint32_t *engineNum, uint32_t userEngineInstance, MOS_GPU_NODE gpuNode);
 #endif
+    void UnlockPendingOcaBuffers(PMOS_COMMAND_BUFFER cmdBuffer, PMOS_CONTEXT mosContext);
 
 private:
     //! \brief    internal command buffer pool per gpu context

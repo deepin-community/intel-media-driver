@@ -44,7 +44,7 @@ bool VPFeatureManagerM12_0::IsVeboxInputFormatSupport(PVPHAL_SURFACE pSrcSurface
     VP_FUNC_CALL();
 
     bool    bRet = false;
-    VPHAL_RENDER_CHK_NULL_NO_STATUS(pSrcSurface);
+    VP_RENDER_CHK_NULL_NO_STATUS(pSrcSurface);
 
     // Check if Sample Format is supported
     // Vebox only support P016 format, P010 format can be supported by faking it as P016
@@ -60,7 +60,7 @@ bool VPFeatureManagerM12_0::IsVeboxInputFormatSupport(PVPHAL_SURFACE pSrcSurface
         !IS_PA_FORMAT(pSrcSurface->Format)/* &&
         !IS_RGB64_FLOAT_FORMAT(pSrcSurface->Format)*/)
     {
-        VPHAL_RENDER_NORMALMESSAGE("Unsupported Source Format '0x%08x' for VEBOX.", pSrcSurface->Format);
+        VP_RENDER_NORMALMESSAGE("Unsupported Source Format '0x%08x' for VEBOX.", pSrcSurface->Format);
         goto finish;
     }
 
@@ -75,9 +75,17 @@ MOS_STATUS VPFeatureManagerM12_0::CheckFeatures(void * params, bool &bApgFuncSup
     VP_FUNC_CALL();
 
     VP_PUBLIC_CHK_NULL_RETURN(params);
+    VP_PUBLIC_CHK_NULL_RETURN(m_hwInterface);
+    VP_PUBLIC_CHK_NULL_RETURN(m_hwInterface->m_osInterface);
 
     PVP_PIPELINE_PARAMS pvpParams = (PVP_PIPELINE_PARAMS)params;
     bApgFuncSupported = false;
+
+    if (!m_hwInterface->m_osInterface->apoMosEnabled)
+    {
+        VP_PUBLIC_NORMALMESSAGE("Fallback to legacy since APO mos not enabled.");
+        return MOS_STATUS_SUCCESS;
+    }
 
     // APG only support single frame input/output
     if (pvpParams->uSrcCount != 1 ||

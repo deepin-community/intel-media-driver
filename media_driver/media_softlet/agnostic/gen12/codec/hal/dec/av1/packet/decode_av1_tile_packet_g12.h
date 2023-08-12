@@ -28,9 +28,9 @@
 #define __DECODE_AV1_TILE_PACKET_G12_H__
 
 #include "media_cmd_packet.h"
-#include "decode_av1_pipeline.h"
+#include "decode_av1_pipeline_g12_base.h"
 #include "decode_utils.h"
-#include "decode_av1_basic_feature.h"
+#include "decode_av1_basic_feature_g12.h"
 #include "decode_av1_tile_packet_g12_base.h"
 
 namespace decode
@@ -39,7 +39,7 @@ namespace decode
 class Av1DecodeTilePktG12 : public Av1DecodeTilePkt_G12_Base
 {
 public:
-    Av1DecodeTilePktG12(Av1Pipeline *pipeline, CodechalHwInterface *hwInterface)
+    Av1DecodeTilePktG12(Av1PipelineG12_Base *pipeline, CodechalHwInterface *hwInterface)
         : Av1DecodeTilePkt_G12_Base(pipeline, hwInterface)
     {
     }
@@ -47,6 +47,7 @@ public:
 
     MOS_STATUS Execute(MOS_COMMAND_BUFFER& cmdBuffer, int16_t tileIdx) override;
 
+MEDIA_CLASS_DEFINE_END(decode__Av1DecodeTilePktG12)
 };
 
 }  // namespace decode

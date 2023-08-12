@@ -22,9 +22,19 @@
 #ifndef __VP_PIPELINE_ADAPTER_H__
 #define __VP_PIPELINE_ADAPTER_H__
 
-#include "vphal.h"
 #include "vp_pipeline.h"
 #include "vp_pipeline_common.h"
+#include "vp_pipeline_adapter_base.h"
+
+const SseuSetting VpHalDefaultSSEUTable[baseKernelMaxNumID] =
+    {
+        // Slice    Sub-Slice       EU      Rsvd(freq)
+        {2, 3, 8, 0},  // COMBINED_FC_KERNEL Default
+
+        // 2 VEBOX KERNELS
+        {2, 3, 8, 0},  // VEBOX_SECUREBLOCKCOPY_KERNEL,
+        {2, 3, 8, 0},  // VEBOX_UPDATEDNSTATE_KERNEL,
+};
 
 class VpPipelineAdapter : public VpPipelineAdapterBase
 {
@@ -63,7 +73,7 @@ public:
     //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
     //!
     virtual MOS_STATUS Allocate(
-      const VphalSettings     *pVpHalSettings) = 0;
+        const VpSettings *pVpHalSettings) = 0;
 
     //!
     //! \brief    Get Status Report
@@ -110,7 +120,7 @@ protected:
     //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
     //!
     virtual MOS_STATUS Init(
-      const VphalSettings *pVpHalSettings, VP_MHWINTERFACE vpMhwinterface);
+        const VpSettings *pVpHalSettings, VP_MHWINTERFACE vpMhwinterface);
 
     //!
     //! \brief  Finish the execution for each frame
@@ -126,6 +136,8 @@ protected:
 
     VP_PIPELINE_PARAMS                 m_vpPipelineParams = {};   //!< vp Pipeline params
     bool                               m_bApgEnabled = false;    //!< VP APG path enabled
+
+MEDIA_CLASS_DEFINE_END(VpPipelineAdapter)
 };
 #endif // !__VP_PIPELINE_ADAPTER_H__
 

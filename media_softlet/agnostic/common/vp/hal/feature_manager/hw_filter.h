@@ -46,11 +46,14 @@
 #include "vp_ste_filter.h"
 #include "vp_procamp_filter.h"
 #include "vp_hdr_filter.h"
+#include "vp_hdr_render_filter.h"
 #include "vp_di_filter.h"
+#include "vp_fc_filter.h"
 
 namespace vp
 {
 class VpInterface;
+class VpSinglePipeContext;
 
 enum EngineType
 {
@@ -104,6 +107,8 @@ protected:
     PACKET_PARAMS       m_Params = {};
     SwFilterPipe        *m_swFilterPipe = nullptr;
     VP_EXECUTE_CAPS     m_vpExecuteCaps = {};
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilter)
 };
 
 class HwFilterVebox: public HwFilter
@@ -120,6 +125,8 @@ public:
 
 protected:
     HwFilterVebox(VpInterface &vpInterface, EngineType type);
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilterVebox)
 };
 
 class HwFilterVeboxSfc: public HwFilterVebox  // VEBOX+SFC
@@ -133,6 +140,8 @@ public:
         return MOS_STATUS_SUCCESS;
     }
     virtual MOS_STATUS SetPacketParams(VpCmdPacket &package);
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilterVeboxSfc)
 };
 
 class HwFilterRender: public HwFilter
@@ -148,6 +157,8 @@ public:
     }
 
     virtual MOS_STATUS SetPacketParams(VpCmdPacket &package);
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilterRender)
 };
 
 }

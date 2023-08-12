@@ -27,12 +27,16 @@
 //!
 #include "vphal.h"
 #include "mos_os.h"
+#include "mos_interface.h"
 #include "mhw_vebox.h"
-#include "renderhal.h"
+#include "renderhal_legacy.h"
 #include "vphal_renderer.h"
 #include "mos_solo_generic.h"
 #include "media_interfaces_vphal.h"
 #include "media_interfaces_mhw.h"
+#include "mhw_vebox_itf.h"
+#include "mos_oca_rtlog_mgr.h"
+#include "vp_user_setting.h"
 
 //!
 //! \brief    Allocate VPHAL Resources
@@ -48,17 +52,66 @@ MOS_STATUS VphalState::Allocate(
     const VphalSettings       *pVpHalSettings)
 {
     MHW_VEBOX_GPUNODE_LIMIT     GpuNodeLimit;
-    RENDERHAL_SETTINGS          RenderHalSettings;
+    RENDERHAL_SETTINGS_LEGACY   RenderHalSettings;
     MOS_GPU_NODE                VeboxGpuNode;
     MOS_GPU_CONTEXT             VeboxGpuContext;
+    bool                        checkGpuCtxOverwriten = false;
+    bool                        addGpuCtxToCheckList  = false;
     MOS_STATUS                  eStatus;
 
+    VPHAL_PUBLIC_CHK_NULL(m_osInterface);
     VPHAL_PUBLIC_CHK_NULL(pVpHalSettings);
     VPHAL_PUBLIC_CHK_NULL(m_renderHal);
 
+    m_clearVideoViewMode = pVpHalSettings->clearVideoViewMode;
+
+    if ((MEDIA_IS_SKU(m_skuTable, FtrVERing) ||
+         MEDIA_IS_SKU(m_skuTable, FtrSFCPipe)) &&
+        !m_clearVideoViewMode)
+    {
+        MhwInterfaces *             mhwInterfaces = nullptr;
+        MhwInterfaces::CreateParams params;
+        MOS_ZeroMemory(&params, sizeof(params));
+        params.Flags.m_sfc   = MEDIA_IS_SKU(m_skuTable, FtrSFCPipe);
+        params.Flags.m_vebox = MEDIA_IS_SKU(m_skuTable, FtrVERing);
+
+        mhwInterfaces = MhwInterfaces::CreateFactory(params, m_osInterface);
+        if (mhwInterfaces)
+        {
+            SetMhwVeboxInterface(mhwInterfaces->m_veboxInterface);
+            SetMhwSfcInterface(mhwInterfaces->m_sfcInterface);
+
+            // MhwInterfaces always create CP and MI interfaces, so we have to delete those we don't need.
+            MOS_Delete(mhwInterfaces->m_miInterface);
+            m_osInterface->pfnDeleteMhwCpInterface(mhwInterfaces->m_cpInterface);
+            mhwInterfaces->m_cpInterface = nullptr;
+            MOS_Delete(mhwInterfaces);
+        }
+        else
+        {
+            VPHAL_DEBUG_ASSERTMESSAGE("Allocate MhwInterfaces failed");
+            eStatus = MOS_STATUS_NO_SPACE;
+            MT_ERR1(MT_VP_HAL_INIT, MT_CODE_LINE, __LINE__);
+        }
+    }
+
+    if (IsApoEnabled() &&
+        m_osInterface->apoMosEnabled &&
+        m_osInterface->bSetHandleInvalid)
+    {
+        checkGpuCtxOverwriten = true;
+    }
+    addGpuCtxToCheckList = checkGpuCtxOverwriten && !IsGpuContextReused(m_renderGpuContext);
+
+    if (IsRenderContextBasedSchedulingNeeded())
+    {
+        Mos_SetVirtualEngineSupported(m_osInterface, true);
+        m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
+    }
+
     // Create Render GPU Context
     {
-        MOS_GPUCTX_CREATOPTIONS createOption;
+        MOS_GPUCTX_CREATOPTIONS_ENHANCED createOption = {};
         VPHAL_PUBLIC_CHK_STATUS(m_osInterface->pfnCreateGpuContext(
             m_osInterface,
             m_renderGpuContext,
@@ -71,14 +124,38 @@ MOS_STATUS VphalState::Allocate(
         m_osInterface,
         m_renderGpuContext));
 
+    // Add gpu context entry, including stream 0 gpu contexts
+    // In legacy path, stream 0 gpu contexts could be reused, and will keep these stream 0 gpu contexts alive
+    // But its mapping relation could be overwritten in APO path
+    // Now, don't reuse these stream 0 gpu contexts overwritten by MediaContext in APO path 
+    // Can not add reused GPU context
+    if (addGpuCtxToCheckList)
+    {
+        AddGpuContextToCheckList(m_renderGpuContext);
+    }
+
     // Register Render GPU context with the event
     VPHAL_PUBLIC_CHK_STATUS(m_osInterface->pfnRegisterBBCompleteNotifyEvent(
         m_osInterface,
         m_renderGpuContext));
 
-    if (MEDIA_IS_SKU(m_skuTable, FtrVERing) && m_veboxInterface)
+    if (MEDIA_IS_SKU(m_skuTable, FtrVERing) && m_veboxInterface && !m_clearVideoViewMode)
     {
         GpuNodeLimit.bSfcInUse         = MEDIA_IS_SKU(m_skuTable, FtrSFCPipe);
+
+        if (m_veboxItf)
+        {
+            // Check GPU Node decide logic together in this function
+            VPHAL_HW_CHK_STATUS(m_veboxItf->FindVeboxGpuNodeToUse(&GpuNodeLimit));
+
+            VeboxGpuNode    = (MOS_GPU_NODE)(GpuNodeLimit.dwGpuNodeToUse);
+            VeboxGpuContext = (VeboxGpuNode == MOS_GPU_NODE_VE) ? MOS_GPU_CONTEXT_VEBOX : MOS_GPU_CONTEXT_VEBOX2;
+
+            VPHAL_PUBLIC_CHK_STATUS(m_veboxItf->CreateGpuContext(
+                m_osInterface,
+                VeboxGpuContext,
+                VeboxGpuNode));
+        }
 
         // Check GPU Node decide logic together in this function
         VPHAL_HW_CHK_STATUS(m_veboxInterface->FindVeboxGpuNodeToUse(&GpuNodeLimit));
@@ -86,12 +163,20 @@ MOS_STATUS VphalState::Allocate(
         VeboxGpuNode    = (MOS_GPU_NODE)(GpuNodeLimit.dwGpuNodeToUse);
         VeboxGpuContext = (VeboxGpuNode == MOS_GPU_NODE_VE) ? MOS_GPU_CONTEXT_VEBOX : MOS_GPU_CONTEXT_VEBOX2;
 
+        addGpuCtxToCheckList = checkGpuCtxOverwriten && !IsGpuContextReused(VeboxGpuContext);
+      
         // Create VEBOX/VEBOX2 Context
         VPHAL_PUBLIC_CHK_STATUS(m_veboxInterface->CreateGpuContext(
             m_osInterface,
             VeboxGpuContext,
             VeboxGpuNode));
 
+        // Add gpu context entry, including stream 0 gpu contexts
+        if (addGpuCtxToCheckList)
+        {
+            AddGpuContextToCheckList(VeboxGpuContext);
+        }
+        
         // Register Vebox GPU context with the Batch Buffer completion event
         // Ignore if creation fails
         VPHAL_PUBLIC_CHK_STATUS(m_osInterface->pfnRegisterBBCompleteNotifyEvent(
@@ -103,12 +188,28 @@ MOS_STATUS VphalState::Allocate(
     RenderHalSettings.iMediaStates  = pVpHalSettings->mediaStates;
     VPHAL_PUBLIC_CHK_STATUS(m_renderHal->pfnInitialize(m_renderHal, &RenderHalSettings));
 
-    if (m_veboxInterface &&
-        m_veboxInterface->m_veboxSettings.uiNumInstances > 0 &&
-        m_veboxInterface->m_veboxHeap == nullptr)
+    if (!m_clearVideoViewMode)
     {
-        // Allocate VEBOX Heap
-        VPHAL_PUBLIC_CHK_STATUS(m_veboxInterface->CreateHeap());
+        if (m_veboxItf)
+        {
+            const MHW_VEBOX_HEAP *veboxHeap = nullptr;
+            m_veboxItf->GetVeboxHeapInfo(&veboxHeap);
+            uint32_t uiNumInstances = m_veboxItf->GetVeboxNumInstances();
+
+            if (uiNumInstances > 0 &&
+                veboxHeap == nullptr)
+            {
+                // Allocate VEBOX Heap
+                VPHAL_PUBLIC_CHK_STATUS(m_veboxItf->CreateHeap());
+            }
+        }
+
+        if (m_veboxInterface &&
+            m_veboxInterface->m_veboxSettings.uiNumInstances > 0 &&
+            m_veboxInterface->m_veboxHeap == nullptr)
+        {
+            VPHAL_PUBLIC_CHK_STATUS(m_veboxInterface->CreateHeap());
+        }
     }
 
     // Create renderer
@@ -150,7 +251,13 @@ static bool IsSurfNeedAvs(
 
         if (IS_YUV_FORMAT(pSurf->Format))
         {
-            return true;
+            // Not perform AVS for surface with VPHAL_SCALING_NEAREST
+            // or VPHAL_SCALING_BILINEAR scaling mode.
+            if (pSurf->ScalingMode == VPHAL_SCALING_AVS ||
+                pSurf->ScalingMode == VPHAL_SCALING_ADV_QUALITY)
+            {
+                return true;
+            }
         }
     }
 finish:
@@ -415,6 +522,7 @@ static MOS_STATUS VpHal_RenderWithAvsForMultiStreams(
                 eStatus             = eStatusSingleRender;
                 bHasNonAvsSubstream = false;
                 VPHAL_PUBLIC_ASSERTMESSAGE("Failed to create intermediate surface, eStatus: %d.\n", eStatus);
+                MT_ERR1(MT_VP_HAL_REALLOC_SURF, MT_CODE_LINE, __LINE__);
             }
         }
     } 
@@ -471,6 +579,7 @@ static MOS_STATUS VpHal_RenderWithAvsForMultiStreams(
             {
                 eStatus = eStatusSingleRender;
                 VPHAL_PUBLIC_ASSERTMESSAGE("Failed to redner for primary streams, eStatus: %d.\n", eStatus);
+                MT_ERR2(MT_VP_HAL_RENDER, MT_ERROR_CODE, eStatus, MT_CODE_LINE, __LINE__);
             }
         }
     }
@@ -505,11 +614,8 @@ static MOS_STATUS VpHal_RenderWithAvsForMultiStreams(
         {
             eStatus = eStatusSingleRender;
             VPHAL_PUBLIC_ASSERTMESSAGE("Failed to redner for substreams, eStatus: %d.\n", eStatus);
+            MT_ERR2(MT_VP_HAL_RENDER, MT_ERROR_CODE, eStatus, MT_CODE_LINE, __LINE__);
         }
-
-        //Free the temporary surface
-        pRenderer->GetOsInterface()->pfnFreeResource(pRenderer->GetOsInterface(), &(pIntermediateSurface->OsResource));
-
     }
 
 finish:
@@ -573,17 +679,13 @@ VphalFeatureReport* VphalState::GetRenderFeatureReport()
 //!           - Caller must call pfnAllocate to allocate all VPHAL states and objects.
 //! \param    [in] pOsInterface
 //!           OS interface, if provided externally - may be nullptr
-//! \param    [in] pOsDriverContext
-//!           OS driver context (UMD context, pShared, ...)
 //! \param    [in,out] peStatus
 //!           Pointer to the MOS_STATUS flag.
 //!           Will assign this flag to MOS_STATUS_SUCCESS if successful, otherwise failed
 //!
 VphalState::VphalState(
         PMOS_INTERFACE          pOsInterface,
-        PMOS_CONTEXT            pOsDriverContext,
         MOS_STATUS              *peStatus) :
-        m_gpuAppTaskEvent(nullptr),
         m_platform(),
         m_skuTable(nullptr),
         m_waTable(nullptr),
@@ -607,40 +709,15 @@ VphalState::VphalState(
     m_skuTable = m_osInterface->pfnGetSkuTable(m_osInterface);
     m_waTable  = m_osInterface->pfnGetWaTable (m_osInterface);
 
-    m_renderHal = (PRENDERHAL_INTERFACE)MOS_AllocAndZeroMemory(sizeof(*m_renderHal));
+    m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    VpUserSetting::InitVpUserSetting(m_userSettingPtr);
+
+    m_renderHal = (PRENDERHAL_INTERFACE_LEGACY)MOS_AllocAndZeroMemory(sizeof(RENDERHAL_INTERFACE_LEGACY));
     VPHAL_PUBLIC_CHK_NULL(m_renderHal);
-    VPHAL_PUBLIC_CHK_STATUS(RenderHal_InitInterface(
+    VPHAL_PUBLIC_CHK_STATUS(RenderHal_InitInterface_Legacy(
         m_renderHal,
         &m_cpInterface,
         m_osInterface));
-
-    if (MEDIA_IS_SKU(m_skuTable, FtrVERing) ||
-        MEDIA_IS_SKU(m_skuTable, FtrSFCPipe))
-    {
-        MhwInterfaces *mhwInterfaces = nullptr;
-        MhwInterfaces::CreateParams params;
-        MOS_ZeroMemory(&params, sizeof(params));
-        params.Flags.m_sfc   = MEDIA_IS_SKU(m_skuTable, FtrSFCPipe);
-        params.Flags.m_vebox = MEDIA_IS_SKU(m_skuTable, FtrVERing);
-
-        mhwInterfaces = MhwInterfaces::CreateFactory(params, pOsInterface);
-        if (mhwInterfaces)
-        {
-            SetMhwVeboxInterface(mhwInterfaces->m_veboxInterface);
-            SetMhwSfcInterface(mhwInterfaces->m_sfcInterface);
-
-            // MhwInterfaces always create CP and MI interfaces, so we have to delete those we don't need.
-            MOS_Delete(mhwInterfaces->m_miInterface);
-            Delete_MhwCpInterface(mhwInterfaces->m_cpInterface);
-            mhwInterfaces->m_cpInterface = nullptr;
-            MOS_Delete(mhwInterfaces);
-        }
-        else
-        {
-            VPHAL_DEBUG_ASSERTMESSAGE("Allocate MhwInterfaces failed");
-            eStatus = MOS_STATUS_NO_SPACE;
-        }
-    }
 
 finish:
     if(peStatus)
@@ -658,6 +735,13 @@ VphalState::~VphalState()
 {
     MOS_STATUS              eStatus;
 
+    // Wait for all cmd before destroy gpu resource
+    if (m_osInterface && m_osInterface->pfnWaitAllCmdCompletion && m_osInterface->bDeallocateOnExit)
+    {
+        VP_PUBLIC_NORMALMESSAGE("WaitAllCmdCompletion in VphalState::~VphalState");
+        m_osInterface->pfnWaitAllCmdCompletion(m_osInterface);
+    }
+
     // Destroy rendering objects (intermediate surfaces, BBs, etc)
     if (m_renderer)
     {
@@ -673,6 +757,7 @@ VphalState::~VphalState()
             if (eStatus != MOS_STATUS_SUCCESS)
             {
                 VPHAL_PUBLIC_ASSERTMESSAGE("Failed to destroy RenderHal, eStatus:%d.\n", eStatus);
+                MT_ERR1(MT_VP_HAL_DESTROY, MT_CODE_LINE, __LINE__);
             }
         }
         MOS_FreeMemory(m_renderHal);
@@ -680,8 +765,15 @@ VphalState::~VphalState()
 
     if (m_cpInterface)
     {
-        Delete_MhwCpInterface(m_cpInterface);
-        m_cpInterface = nullptr;
+        if (m_osInterface)
+        {
+            m_osInterface->pfnDeleteMhwCpInterface(m_cpInterface);
+            m_cpInterface = nullptr;
+        }
+        else
+        {
+            VPHAL_PUBLIC_ASSERTMESSAGE("Failed to destroy cpInterface.");
+        }
     }
 
     if (m_sfcInterface)
@@ -692,12 +784,19 @@ VphalState::~VphalState()
 
     if (m_veboxInterface)
     {
+        if (m_veboxItf)
+        {
+            eStatus = m_veboxItf->DestroyHeap();
+        }
+
         eStatus = m_veboxInterface->DestroyHeap();
         MOS_Delete(m_veboxInterface);
         m_veboxInterface = nullptr;
+        m_veboxItf       = nullptr;
         if (eStatus != MOS_STATUS_SUCCESS)
         {
             VPHAL_PUBLIC_ASSERTMESSAGE("Failed to destroy Vebox Interface, eStatus:%d.\n", eStatus);
+            MT_ERR1(MT_VP_HAL_DESTROY, MT_CODE_LINE, __LINE__);
         }
     }
 
@@ -706,6 +805,13 @@ VphalState::~VphalState()
     {
         if (m_osInterface->bDeallocateOnExit)
         {
+            //Clear some overwriten gpucontext resources
+            if (!m_gpuContextCheckList.empty())
+            {
+                DestroyGpuContextWithInvalidHandle();
+                m_gpuContextCheckList.clear();
+            }
+            
             m_osInterface->pfnDestroy(m_osInterface, true);
 
             // Deallocate OS interface structure (except if externally provided)
@@ -719,7 +825,13 @@ VphalState* VphalState::VphalStateFactory(
     PMOS_CONTEXT            pOsDriverContext,
     MOS_STATUS              *peStatus)
 {
-    return VphalDevice::CreateFactory(pOsInterface, pOsDriverContext, peStatus);
+    VphalState* vphalState = dynamic_cast<VphalState*>(VphalDevice::CreateFactory(pOsInterface, pOsDriverContext, peStatus));
+    if(nullptr == vphalState)
+    {
+        VPHAL_PUBLIC_ASSERTMESSAGE("vphal state pointer is nullptr");
+        *peStatus = MOS_STATUS_NULL_POINTER;
+    }
+    return vphalState;
 }
 
 //!
@@ -785,11 +897,7 @@ MOS_STATUS VphalState::GetStatusReport(
             continue;
         }
 
-#if (LINUX || ANDROID)
-        dwGpuTag    = pOsContext->GetGPUTag(m_osInterface, pStatusEntry->GpuContextOrdinal);
-#else
-        dwGpuTag    = m_osInterface->pfnGetGpuStatusSyncTag(m_osInterface, pStatusEntry->GpuContextOrdinal);
-#endif
+        dwGpuTag           = m_osInterface->pfnGetGpuStatusSyncTag(m_osInterface, pStatusEntry->GpuContextOrdinal);
         bDoneByGpu         = (dwGpuTag >= pStatusEntry->dwTag);
         bFailedOnSubmitCmd = (pStatusEntry->dwStatus == VPREP_ERROR);
 
@@ -896,4 +1004,112 @@ MOS_STATUS VphalState::GetVpMhwInterface(
     vpMhwinterface.m_statusTable    = &m_statusTable;
 
     return eStatus;
+}
+
+//!
+//! \brief    Put GPU context entry
+//! \details  Put GPU context entry in the m_gpuContextCheckList
+//! \param    MOS_GPU_CONTEXT mosGpuConext
+//!           [in] Mos GPU context
+//! \return   MOS_STATUS
+//!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+//!
+MOS_STATUS VphalState::AddGpuContextToCheckList(
+    MOS_GPU_CONTEXT mosGpuConext) 
+{
+#if !EMUL 
+    MOS_GPU_CONTEXT originalGpuCtxOrdinal = m_osInterface->CurrentGpuContextOrdinal;
+    if (mosGpuConext != originalGpuCtxOrdinal)
+    {
+        // Set GPU context temporarily
+        VPHAL_PUBLIC_CHK_STATUS_RETURN(m_osInterface->pfnSetGpuContext(
+            m_osInterface,
+            mosGpuConext));
+    }
+    VPHAL_GPU_CONTEXT_ENTRY tmpEntry;
+    tmpEntry.gpuCtxForMos     = mosGpuConext;
+    tmpEntry.gpuContextHandle = m_osInterface->CurrentGpuContextHandle;
+    tmpEntry.pGpuContext      = m_osInterface->pfnGetGpuContextbyHandle(m_osInterface, m_osInterface->CurrentGpuContextHandle);
+    m_gpuContextCheckList.push_back(tmpEntry);
+
+    if (mosGpuConext != originalGpuCtxOrdinal)
+    {
+        //Recover original settings
+        VPHAL_PUBLIC_CHK_STATUS_RETURN(m_osInterface->pfnSetGpuContext(
+            m_osInterface,
+            originalGpuCtxOrdinal));
+    }
+#endif
+
+    return MOS_STATUS_SUCCESS;
+}
+
+//!
+//! \brief    Destroy GPU context entry with invalid handle
+//! \details  Release these GPU context overwritten by MediaContext
+//! \return   MOS_STATUS
+//!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+//!
+MOS_STATUS VphalState::DestroyGpuContextWithInvalidHandle() 
+{
+#if !EMUL
+    MOS_GPU_CONTEXT originalGpuCtxOrdinal = m_osInterface->CurrentGpuContextOrdinal;
+    for (auto &curGpuEntry : m_gpuContextCheckList)
+    {
+        //Failure in switching GPU Context indicates that we can't find and release gpu context in normal flow later
+        //So if failed to switch GPU Context, just need to check GPU context, and release it here
+        //If switch GPU Context successfully, need to check both handle and GPU context
+        if ((MOS_FAILED(m_osInterface->pfnSetGpuContext(m_osInterface, curGpuEntry.gpuCtxForMos)) || 
+            m_osInterface->CurrentGpuContextHandle != curGpuEntry.gpuContextHandle) &&
+            m_osInterface->pfnGetGpuContextbyHandle(m_osInterface, curGpuEntry.gpuContextHandle) == curGpuEntry.pGpuContext)
+        {
+            m_osInterface->pfnWaitForCmdCompletion(m_osInterface->osStreamState, curGpuEntry.gpuContextHandle);
+
+            m_osInterface->pfnDestroyGpuContextByHandle(m_osInterface, curGpuEntry.gpuContextHandle);
+        }
+    }
+    if (m_osInterface->CurrentGpuContextOrdinal != originalGpuCtxOrdinal)
+    {
+        //Recover original settings
+        if (m_osInterface->pfnSetGpuContext(m_osInterface, originalGpuCtxOrdinal) != MOS_STATUS_SUCCESS)
+        {
+            VPHAL_PUBLIC_NORMALMESSAGE("Have not recovered original GPU Context settings in m_osInterface");
+        }
+    }
+#endif
+
+    return MOS_STATUS_SUCCESS;
+}
+
+//!
+//! \brief    Check whether GPU context is reused or not
+//! \details  Check whether GPU context is reused or not
+//! \param    MOS_GPU_CONTEXT mosGpuConext
+//!           [in] Mos GPU context
+//! \return   bool
+//!           Return true if is reused, otherwise false
+//!
+bool VphalState::IsGpuContextReused(
+    MOS_GPU_CONTEXT mosGpuContext)
+{
+    bool reuseContextFlag = false;
+#if !EMUL
+    MOS_GPU_CONTEXT originalGpuCtxOrdinal = m_osInterface->CurrentGpuContextOrdinal;
+    if (MOS_SUCCEEDED(m_osInterface->pfnSetGpuContext(m_osInterface, mosGpuContext)))
+    {
+        VPHAL_PUBLIC_NORMALMESSAGE("Reuse mos GPU context %d. GPU handle %d", (uint32_t)mosGpuContext, m_osInterface->CurrentGpuContextHandle);
+        reuseContextFlag = true;
+    }
+
+    if (originalGpuCtxOrdinal < MOS_GPU_CONTEXT_MAX &&
+        m_osInterface->CurrentGpuContextOrdinal != originalGpuCtxOrdinal)
+    {
+        //Recover original settings
+        if (m_osInterface->pfnSetGpuContext(m_osInterface, originalGpuCtxOrdinal) != MOS_STATUS_SUCCESS)
+        {
+            VPHAL_PUBLIC_NORMALMESSAGE("Have not recovered original GPU Context settings in m_osInterface");
+        }
+    }
+#endif
+    return reuseContextFlag;
 }

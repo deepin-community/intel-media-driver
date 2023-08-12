@@ -33,6 +33,7 @@
 #include "hwinfo_linux.h"
 #include "codechal_memdecomp.h"
 #include "media_interfaces_codechal.h"
+#include "media_interfaces_codechal_next.h"
 #include "media_interfaces_mmd.h"
 #include "cm_device_rt.h"
 
@@ -277,22 +278,24 @@ VAStatus DdiEncode_CreateContext(
     mosCtx.m_cmdBufMgr     = mediaDrvCtx->m_cmdBufMgr;
     mosCtx.fd              = mediaDrvCtx->fd;
     mosCtx.iDeviceId       = mediaDrvCtx->iDeviceId;
-    mosCtx.SkuTable        = mediaDrvCtx->SkuTable;
-    mosCtx.WaTable         = mediaDrvCtx->WaTable;
-    mosCtx.gtSystemInfo    = *mediaDrvCtx->pGtSystemInfo;
-    mosCtx.platform        = mediaDrvCtx->platform;
+    mosCtx.m_skuTable      = mediaDrvCtx->SkuTable;
+    mosCtx.m_waTable       = mediaDrvCtx->WaTable;
+    mosCtx.m_gtSystemInfo  = *mediaDrvCtx->pGtSystemInfo;
+    mosCtx.m_platform      = mediaDrvCtx->platform;
 
     mosCtx.ppMediaMemDecompState = &mediaDrvCtx->pMediaMemDecompState;
     mosCtx.pfnMemoryDecompress   = mediaDrvCtx->pfnMemoryDecompress;
     mosCtx.pfnMediaMemoryCopy    = mediaDrvCtx->pfnMediaMemoryCopy;
     mosCtx.pfnMediaMemoryCopy2D  = mediaDrvCtx->pfnMediaMemoryCopy2D;
     mosCtx.ppMediaCopyState      = &mediaDrvCtx->pMediaCopyState;
-    mosCtx.gtSystemInfo          = *mediaDrvCtx->pGtSystemInfo;
+    mosCtx.m_gtSystemInfo          = *mediaDrvCtx->pGtSystemInfo;
     mosCtx.m_auxTableMgr         = mediaDrvCtx->m_auxTableMgr;
     mosCtx.pGmmClientContext     = mediaDrvCtx->pGmmClientContext;
 
     mosCtx.m_osDeviceContext     = mediaDrvCtx->m_osDeviceContext;
     mosCtx.m_apoMosEnabled       = mediaDrvCtx->m_apoMosEnabled;
+
+    mosCtx.m_userSettingPtr      = mediaDrvCtx->m_userSettingPtr;
 
     mosCtx.pPerfData             = (PERF_DATA *)MOS_AllocAndZeroMemory(sizeof(PERF_DATA));
     if (nullptr == mosCtx.pPerfData)
@@ -340,10 +343,19 @@ VAStatus DdiEncode_CreateContext(
         nullptr);
     if (pCodecHal == nullptr)
     {
-        // add anything necessary here to free the resource
-        vaStatus = VA_STATUS_ERROR_ALLOCATION_FAILED;
-        DdiEncodeCleanUp(encCtx);
-        return vaStatus;
+        pCodecHal = CodechalDeviceNext::CreateFactory(
+            nullptr,
+            &mosCtx,
+            &standardInfo,
+            nullptr);
+
+        if (nullptr == pCodecHal)
+        {
+            // add anything necessary here to free the resource
+            vaStatus = VA_STATUS_ERROR_ALLOCATION_FAILED;
+            DdiEncodeCleanUp(encCtx);
+            return vaStatus;
+        }
     }
 
     encCtx->pCodecHal = pCodecHal;

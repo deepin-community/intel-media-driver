@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2021, Intel Corporation
+# Copyright (c) 2019-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -18,34 +18,58 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 
+media_include_subdirectory(osservice)
+media_include_subdirectory(user_setting)
+if(NOT CMAKE_WDDM_LINUX)
+
+media_include_subdirectory(i915)
+
+if(ENABLE_PRODUCTION_KMD)
+    media_include_subdirectory(i915_production)
+endif()
+media_include_subdirectory(private)
+
+if(ENABLE_PRODUCTION_KMD)
+    media_include_subdirectory(i915_production)
+endif()
+
 set(TMP_SOURCES_
+    ${CMAKE_CURRENT_LIST_DIR}/hwinfo_linux.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mos_context_specific_next.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mos_graphicsresource_specific_next.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mos_graphicsresource_specific_next_ext.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mos_util_debug_specific_next.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mos_utilities_specific_next.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mos_commandbuffer_specific_next.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mos_gpucontext_specific_next.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mos_gpucontext_specific_next_ext.cpp
     ${CMAKE_CURRENT_LIST_DIR}/mos_os_specific_next.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mos_decompression.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/mos_mediacopy.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_decompression_base.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_mediacopy_base.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_user_setting_specific.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_os_mock_adaptor_specific.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_oca_rtlog_mgr_specific.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_vma.c
+    ${CMAKE_CURRENT_LIST_DIR}/mos_oca_specific.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_auxtable_mgr.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/mos_interface.cpp
 )
 
 set(TMP_HEADERS_
+    ${CMAKE_CURRENT_LIST_DIR}/hwinfo_linux.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_context_specific_next.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_graphicsresource_specific_next.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_util_devult_specific_next.h
-    ${CMAKE_CURRENT_LIST_DIR}/mos_utilities_specific_next.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_commandbuffer_specific_next.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_gpucontext_specific_next.h
-    ${CMAKE_CURRENT_LIST_DIR}/mos_os_specific_next.h
+    ${CMAKE_CURRENT_LIST_DIR}/mos_decompression_base.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_decompression.h
-    ${CMAKE_CURRENT_LIST_DIR}/mos_mediacopy.h
+    ${CMAKE_CURRENT_LIST_DIR}/media_skuwa_specific.h
+    ${CMAKE_CURRENT_LIST_DIR}/mos_os_mock_adaptor_specific.h
+    ${CMAKE_CURRENT_LIST_DIR}/mos_oca_defs_specific.h
+    ${CMAKE_CURRENT_LIST_DIR}/mos_oca_interface_specific.h
+    ${CMAKE_CURRENT_LIST_DIR}/mos_auxtable_mgr.h
+    ${CMAKE_CURRENT_LIST_DIR}/mos_vma.h
 )
 
 if(${Media_Scalability_Supported} STREQUAL "yes")
-
 set(TMP_SOURCES_
     ${TMP_SOURCES_}
     ${CMAKE_CURRENT_LIST_DIR}/mos_os_virtualengine_scalability_specific_next.cpp
@@ -57,18 +81,28 @@ set(TMP_HEADERS_
     ${CMAKE_CURRENT_LIST_DIR}/mos_os_virtualengine_scalability_specific_next.h
     ${CMAKE_CURRENT_LIST_DIR}/mos_os_virtualengine_singlepipe_specific_next.h
 )
+endif() #if(${Media_Scalability_Supported} STREQUAL "yes")
 
-endif()
-
-set(SOURCES_
-    ${SOURCES_}
+set(SOFTLET_MOS_COMMON_SOURCES_
+    ${SOFTLET_MOS_COMMON_SOURCES_}
     ${TMP_SOURCES_}
  )
 
-set(HEADERS_
-    ${HEADERS_}
+set(SOFTLET_MOS_COMMON_HEADERS_
+    ${SOFTLET_MOS_COMMON_HEADERS_}
     ${TMP_HEADERS_}
 )
 
+set(SOFTLET_MOS_PUBLIC_INCLUDE_DIRS_
+    ${SOFTLET_MOS_PUBLIC_INCLUDE_DIRS_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+if("${MEDIA_EXT}" STREQUAL "")
+set (SOFTLET_MOS_EXT_INCLUDE_DIRS_
+${SOFTLET_MOS_EXT_INCLUDE_DIRS_}
+${MEDIA_SOFTLET}/agnostic/common/shared/classtrace
+)
+endif()
+source_group( "mos_softlet" FILES ${TMP_SOURCES_} ${TMP_HEADERS_} )
 
-media_add_curr_to_include_path()
+endif() # CMAKE_WDDM_LINUX

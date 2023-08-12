@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2009-2021, Intel Corporation
+* Copyright (c) 2009-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -33,45 +33,17 @@
 #include "mhw_vebox.h"
 #include "mhw_sfc.h"
 #include "vp_pipeline_adapter_base.h"
-#include "vp_feature_report.h"
-
-//*-----------------------------------------------------------------------------
-//| DEFINITIONS
-//*-----------------------------------------------------------------------------
-// Incremental size for allocating/reallocating resource
-#define VPHAL_BUFFER_SIZE_INCREMENT     128
+#include "vphal_common_hdr.h"
+#include "vp_common.h"
+#include "vp_base.h"
+#include "renderhal_legacy.h"
 
 // YUV input ranges
-#define YUV_RANGE_16_235                1
-#define YUV_RANGE_0_255                 2
 #define YUV_RANGE_FROM_DDI              3
 
 // RGB input ranges
 #define RGB_RANGE_16_235                1
 #define RGB_RANGE_0_255                 0
-
-// Media Features width
-#define VPHAL_RNDR_8K_WIDTH (7680)
-#define VPHAL_RNDR_16K_HEIGHT_LIMIT (16352)
-
-// Media Features height
-#define VPHAL_RNDR_2K_HEIGHT  1080
-// The reason that the definition is not (VPHAL_RNDR_2K_HEIGHT*2) is because some 4K clips have 1200 height.
-#define VPHAL_RNDR_4K_HEIGHT  1200
-#define VPHAL_RNDR_4K_MAX_HEIGHT  3112
-#define VPHAL_RNDR_4K_MAX_WIDTH  4096
-#define VPHAL_RNDR_6K_HEIGHT  (VPHAL_RNDR_2K_HEIGHT*3)
-#define VPHAL_RNDR_8K_HEIGHT  (VPHAL_RNDR_2K_HEIGHT*4)
-#define VPHAL_RNDR_10K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*5)
-#define VPHAL_RNDR_12K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*6)
-#define VPHAL_RNDR_14K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*7)
-#define VPHAL_RNDR_16K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*8)
-#define VPHAL_RNDR_18K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*9)
-#define VPHAL_RNDR_20K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*10)
-#define VPHAL_RNDR_22K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*11)
-#define VPHAL_RNDR_24K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*12)
-#define VPHAL_RNDR_26K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*13)
-#define VPHAL_RNDR_28K_HEIGHT (VPHAL_RNDR_2K_HEIGHT*14)
 
 //------------------------------------------------------------------------------
 // Simplified macros for debug message, Assert, Null check and MOS eStatus check
@@ -250,33 +222,6 @@
     MOS_CHK_NULL_WITH_HR(MOS_COMPONENT_VP, MOS_VP_SUBCOMP_DDI, _ptr)
 
 //!
-//! \brief Base VP kernel list
-//!
-enum VpKernelID
-{
-    // FC
-    kernelCombinedFc = 0,
-
-    // 2 VEBOX KERNELS
-    kernelVeboxSecureBlockCopy,
-    kernelVeboxUpdateDnState,
-
-    // User Ptr
-    kernelUserPtr,
-    // Fast 1toN
-    kernelFast1toN,
-
-    // HDR
-    kernelHdrMandatory,
-    kernelHdrPreprocess,
-
-    // mediacopy-render copy
-    kernelRenderCopy,
-
-    baseKernelMaxNumID
-};
-
-//!
 //! \brief VPHAL SS/EU setting
 //!
 struct VphalSseuSetting
@@ -285,6 +230,16 @@ struct VphalSseuSetting
     uint8_t   numSubSlices;
     uint8_t   numEUs;
     uint8_t   reserved;       // Place holder for frequency setting
+};
+
+//!
+//! \brief Gpu context entry
+//!
+struct VPHAL_GPU_CONTEXT_ENTRY
+{
+    MOS_GPU_CONTEXT    gpuCtxForMos          = MOS_GPU_CONTEXT_MAX;
+    GPU_CONTEXT_HANDLE gpuContextHandle      = MOS_GPU_CONTEXT_INVALID_HANDLE;
+    void*              pGpuContext           = nullptr;
 };
 
 //-----------------------------------------------------------------------------
@@ -301,12 +256,6 @@ using VphalSettings =  VpSettings;
 #pragma pack(push)
 #pragma pack(1)
 
-//!
-//! Structure VphalFeatureReport
-//! \brief    Vphal Feature Report Structure
-//!
-using VphalFeatureReport = VpFeatureReport;
-
 #pragma pack(pop)
 
 
@@ -314,9 +263,12 @@ using VphalFeatureReport = VpFeatureReport;
 //! Class VphalState
 //! \brief VPHAL class definition
 //!
-class VphalState
+class VphalState : public VpBase
 {
 public:
+    // Perf Optimize for ClearVideoView DDI
+    bool m_clearVideoViewMode = false;
+
     // factory function
     static VphalState* VphalStateFactory(
         PMOS_INTERFACE          pOsInterface,
@@ -337,7 +289,6 @@ public:
     //!
     VphalState(
         PMOS_INTERFACE          pOsInterface,
-        PMOS_CONTEXT            pOsDriverContext,
         MOS_STATUS              *peStatus);
 
     //!
@@ -367,7 +318,7 @@ public:
     //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
     //!
     virtual MOS_STATUS Allocate(
-        const VphalSettings     *pVpHalSettings);
+        const VphalSettings *pVpHalSettings) override;
 
     //!
     //! \brief    Performs VP Rendering
@@ -379,7 +330,7 @@ public:
     //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
     //!
     virtual MOS_STATUS Render(
-        PCVPHAL_RENDER_PARAMS   pcRenderParams);
+        PCVPHAL_RENDER_PARAMS pcRenderParams) override;
 
     //!
     //! \brief    Get feature reporting from renderer
@@ -387,7 +338,7 @@ public:
     //! \return   VphalFeatureReport*
     //!           Pointer to VPHAL_FEATURE_REPOR: rendering features reported
     //!
-    virtual VphalFeatureReport*       GetRenderFeatureReport();
+    virtual VphalFeatureReport*       GetRenderFeatureReport() override;
 
     //!
     //! \brief    Get Status Report
@@ -400,7 +351,7 @@ public:
     //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
     virtual MOS_STATUS GetStatusReport(
         PQUERY_STATUS_REPORT_APP        pQueryReport,
-        uint16_t                        numStatus);
+        uint16_t                 numStatus) override;
 
     //!
     //! \brief    Get Status Report's entry length from head to tail
@@ -410,15 +361,15 @@ public:
     //! \return   MOS_STATUS
     //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
     //!
-    MOS_STATUS GetStatusReportEntryLength(
-        uint32_t                         *puiLength);
+    virtual MOS_STATUS GetStatusReportEntryLength(
+        uint32_t                         *puiLength) override;
 
-    PLATFORM &GetPlatform()
+    virtual PLATFORM &GetPlatform() override
     {
         return m_platform;
     }
 
-    MEDIA_FEATURE_TABLE* GetSkuTable()
+    virtual MEDIA_FEATURE_TABLE *GetSkuTable() override
     {
         return m_skuTable;
     }
@@ -428,12 +379,12 @@ public:
         return m_waTable;
     }
 
-    PMOS_INTERFACE GetOsInterface()
+    virtual PMOS_INTERFACE GetOsInterface() override
     {
         return m_osInterface;
     }
 
-    PRENDERHAL_INTERFACE GetRenderHal()
+    virtual PRENDERHAL_INTERFACE GetRenderHal() override
     {
         return m_renderHal;
     }
@@ -472,7 +423,15 @@ public:
 
         if (m_veboxInterface != nullptr)
         {
-            MOS_STATUS eStatus = m_veboxInterface->DestroyHeap();
+            m_veboxItf = std::static_pointer_cast<mhw::vebox::Itf>(m_veboxInterface->GetNewVeboxInterface());
+            MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+
+            if (m_veboxItf)
+            {
+                eStatus = m_veboxItf->DestroyHeap();
+            }
+
+            eStatus = m_veboxInterface->DestroyHeap();
             MOS_Delete(m_veboxInterface);
             m_veboxInterface = nullptr;
             if (eStatus != MOS_STATUS_SUCCESS)
@@ -482,6 +441,7 @@ public:
         }
 
         m_veboxInterface = veboxInterface;
+        m_veboxItf = std::static_pointer_cast<mhw::vebox::Itf>(veboxInterface->GetNewVeboxInterface());
     }
 
     void SetMhwSfcInterface(MhwSfcInterface* sfcInterface)
@@ -503,8 +463,6 @@ public:
     virtual MOS_STATUS GetVpMhwInterface(
         VP_MHWINTERFACE &vpMhwinterface);
 
-    HANDLE                      m_gpuAppTaskEvent;
-
 protected:
     // Internals
     PLATFORM                    m_platform;
@@ -513,11 +471,12 @@ protected:
 
     // States
     PMOS_INTERFACE              m_osInterface;
-    PRENDERHAL_INTERFACE        m_renderHal;
+    PRENDERHAL_INTERFACE_LEGACY m_renderHal;
     PMHW_VEBOX_INTERFACE        m_veboxInterface;
     MhwCpInterface              *m_cpInterface;
     PMHW_SFC_INTERFACE          m_sfcInterface;
     VphalRenderer               *m_renderer;
+    std::shared_ptr<mhw::vebox::Itf> m_veboxItf = nullptr;
 
     // Render GPU context/node
     MOS_GPU_NODE                m_renderGpuNode;
@@ -525,6 +484,14 @@ protected:
 
     // StatusTable indicating if command is done by gpu or not
     VPHAL_STATUS_TABLE          m_statusTable = {};
+
+    MediaUserSettingSharedPtr   m_userSettingPtr = nullptr;  //!< usersettingInstance
+
+    // Same MOS_GPU_CONTEXT may be created in MediaContext with a different handle,
+    // which will cause the gpuContext created in VphalState missed to be destroyed during
+    // m_osInterface being destroyed. m_gpuContextCheckList is used to store gpu contexts
+    // which may encounter such case.
+    std::vector<VPHAL_GPU_CONTEXT_ENTRY> m_gpuContextCheckList;
 
     //!
     //! \brief    Create instance of VphalRenderer
@@ -534,10 +501,46 @@ protected:
     //!
     virtual MOS_STATUS CreateRenderer() = 0;
 
-    virtual bool IsApoEnabled()
+    virtual bool IsApoEnabled() override
     {
         return false;
     }
+
+    virtual bool IsRenderContextBasedSchedulingNeeded()
+    {
+        return false;
+    }
+
+private:
+    //!
+    //! \brief    Put GPU context entry
+    //! \details  Put GPU context entry in the m_gpuContextCheckList
+    //! \param    MOS_GPU_CONTEXT mosGpuConext
+    //!           [in] Mos GPU context
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //!
+    MOS_STATUS AddGpuContextToCheckList(
+        MOS_GPU_CONTEXT mosGpuConext);
+
+    //!
+    //! \brief    Destroy GPU context entry with invalid handle
+    //! \details  Release these GPU context overwritten by MediaContext
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //!
+    MOS_STATUS DestroyGpuContextWithInvalidHandle();
+
+    //!
+    //! \brief    Check whether GPU context is reused or not
+    //! \details  Check whether GPU context is reused or not
+    //! \param    MOS_GPU_CONTEXT mosGpuConext
+    //!           [in] Mos GPU context
+    //! \return   bool
+    //!           Return true if is reused, otherwise false
+    //!
+    bool IsGpuContextReused(
+        MOS_GPU_CONTEXT mosGpuContext);
 };
 
 #endif  // __VPHAL_H__

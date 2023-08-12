@@ -354,7 +354,7 @@ VAStatus DdiCodec_PutSurfaceLinuxHW(
     uint32_t         flags             /* de-interlacing flags */
 )
 {
-    VphalState             *vpHal = nullptr;
+    VpBase                  *vpHal = nullptr;
     int32_t                 ovRenderIndex = 0;
     VPHAL_SURFACE           Surf;
     VPHAL_SURFACE           target;
@@ -466,7 +466,7 @@ VAStatus DdiCodec_PutSurfaceLinuxHW(
     Surf.rcSrc                  = srcRect;
     Surf.rcDst                  = dstRect;
 
-    MOS_LINUX_BO* drawable_bo = mos_bo_gem_create_from_name(mediaCtx->pDrmBufMgr, "rendering buffer", buffer->dri2.name);
+    MOS_LINUX_BO* drawable_bo = mos_bo_create_from_name(mediaCtx->pDrmBufMgr, "rendering buffer", buffer->dri2.name);
 
 
     if  (nullptr == drawable_bo)

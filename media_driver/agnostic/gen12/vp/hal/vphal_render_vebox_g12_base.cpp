@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2011-2021, Intel Corporation
+* Copyright (c) 2011-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -34,6 +34,9 @@
 #if defined(ENABLE_KERNELS) && !defined(_FULL_OPEN_SOURCE)
 #include "igvpkrn_isa_g12_tgllp.h"
 #endif
+#include "vphal_render_hdr_3dlut_g12.h"
+#include "vp_hal_ddi_utils.h"
+
 const char g_KernelDNDI_Str_g12[KERNEL_VEBOX_BASE_MAX][MAX_PATH] =
 {
     DBG_TEXT("Reserved"),
@@ -206,25 +209,25 @@ const uint32_t   dwPixRangeWeight5[NOISEFACTOR_MAX + 1] = {
     4 };
 
 const uint32_t   dwLTDThresholdUV[NOISEFACTOR_MAX + 1] = {
-    4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,   4,
-    5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,   5,
-    6,   6,   6,   6,   6,   6,   6,   6,   6,   6,   6,   6,   6,   6,   6,   6,
-    7,   7,   7,   7,   7,   7,   7,   7,   7,   7,   7,   7,   7,   7,   7,   7,
-    8 };
+    64,   65,   66,   67,   68,   69,   70,   71,   72,   73,   74,   75,   76,
+    77,   78,   79,   80,   81,   82,   83,   84,   85,   86,   87,   88,   89,
+    90,   91,   92,   93,   94,   95,   96,   97,   98,   99,   100,  101,  102,
+    103,  104,  105,  106,  107,  108,  109,  110,  111,  112,  113,  114,  115,
+    116,  117,  118,  119,  120,  121,  122,  123,  124,  125,  126,  127,  128 };
 
 const uint32_t   dwTDThresholdUV[NOISEFACTOR_MAX + 1] = {
-    10,  10,  10,  10,  10,  10,  10,  10,  10,  10,  10,  10,  10,  10,  10,  10,
-    11,  11,  11,  11,  11,  11,  11,  11,  11,  11,  11,  11,  11,  11,  11,  11,
-    12,  12,  12,  12,  12,  12,  12,  12,  12,  12,  12,  12,  12,  12,  12,  12,
-    13,  13,  13,  13,  13,  13,  13,  13,  13,  13,  13,  13,  13,  13,  13,  13,
-    14 };
+    160,  161,  162,  163,  164,  165,  166,  167,  168,  169,  170,  171,  172,
+    173,  174,  175,  176,  177,  178,  179,  180,  181,  182,  183,  184,  185, 
+    186,  187,  188,  189,  190,  191,  192,  193,  194,  195,  196,  197,  198, 
+    199,  200,  201,  202,  203,  204,  205,  206,  207,  208,  209,  210,  211, 
+    212,  213,  214,  215,  216,  217,  218,  219,  220,  221,  222,  223,  224 };
 
 const uint32_t   dwSTADThresholdUV[NOISEFACTOR_MAX + 1] = {
-    128, 128, 128, 128, 129, 129, 129, 129, 130, 130, 130, 130, 131, 131, 131, 131,
-    132, 132, 132, 132, 133, 133, 133, 133, 134, 134, 134, 134, 135, 135, 135, 135,
-    136, 136, 136, 136, 137, 137, 137, 137, 138, 138, 138, 138, 139, 139, 139, 139,
-    140, 140, 140, 140, 141, 141, 141, 141, 142, 142, 142, 142, 143, 143, 143, 143,
-    144 };
+    2048, 2052, 2056, 2060, 2064, 2068, 2072, 2076, 2080, 2084, 2088, 2092, 2096, 
+    2100, 2104, 2108, 2112, 2116, 2120, 2124, 2128, 2132, 2136, 2140, 2144, 2148, 
+    2152, 2156, 2160, 2164, 2168, 2172, 2176, 2180, 2184, 2188, 2192, 2196, 2200, 
+    2204, 2208, 2212, 2216, 2220, 2224, 2228, 2232, 2236, 2240, 2244, 2248, 2252, 
+    2256, 2260, 2264, 2268, 2272, 2276, 2280, 2284, 2288, 2292, 2296, 2300, 2304};
 
 //!
 //! \brief    Vebox format support check
@@ -594,7 +597,9 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
     pVeboxInterface         = pVeboxState->m_pVeboxInterface;
     InitValue               = 0;
     // change the init value when null hw is enabled
-    if (NullHW::IsEnabled())
+    VPHAL_RENDER_CHK_NULL(pOsInterface);
+
+    if (pOsInterface->bNullHwIsEnabled)
     {
         InitValue = 0x80;
     }
@@ -660,7 +665,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
                 MOS_HW_RESOURCE_DEF_MAX,
                 MOS_TILE_UNSET_GMM,
                 memTypeSurfVideoMem,
-                MOS_MEMPOOL_DEVICEMEMORY == memTypeSurfVideoMem));
+                VPP_INTER_RESOURCE_NOTLOCKABLE));
 
             pVeboxState->FFDISurfaces[i]->SampleType = SampleType;
 
@@ -720,7 +725,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
 
     tileModeByForce = MOS_TILE_UNSET_GMM;
     //DN output surface must be tile64 only when input format is bayer
-    if (MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrMediaTile64) &&
+    if (!MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrTileY) &&
         IS_BAYER_FORMAT(pVeboxState->m_currentSurface->Format))
     {
         VPHAL_RENDER_NORMALMESSAGE("tilemode: media support tile encoding 1");
@@ -746,7 +751,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
                 MOS_HW_RESOURCE_DEF_MAX,
                 tileModeByForce,
                 memTypeSurfVideoMem,
-                MOS_MEMPOOL_DEVICEMEMORY == memTypeSurfVideoMem));
+                VPP_INTER_RESOURCE_NOTLOCKABLE));
 
             // if allocated, pVeboxState->PreviousSurface is not valid for DN reference.
             if (bAllocated)
@@ -813,7 +818,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
     }
 
     tileModeByForce = MOS_TILE_UNSET_GMM;
-    if (MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrMediaTile64))
+    if (!MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrTileY))
     {
         VPHAL_RENDER_NORMALMESSAGE("tilemode: media support tile encoding 1");
         tileModeByForce = MOS_TILE_64_GMM;
@@ -958,7 +963,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
         MOS_MMC_DISABLED,
         &bAllocated));
 
-    if (bAllocated && NullHW::IsEnabled())
+    if (bAllocated && pOsInterface->bNullHwIsEnabled)
     {
         // Initialize VeboxRGBHistogram Surface
         VPHAL_RENDER_CHK_STATUS(pOsInterface->pfnFillResource(
@@ -1048,7 +1053,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::AllocateResources()
             {
 #if defined(ENABLE_KERNELS) && !defined(_FULL_OPEN_SOURCE)
                 PRENDERHAL_INTERFACE pRenderHal = pVeboxState->m_pRenderHal;
-                m_hdr3DLutGenerator = MOS_New(Hdr3DLutGenerator, pRenderHal, IGVP3DLUT_GENERATION_G12_TGLLP, IGVP3DLUT_GENERATION_G12_TGLLP_SIZE);
+                m_hdr3DLutGenerator             = MOS_New(Hdr3DLutGeneratorG12, pRenderHal, m_hdr3DLutKernelBinary, m_hdr3DLutKernelBinarySize);
 #endif
             }
         }
@@ -1168,9 +1173,9 @@ bool VPHAL_VEBOX_STATE_G12_BASE::IsMMCEnabledForCurrOutputSurf()
     VPHAL_RENDER_CHK_NULL_NO_STATUS(pRenderData);
     VPHAL_RENDER_CHK_NULL_NO_STATUS(pRenderData->pRenderTarget);
 
-    return bEnableMMC   &&
+    return bEnableMMC &&
            IsFormatMMCSupported(pRenderData->pRenderTarget->Format) &&
-           (pRenderData->pRenderTarget->CompressionMode == MOS_MMC_MC);
+           (pRenderData->pRenderTarget->CompressionMode != MOS_MMC_DISABLED);
 
 finish:
     return false;
@@ -1225,6 +1230,13 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::SetupDiIecpStateForOutputSurf(
             MOS_ZeroMemory(&VeboxSurfCntlParams, sizeof(VeboxSurfCntlParams));
             VeboxSurfCntlParams.bIsCompressed   = pSurface->bIsCompressed;
             VeboxSurfCntlParams.CompressionMode = pSurface->CompressionMode;
+
+            if (pSurface->OsResource.bUncompressedWriteNeeded)
+            {
+                VPHAL_RENDER_NORMALMESSAGE("Vebox uncompressed write needed as previous write need clear ");
+                VeboxSurfCntlParams.CompressionMode = MOS_MMC_RC;
+            }
+
             VPHAL_RENDER_CHK_STATUS(pVeboxInterface->AddVeboxSurfaceControlBits(
                 &VeboxSurfCntlParams,
                 (uint32_t *)&(pVeboxDiIecpCmdParams->CurrOutputSurfCtrl.Value)));
@@ -1297,6 +1309,9 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::SetupDiIecpStateForOutputSurf(
                 (uint32_t *)&(pVeboxDiIecpCmdParams->CurrOutputSurfCtrl.Value)));
         }
     }
+#if (_DEBUG || _RELEASE_INTERNAL)
+    pRenderHal->oldCacheSettingForTargetSurface = (uint8_t)((pVeboxDiIecpCmdParams->CurrOutputSurfCtrl.Value >> 1) & 0x0000003f);
+#endif
 
 finish:
     return eStatus;
@@ -1517,7 +1532,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::SetupDiIecpState(
     pVeboxDiIecpCmdParams->pOsResStatisticsOutput         = &pVeboxState->VeboxStatisticsSurface.OsResource;
     pVeboxDiIecpCmdParams->StatisticsOutputSurfCtrl.Value = pVeboxState->DnDiSurfMemObjCtl.StatisticsOutputSurfMemObjCtl;
 
-    if (pRenderData->bHdr3DLut)
+    if (!Mos_ResourceIsNull(&pVeboxState->VeboxRGBHistogram.OsResource))
     {
         VPHAL_RENDER_CHK_STATUS(pOsInterface->pfnRegisterResource(
             pOsInterface,
@@ -1526,6 +1541,8 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::SetupDiIecpState(
             true));
 
         pVeboxDiIecpCmdParams->pOsResLaceOrAceOrRgbHistogram = &pVeboxState->VeboxRGBHistogram.OsResource;
+        pVeboxDiIecpCmdParams->LaceOrAceOrRgbHistogramSurfCtrl.Value =
+            pVeboxState->DnDiSurfMemObjCtl.LaceOrAceOrRgbHistogramSurfCtrl;
     }
 
 finish:
@@ -1973,7 +1990,7 @@ void VPHAL_VEBOX_STATE_G12_BASE::SetupChromaSampling(
     {
         pSrcSurface->ChromaSiting = (CHROMA_SITING_HORZ_LEFT | CHROMA_SITING_VERT_CENTER);
     }
-    srcColorPack = VpHal_GetSurfaceColorPack(pSrcSurface->Format);
+    srcColorPack = VpHalDDIUtils::GetSurfaceColorPack(pSrcSurface->Format);
     switch (srcColorPack)
     {
         // For 422 format, vertical should be always 0.
@@ -2127,7 +2144,7 @@ void VPHAL_VEBOX_STATE_G12_BASE::SetupChromaSampling(
     {
         pRenderTarget->ChromaSiting = (CHROMA_SITING_HORZ_LEFT | CHROMA_SITING_VERT_CENTER);
     }
-    dstColorPack = VpHal_GetSurfaceColorPack(pRenderTarget->Format);
+    dstColorPack = VpHalDDIUtils::GetSurfaceColorPack(pRenderTarget->Format);
     switch (dstColorPack)
     {
         case VPHAL_COLORPACK_422:
@@ -2466,6 +2483,28 @@ VPHAL_OUTPUT_PIPE_MODE VPHAL_VEBOX_STATE_G12_BASE::GetOutputPipe(
         {
             OutputPipe              = VPHAL_OUTPUT_PIPE_MODE_VEBOX;
             pTarget->bFastColorFill = true;
+            
+            if (pTarget->bIsCompressed &&
+                pTarget->CompressionMode == MOS_MMC_MC &&
+                (pSrcSurface->rcDst.bottom - pSrcSurface->rcDst.top) % 8 != 0)
+            {
+                //If FastColorFill is enabled, pTarget will be shared by VE and Render
+                //Upper rectangle in pTarget will be used by VE
+                //Bottom rectangle in pTarget will be used by Render
+                //If upper rectangle height is not a multiple of 8 unit When MMC is enabled,    
+                //we need to decompress the target surface to avoid output corruption
+                MOS_STATUS eStatus = m_pOsInterface->pfnDecompResource(m_pOsInterface, &pTarget->OsResource);
+                if(eStatus == MOS_STATUS_SUCCESS)
+                {
+                    pTarget->bIsCompressed     = false;
+                    pTarget->CompressionMode   = MOS_MMC_DISABLED;
+                    pTarget->CompressionFormat = 0;
+                }
+                else
+                {
+                    VPHAL_RENDER_ASSERTMESSAGE("FastColorFill is enabled and decompress target surface failed");
+                }
+            }
         }
         pTarget->rcDst.bottom = lTargetBottom;
     }
@@ -2540,6 +2579,14 @@ bool VPHAL_VEBOX_STATE_G12_BASE::IsNeeded(
             pRenderPassData->bCompNeeded = true;
             goto finish;
         }
+    }
+
+    // Force NV12 16K to render
+    if (pRenderTarget->Format == Format_NV12 && pRenderTarget->dwHeight > VPHAL_RNDR_16K_HEIGHT_LIMIT)
+    {
+        VPHAL_RENDER_NORMALMESSAGE("Disable VEBOX/SFC for NV12 16k resolution");
+        pRenderPassData->bCompNeeded = true;
+        goto finish;
     }
 
     pRenderData->Init();
@@ -2855,7 +2902,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::SetupSurfaceStatesForDenoise()
     MOS_ZeroMemory(&SurfaceParams, sizeof(SurfaceParams));
 
     SurfaceParams.Type             = pRenderHal->SurfaceTypeDefault;
-    SurfaceParams.bRenderTarget    = true;
+    SurfaceParams.isOutput    = true;
     SurfaceParams.bWidthInDword_Y  = true;
     SurfaceParams.bWidthInDword_UV = true;
     SurfaceParams.Boundary         = RENDERHAL_SS_BOUNDARY_ORIGINAL;
@@ -2877,7 +2924,7 @@ MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::SetupSurfaceStatesForDenoise()
     MOS_ZeroMemory(&SurfaceParams, sizeof(SurfaceParams));
 
     SurfaceParams.Type             = pRenderHal->SurfaceTypeDefault;
-    SurfaceParams.bRenderTarget    = true;
+    SurfaceParams.isOutput    = true;
     SurfaceParams.bWidthInDword_Y  = true;
     SurfaceParams.bWidthInDword_UV = true;
     SurfaceParams.Boundary         = RENDERHAL_SS_BOUNDARY_ORIGINAL;
@@ -3003,6 +3050,7 @@ void VPHAL_VEBOX_STATE_G12_BASE::VeboxSetRenderingFlags(
     pRenderData->bHdr3DLut = bToneMapping;
     pRenderData->bHdr3DLut |= (pSrc->p3DLutParams != nullptr);
     VPHAL_RENDER_NORMALMESSAGE("Enable 3DLut for HDR ToneMapping %d or 3DLUT filter %d.", bToneMapping, (pSrc->p3DLutParams != nullptr));
+    MT_LOG1(MT_VP_HAL_RENDER_VE, MT_NORMAL, MT_VP_RENDERDATA_HDR3DLUT, pRenderData->bHdr3DLut);
 
     VPHAL_VEBOX_STATE::VeboxSetRenderingFlags(pSrc, pRenderTarget);
 
@@ -3092,41 +3140,46 @@ VPHAL_VEBOX_STATE_G12_BASE::VPHAL_VEBOX_STATE_G12_BASE(
     pKernelParamTable = (PRENDERHAL_KERNEL_PARAM)g_Vebox_KernelParam_g12;
     iNumFFDISurfaces  = 2;  // PE on: 4 used. PE off: 2 used
 
+#if defined(ENABLE_KERNELS) && !defined(_FULL_OPEN_SOURCE)
+    m_hdr3DLutKernelBinary     = (uint32_t *)IGVP3DLUT_GENERATION_G12_TGLLP;
+    m_hdr3DLutKernelBinarySize = IGVP3DLUT_GENERATION_G12_TGLLP_SIZE;
+#endif
 }
 
 MOS_STATUS VPHAL_VEBOX_STATE_G12_BASE::Initialize(
     const VphalSettings         *pSettings,
     Kdll_State                  *pKernelDllState)
 {
-    MOS_STATUS                          eStatus;
-    MOS_USER_FEATURE_VALUE_DATA         UserFeatureData;
+    MOS_STATUS eStatus   = MOS_STATUS_SUCCESS;
     PVPHAL_VEBOX_STATE_G12_BASE         pVeboxState = this;
+    bool       enableMMC   = false;
 
-    eStatus      = MOS_STATUS_SUCCESS;
     VPHAL_VEBOX_STATE::Initialize(pSettings, pKernelDllState);
 
     // Read user feature key for MMC enable
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
-#if(LINUX)
-    UserFeatureData.bData       = !MEDIA_IS_WA(pVeboxState->m_pWaTable, WaDisableVPMmc); // enable MMC by default
+#if (LINUX) && (!WDDM_LINUX)
+    enableMMC       = !MEDIA_IS_WA(pVeboxState->m_pWaTable, WaDisableVPMmc); // enable MMC by default
 #else
-    UserFeatureData.bData = true;
+    enableMMC         = true;
 #endif
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_ENABLE_MMC_ID,
-        &UserFeatureData,
-        m_pOsInterface->pOsContext));
-
+    if (m_userSettingPtr != nullptr)
+    {
+        ReadUserSetting(
+            m_userSettingPtr,
+            enableMMC,
+            __VPHAL_ENABLE_MMC,
+            MediaUserSetting::Group::Device,
+            enableMMC,
+            true);
+    }
     // Set Vebox MMC enable
-    pVeboxState->bEnableMMC = UserFeatureData.bData && MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrE2ECompression);
+    pVeboxState->bEnableMMC = enableMMC && MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrE2ECompression);
 
     // Set SFC MMC enable
     if (MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrSFCPipe) &&
         m_sfcPipeState)
     {
-        m_sfcPipeState->SetSfcOutputMmcStatus(UserFeatureData.bData && MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrE2ECompression));
+        m_sfcPipeState->SetSfcOutputMmcStatus(enableMMC && MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrE2ECompression));
     }
 
     return eStatus;

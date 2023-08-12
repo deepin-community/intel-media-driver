@@ -28,22 +28,20 @@
 //!
 #include "decode_basic_feature.h"
 #include "decode_utils.h"
+#include "codechal_debug.h"
 
 namespace decode {
 
 DecodeBasicFeature::DecodeBasicFeature(
     DecodeAllocator *allocator,
-    CodechalHwInterface *hwInterface):
-    m_hwInterface(hwInterface), m_allocator(allocator)
+    void *hwInterface,
+    PMOS_INTERFACE osInterface) :
+    m_hwInterface(hwInterface), m_allocator(allocator), m_osInterface(osInterface)
 {
-    if(hwInterface != nullptr)
+    if (osInterface != nullptr)
     {
-        PMOS_INTERFACE osInterface  = hwInterface->GetOsInterface();
-        if (osInterface != nullptr)
-        {
-            MEDIA_WA_TABLE* waTable = osInterface->pfnGetWaTable(osInterface);
-            m_useDummyReference = (waTable != nullptr) ? MEDIA_IS_WA(waTable, WaDummyReference) : false;
-        }
+        MEDIA_WA_TABLE* waTable = osInterface->pfnGetWaTable(osInterface);
+        m_useDummyReference = (waTable != nullptr) ? MEDIA_IS_WA(waTable, WaDummyReference) : false;
     }
 
     MOS_ZeroMemory(&m_destSurface, sizeof(m_destSurface));
@@ -81,6 +79,8 @@ MOS_STATUS DecodeBasicFeature::Init(void *setting)
     m_picHeightInMb = (uint16_t)CODECHAL_GET_HEIGHT_IN_MACROBLOCKS(m_height);
 
     m_disableDecodeSyncLock = codecSettings->disableDecodeSyncLock ? true : false;
+
+    m_frameNum = DecodeFrameIndex;
 
     return MOS_STATUS_SUCCESS;
 }

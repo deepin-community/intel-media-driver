@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2012-2021, Intel Corporation
+* Copyright (c) 2012-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,7 +29,7 @@
 #include "mhw_sfc_g12_X.h"
 #include "vphal_render_vebox_base.h"
 #include "vphal_render_sfc_g12_base.h"
-#include "media_user_settings_mgr_g12.h"
+#include "vp_hal_ddi_utils.h"
 
 #if __VPHAL_SFC_SUPPORTED
 
@@ -39,17 +39,13 @@ VphalSfcStateG12::VphalSfcStateG12(
     PMHW_SFC_INTERFACE   sfcInterface)
     : VphalSfcState(osInterface, renderHal, sfcInterface)
 {
-    MOS_USER_FEATURE_VALUE_DATA UserFeatureData;
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_SFC_OUTPUT_CENTERING_DISABLE_ID_G12,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-
     // Setup disable render flag controlled by a user feature key for validation purpose
     // Enable output centering by default on Gen12+
-    m_disableOutputCentering = UserFeatureData.bData ? true : false;
+    ReadUserSetting(
+        m_userSettingPtr,
+        m_disableOutputCentering,
+        __MEDIA_USER_FEATURE_VALUE_SFC_OUTPUT_CENTERING_DISABLE,
+        MediaUserSetting::Group::Sequence);
 }
 
 bool VphalSfcStateG12::IsFormatSupported(
@@ -196,7 +192,7 @@ void VphalSfcStateG12::GetInputWidthHeightAlignUnit(
     heightAlignUnit = 1;
 
     // Apply alignment restriction to Region of the input frame.
-    switch (VpHal_GetSurfaceColorPack(inputFormat))
+    switch (VpHalDDIUtils::GetSurfaceColorPack(inputFormat))
     {
         case VPHAL_COLORPACK_420:
             widthAlignUnit  = 2;
@@ -320,6 +316,21 @@ MOS_STATUS VphalSfcStateG12::SetSfcStateParams(
         sfcStateParams->bRGBASwapEnable = false;
     }
 
+    // Enable Adaptive Filtering for YUV input only on Gen12LP, if it is being upscaled
+    // in either direction. We must check for this before clamping the SF.
+    if ((IS_YUV_FORMAT(m_renderData.SfcInputFormat) || (m_renderData.SfcInputFormat == Format_AYUV)) &&  // YUV format
+        (m_renderData.fScaleX > 1.0F || m_renderData.fScaleY > 1.0F) && // scaling ratio > 1
+        (sfcStateParams->dwAVSFilterMode != MEDIASTATE_SFC_AVS_FILTER_BILINEAR)) // AVS 8x8(VE+SFC) or 5X5 (VD+SFC)
+    {
+        sfcStateParams->bBypassXAdaptiveFilter = false;
+        sfcStateParams->bBypassYAdaptiveFilter = false;
+    }
+    else
+    {
+        sfcStateParams->bBypassXAdaptiveFilter = true;
+        sfcStateParams->bBypassYAdaptiveFilter = true;
+    }
+
     return eStatus;
 }
 
@@ -388,8 +399,8 @@ void VphalSfcStateG12::SetRenderingFlags(
     wHeightAlignUnit = 1;
     dwVeboxBottom    = (uint32_t)pSrc->rcSrc.bottom;
     dwVeboxRight     = (uint32_t)pSrc->rcSrc.right;
-    srcColorPack     = VpHal_GetSurfaceColorPack(pSrc->Format);
-    dstColorPack     = VpHal_GetSurfaceColorPack(pRenderTarget->Format);
+    srcColorPack     = VpHalDDIUtils::GetSurfaceColorPack(pSrc->Format);
+    dstColorPack     = VpHalDDIUtils::GetSurfaceColorPack(pRenderTarget->Format);
 
     // Get the SFC input surface size from Vebox
     AdjustBoundary(
@@ -513,7 +524,7 @@ void VphalSfcStateG12::SetRenderingFlags(
     {
         m_renderData.SfcSrcChromaSiting = (CHROMA_SITING_HORZ_LEFT | CHROMA_SITING_VERT_CENTER);
     }
-    switch (VpHal_GetSurfaceColorPack(m_renderData.SfcInputFormat))
+    switch (VpHalDDIUtils::GetSurfaceColorPack(m_renderData.SfcInputFormat))
     {
         case VPHAL_COLORPACK_422:
             m_renderData.SfcSrcChromaSiting = (m_renderData.SfcSrcChromaSiting & 0x7) | CHROMA_SITING_VERT_TOP;
@@ -557,6 +568,9 @@ MOS_STATUS VphalSfcStateG12::SetSfcMmcStatus(
 {
     MOS_STATUS       eStatus = MOS_STATUS_SUCCESS;
 
+    VPHAL_RENDER_CHK_NULL_RETURN(outSurface);
+    VPHAL_RENDER_CHK_NULL_RETURN(sfcStateParams);
+
     if (outSurface->CompressionMode               &&
         IsFormatMMCSupported(outSurface->Format)  &&
         outSurface->TileType == MOS_TILE_Y        &&
@@ -564,6 +578,11 @@ MOS_STATUS VphalSfcStateG12::SetSfcMmcStatus(
     {
         sfcStateParams->bMMCEnable = true;
         sfcStateParams->MMCMode    = outSurface->CompressionMode;
+
+        if (outSurface->OsResource.bUncompressedWriteNeeded)
+        {
+            sfcStateParams->MMCMode = MOS_MMC_RC;
+        }
     }
     else
     {

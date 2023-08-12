@@ -31,7 +31,7 @@
 #include "codec_def_decode.h"
 #include "decode_allocator.h"
 #include "media_feature.h"
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 #include "codechal_setting.h"
 #include "decode_internal_target.h"
 
@@ -45,7 +45,7 @@ public:
     using SurfaceWidthT  = decltype(MOS_SURFACE::dwWidth);
     using SurfaceHeightT = decltype(MOS_SURFACE::dwHeight);
 
-    DecodeDownSamplingFeature(MediaFeatureManager *featureManager, DecodeAllocator *allocator, CodechalHwInterface *hwInterface);
+    DecodeDownSamplingFeature(MediaFeatureManager *featureManager, DecodeAllocator *allocator, PMOS_INTERFACE osInterface);
     virtual ~DecodeDownSamplingFeature();
 
     //!
@@ -105,12 +105,14 @@ protected:
     virtual MOS_STATUS UpdateDecodeTarget(MOS_SURFACE &surface) = 0;
     PMOS_BUFFER        AllocateHistogramBuffer(uint8_t frameIndex);
 
-    CodechalHwInterface *m_hwInterface  = nullptr;
+    PMOS_INTERFACE       m_osInterface  = nullptr;
     DecodeAllocator     *m_allocator    = nullptr;
     DecodeBasicFeature  *m_basicFeature = nullptr;
 
     InternalTargets      m_internalTargets; //!< Internal targets for downsampling input if application dosen't prepare
     PMOS_BUFFER          m_histogramBufferList[DecodeBasicFeature::m_maxFrameIndex] = {};  //! \brief Internal histogram output buffer list
+
+MEDIA_CLASS_DEFINE_END(decode__DecodeDownSamplingFeature)
 };
 }//decode
 

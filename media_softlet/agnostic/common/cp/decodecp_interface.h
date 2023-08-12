@@ -29,7 +29,7 @@
 #include "mos_util_debug.h"
 #include "codechal_setting.h"
 #include "mos_os_specific.h"
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 #include "mos_utilities.h"
 
 #define DECODE_CP_ASSERT(_ptr) \
@@ -50,9 +50,6 @@
 #define DECODE_CP_CHK_STATUS_MESSAGE(_stmt, _message, ...) \
     MOS_CHK_STATUS_MESSAGE_RETURN(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, _stmt, _message, ##__VA_ARGS__)
 
-#define DECODE_CP_CHK_NULL(_ptr) \
-    MOS_CHK_NULL(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, _ptr)
-
 #define DECODE_CP_CHK_NULL_RETURN(_ptr) \
     MOS_CHK_NULL_RETURN(MOS_COMPONENT_CODEC, MOS_CODEC_SUBCOMP_DECODE, _ptr)
 
@@ -68,6 +65,12 @@
 
 #define DECODE_CP_FUNCTION_EXIT(eStatus) \
     MOS_FUNCTION_EXIT(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, eStatus)
+
+namespace decode
+{
+    class DecodePipeline;
+    class DecodeSubPacket;
+}
 
 class DecodeCpInterface
 {
@@ -85,6 +88,7 @@ public:
         uint32_t            length,
         uint32_t            startoffset,
         uint32_t            dwsliceIndex) = 0;
+    
     //!
     //! \brief  Add Huc State
     //! \return MOS_STATUS
@@ -119,6 +123,43 @@ public:
     virtual bool       IsCpEnabled()                                     = 0;
     virtual void       SetCpEnabled(bool isCpInUse)                      = 0;
 
+    //!
+    //! \brief  CreateDecodeCpIndSubPkt
+    //! \return DecodeSubPacket pointer, return nullptr if failed.
+    //! 
+    //!
+    virtual decode::DecodeSubPacket*  CreateDecodeCpIndSubPkt(
+        decode::DecodePipeline *pipeline, 
+        CODECHAL_MODE           mode,
+        CodechalHwInterfaceNext    *hwInterface)
+    {
+        MOS_UNUSED(pipeline);
+        MOS_UNUSED(mode);
+        MOS_UNUSED(hwInterface);
+        MOS_ASSERTMESSAGE(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, "This function is not implemented.");
+        return nullptr;
+    };
+
+    //!
+    //! \brief  ExecuteDecodeCpIndSubPkt
+    //! \return MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    //!
+    virtual MOS_STATUS ExecuteDecodeCpIndSubPkt(
+        decode::DecodeSubPacket *packet,
+        CODECHAL_MODE            mode,
+        MOS_COMMAND_BUFFER      &cmdBuffer,
+        uint32_t                sliceIndex)
+    {
+        MOS_UNUSED(packet);
+        MOS_UNUSED(mode);
+        MOS_UNUSED(cmdBuffer);
+        MOS_UNUSED(sliceIndex);
+        MOS_ASSERTMESSAGE(MOS_COMPONENT_CP, MOS_CP_SUBCOMP_CODEC, "This function is not implemented.");
+        return MOS_STATUS_UNIMPLEMENTED;
+    };
+
+MEDIA_CLASS_DEFINE_END(DecodeCpInterface)
 };
 
 //!
@@ -129,7 +170,8 @@ public:
 //
 DecodeCpInterface *Create_DecodeCpInterface(
     CodechalSetting *    codechalSettings,
-    CodechalHwInterface *hwInterfaceInput);
+    MhwCpInterface  *    cpInterface,
+    PMOS_INTERFACE       osInterface);
 
 //!
 //! \brief    Delete the DecodeCpInterface Object

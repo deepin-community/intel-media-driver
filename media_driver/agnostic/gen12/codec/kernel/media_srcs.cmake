@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2019, Intel Corporation
+# Copyright (c) 2017-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -26,27 +26,31 @@ set(TMP_HEADERS_
     ${CMAKE_CURRENT_LIST_DIR}/igcodeckrn_g12.h
 )
 
-set(SOURCES_
-    ${SOURCES_}
+set(CODEC_SOURCES_
+    ${CODEC_SOURCES_}
     ${TMP_SOURCES_}
 )
 
-set(HEADERS_
-    ${HEADERS_}
+set(CODEC_HEADERS_
+    ${CODEC_HEADERS_}
     ${TMP_HEADERS_}
 )
 
-set(COMMON_SOURCES_
-    ${COMMON_SOURCES_}
+set(MEDIA_BIN_SOURCES_
+    ${MEDIA_BIN_SOURCES_}
     ${TMP_SOURCES_}
 )
 
-set(COMMON_HEADERS_
-    ${COMMON_HEADERS_}
+set(MEDIA_BIN_HEADERS_
+    ${MEDIA_BIN_HEADERS_}
     ${TMP_HEADERS_}
 )
-
 source_group("Kernel\\CodecKernel" FILES ${TMP_SOURCES_} ${TMP_HEADERS_})
+set(TMP_SOURCES_ "")
+set(TMP_HEADERS_ "")
 
-
+set(MEDIA_BIN_INCLUDE_DIR
+    ${MEDIA_BIN_INCLUDE_DIR}
+    ${CMAKE_CURRENT_LIST_DIR}
+)
 media_add_curr_to_include_path()

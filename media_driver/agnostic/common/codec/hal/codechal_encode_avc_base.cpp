@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2021, Intel Corporation
+* Copyright (c) 2017-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -280,7 +280,7 @@ MOS_STATUS CodechalEncodeAvcBase::SendSlice(
     }
 
     // add AVC Slice state commands
-    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_mfxInterface->AddMfxAvcSlice(cmdBufferInUse, batchBufferInUse, params));
+    CODECHAL_ENCODE_CHK_STATUS_RETURN(AddMfxAvcSlice(cmdBufferInUse, batchBufferInUse, params));
 
     //insert AU, SPS, PSP headers before first slice header
     if (params->bInsertBeforeSliceHeaders)
@@ -397,7 +397,7 @@ MOS_STATUS CodechalEncodeAvcBase::SendSlice(
         {
             weightOffsetParams.pAvcPicParams = params->pEncodeAvcPicParams;
             CODECHAL_ENCODE_CHK_STATUS_RETURN(m_vdencInterface->AddVdencAvcWeightsOffsetsStateCmd(cmdBuffer, &weightOffsetParams));
-            CODECHAL_ENCODE_CHK_STATUS_RETURN(m_vdencInterface->AddVdencSliceStateCmd(cmdBuffer, params));
+            CODECHAL_ENCODE_CHK_STATUS_RETURN(AddVdencSliceStateCmd(cmdBuffer, params));
 
             vdencWalkerStateParams.Mode          = CODECHAL_ENCODE_MODE_AVC;
             vdencWalkerStateParams.slcIdx        = params->dwSliceIndex;
@@ -1249,6 +1249,39 @@ static MOS_STATUS CodecHal_PackSliceHeader_PredWeightTable(
     return eStatus;
 }
 
+static MOS_STATUS CodecHal_PackSliceHeader_MMCO(
+    PCODECHAL_ENCODE_AVC_PACK_SLC_HEADER_PARAMS params)
+{
+    PCODEC_AVC_ENCODE_SLICE_PARAMS slcParams;
+    PBSBuffer                      bsbuffer;
+    MOS_STATUS                     eStatus = MOS_STATUS_SUCCESS;
+
+    CODECHAL_ENCODE_CHK_NULL_RETURN(params);
+    CODECHAL_ENCODE_CHK_NULL_RETURN(params->pAvcSliceParams);
+    CODECHAL_ENCODE_CHK_NULL_RETURN(params->pBsBuffer);
+
+    bsbuffer  = params->pBsBuffer;
+    slcParams = params->pAvcSliceParams;
+    
+    PCODEC_SLICE_MMCO mmco = &slcParams->MMCO[0];
+    do
+    {
+        PutVLCCode(bsbuffer, mmco->MmcoIDC);
+        if (mmco->MmcoIDC == 1 ||
+            mmco->MmcoIDC == 3)
+            PutVLCCode(bsbuffer, mmco->DiffPicNumMinus1);
+        if (mmco->MmcoIDC == 2)
+            PutVLCCode(bsbuffer, mmco->LongTermPicNum);
+        if (mmco->MmcoIDC == 3 ||
+            mmco->MmcoIDC == 6)
+            PutVLCCode(bsbuffer, mmco->LongTermFrameIdx);
+        if (mmco->MmcoIDC == 4)
+            PutVLCCode(bsbuffer, mmco->MaxLongTermFrameIdxPlus1);
+    } while ((mmco++)->MmcoIDC != 0);
+
+    return eStatus;
+}
+
 //!
 //! \brief    Pack AUD parameters
 //!
@@ -1294,14 +1327,20 @@ static MOS_STATUS CodecHal_PackSliceHeader_RefPicListReordering(
     bsbuffer  = params->pBsBuffer;
     sliceType = Slice_Type[slcParams->slice_type];
 
-    // Generate the initial reference list
-    CodecHal_PackSliceHeader_SetInitialRefPicList(params);
+    if (!params->UserFlags.bDisableAcceleratorRefPicListReordering)
+    {
+        // Generate the initial reference list (PicOrder)
+        CodecHal_PackSliceHeader_SetInitialRefPicList(params);
+    }
 
     if (sliceType != SLICE_I && sliceType != SLICE_SI)
     {
         if (slcParams->ref_pic_list_reordering_flag_l0)
         {
-            CODECHAL_ENCODE_CHK_STATUS_RETURN(CodecHal_PackSliceHeader_SetRefPicListParam(params, 0));
+            if (!params->UserFlags.bDisableAcceleratorRefPicListReordering)
+            {
+                CODECHAL_ENCODE_CHK_STATUS_RETURN(CodecHal_PackSliceHeader_SetRefPicListParam(params, 0));
+            }
 
             PutBit(bsbuffer, slcParams->ref_pic_list_reordering_flag_l0);
 
@@ -1315,6 +1354,10 @@ static MOS_STATUS CodecHal_PackSliceHeader_RefPicListReordering(
                         picOrder->ReorderPicNumIDC == 1)
                     {
                         PutVLCCode(bsbuffer, picOrder->DiffPicNumMinus1);
+                    } else
+                    if (picOrder->ReorderPicNumIDC == 2)
+                    {
+                        PutVLCCode(bsbuffer, picOrder->LongTermPicNum);
                     }
                 } while ((picOrder++)->ReorderPicNumIDC != 3);
             }
@@ -1328,7 +1371,10 @@ static MOS_STATUS CodecHal_PackSliceHeader_RefPicListReordering(
     {
         if (slcParams->ref_pic_list_reordering_flag_l1)
         {
-            CodecHal_PackSliceHeader_SetRefPicListParam(params, 1);
+            if (!params->UserFlags.bDisableAcceleratorRefPicListReordering)
+            {
+                CodecHal_PackSliceHeader_SetRefPicListParam(params, 1);
+            }
 
             PutBit(bsbuffer, slcParams->ref_pic_list_reordering_flag_l1);
 
@@ -1342,6 +1388,10 @@ static MOS_STATUS CodecHal_PackSliceHeader_RefPicListReordering(
                         picOrder->ReorderPicNumIDC == 1)
                     {
                         PutVLCCode(bsbuffer, picOrder->DiffPicNumMinus1);
+                    } else
+                    if (picOrder->ReorderPicNumIDC == 2)
+                    {
+                        PutVLCCode(bsbuffer, picOrder->PicNum);
                     }
                 } while ((picOrder++)->ReorderPicNumIDC != 3);
             }
@@ -1849,15 +1899,22 @@ MOS_STATUS CodecHalAvcEncode_PackSliceHeader(
         CODECHAL_ENCODE_CHK_STATUS_RETURN(CodecHal_PackSliceHeader_PredWeightTable(params));
     }
 
-    // dec_ref_pic_marking()
-    if (nalType == CODECHAL_ENCODE_AVC_NAL_UT_IDR_SLICE)
+    if (ref)
     {
-        PutBit(bsbuffer, slcParams->no_output_of_prior_pics_flag);
-        PutBit(bsbuffer, slcParams->long_term_reference_flag);
-    }
-    else if (ref)
-    {
-        PutBit(bsbuffer, slcParams->adaptive_ref_pic_marking_mode_flag);
+        // dec_ref_pic_marking()
+        if (nalType == CODECHAL_ENCODE_AVC_NAL_UT_IDR_SLICE)
+        {
+            PutBit(bsbuffer, slcParams->no_output_of_prior_pics_flag);
+            PutBit(bsbuffer, slcParams->long_term_reference_flag);
+        }
+        else
+        {
+            PutBit(bsbuffer, slcParams->adaptive_ref_pic_marking_mode_flag);
+            if (slcParams->adaptive_ref_pic_marking_mode_flag)
+            {
+                CODECHAL_ENCODE_CHK_STATUS_RETURN(CodecHal_PackSliceHeader_MMCO(params));
+            }
+        }
     }
 
     if (picParams->entropy_coding_mode_flag && sliceType != SLICE_I && sliceType != SLICE_SI)
@@ -3038,8 +3095,8 @@ MOS_STATUS CodechalEncodeAvcBase::EncodeMeKernel(
         &walkerParams,
         &walkerCodecParams));
 
-    HalOcaInterface::TraceMessage(cmdBuffer, *m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
-    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface->pOsContext, *m_miInterface, *m_renderEngineInterface->GetMmioRegisters());
+    HalOcaInterface::TraceMessage(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
+    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *m_miInterface, *m_renderEngineInterface->GetMmioRegisters());
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(m_renderEngineInterface->AddMediaObjectWalkerCmd(
         &cmdBuffer,
@@ -3198,10 +3255,6 @@ MOS_STATUS CodechalEncodeAvcBase::SetSliceStructs()
         slcParams->redundant_pic_cnt                  = 0;
         slcParams->sp_for_switch_flag                 = 0;
         slcParams->slice_qs_delta                     = 0;
-        slcParams->ref_pic_list_reordering_flag_l0    = 0;
-        slcParams->ref_pic_list_reordering_flag_l1    = 0;
-        slcParams->adaptive_ref_pic_marking_mode_flag = 0;
-        slcParams->no_output_of_prior_pics_flag       = 0;
         slcParams->redundant_pic_cnt                  = 0;
 
         slcParams->MaxFrameNum =
@@ -4623,4 +4676,67 @@ MOS_STATUS CodechalEncodeAvcBase::SetFrameStoreIds(uint8_t frameIdx)
         }
     }
     return MOS_STATUS_SUCCESS;
+}
+
+MOS_STATUS CodechalEncodeAvcBase::AddMfxAvcSlice(
+    PMOS_COMMAND_BUFFER        cmdBuffer,
+    PMHW_BATCH_BUFFER          batchBuffer,
+    PMHW_VDBOX_AVC_SLICE_STATE avcSliceState)
+{
+    CODECHAL_ENCODE_FUNCTION_ENTER;
+
+    CODECHAL_ENCODE_CHK_NULL_RETURN(m_mfxInterface);
+    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_mfxInterface->AddMfxAvcSlice(cmdBuffer, batchBuffer, avcSliceState));
+
+    return MOS_STATUS_SUCCESS;
+}
+
+MOS_STATUS CodechalEncodeAvcBase::AddVdencSliceStateCmd(
+    PMOS_COMMAND_BUFFER        cmdBuffer,
+    PMHW_VDBOX_AVC_SLICE_STATE params)
+{
+    CODECHAL_ENCODE_FUNCTION_ENTER;
+
+    CODECHAL_ENCODE_CHK_NULL_RETURN(m_vdencInterface);
+    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_vdencInterface->AddVdencSliceStateCmd(cmdBuffer, params));
+
+    return MOS_STATUS_SUCCESS;
+}
+MOS_STATUS CodechalEncodeAvcBase::GetStatusReport(
+    EncodeStatus* encodeStatus,
+    EncodeStatusReport* encodeStatusReport)
+{
+    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+
+    encodeStatusReport->CodecStatus = CODECHAL_STATUS_SUCCESSFUL;
+    encodeStatusReport->bitstreamSize =
+        encodeStatus->dwMFCBitstreamByteCountPerFrame + encodeStatus->dwHeaderBytesInserted;
+
+    // dwHeaderBytesInserted is for WAAVCSWHeaderInsertion
+    // and is 0 otherwise
+    encodeStatusReport->QpY = encodeStatus->BrcQPReport.DW0.QPPrimeY;
+    encodeStatusReport->SuggestedQpYDelta =
+        encodeStatus->ImageStatusCtrl.CumulativeSliceDeltaQP;
+    encodeStatusReport->NumberPasses = (uint8_t)encodeStatus->dwNumberPasses;
+    ENCODE_VERBOSEMESSAGE("statusReportData->numberPasses: %d\n", encodeStatusReport->NumberPasses);
+    encodeStatusReport->SceneChangeDetected =
+        (encodeStatus->dwSceneChangedFlag & CODECHAL_ENCODE_SCENE_CHANGE_DETECTED_MASK) ? 1 : 0;
+
+    CODECHAL_ENCODE_CHK_NULL_RETURN(m_skuTable);
+
+    if (m_picWidthInMb != 0 && m_frameFieldHeightInMb != 0)
+    {
+        encodeStatusReport->AverageQp = (unsigned char)(((uint32_t)encodeStatus->QpStatusCount.cumulativeQP) / (m_picWidthInMb * m_frameFieldHeightInMb));
+    }
+    encodeStatusReport->PanicMode = encodeStatus->ImageStatusCtrl.Panic;
+
+    // If Num slices is greater than spec limit set NumSlicesNonCompliant to 1 and report error
+    PMHW_VDBOX_PAK_NUM_OF_SLICES numSlices = &encodeStatus->NumSlices;
+    if (numSlices->NumberOfSlices > m_maxNumSlicesAllowed)
+    {
+        encodeStatusReport->NumSlicesNonCompliant = 1;
+    }
+    encodeStatusReport->NumberSlices = numSlices->NumberOfSlices;
+
+    return eStatus;
 }

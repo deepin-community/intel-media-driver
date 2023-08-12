@@ -31,14 +31,12 @@
 #include "media_interfaces_codechal.h"
 #include "media_interfaces_mmd.h"
 #include "media_interfaces_cmhal.h"
-#include "media_interfaces_mosutil.h"
 #include "media_interfaces_vphal.h"
 #include "media_interfaces_renderhal.h"
 
 #include "mhw_cp_interface.h"
 #include "mhw_mi_g8_X.h"
 #include "mhw_render_g8_X.h"
-#include "mhw_sfc_g9_X.h"
 #include "mhw_state_heap_g8.h"
 #include "mhw_vebox_g8_X.h"
 #include "mhw_vdbox_mfx_g8_bdw.h"
@@ -48,8 +46,6 @@
 #ifdef _AVC_DECODE_SUPPORTED
 #include "codechal_decode_avc.h"
 #endif
-
-#include "codechal_decode_downsampling_g9.h"
 
 #ifdef _HEVC_DECODE_SUPPORTED
 #include "codechal_decode_hevc.h"
@@ -171,14 +167,6 @@ protected:
         CM_HAL_STATE *pCmState);
 };
 
-class MosUtilDeviceG8Bdw : public MosUtilDevice
-{
-public:
-    using MosUtil = MediaUserSettingsMgr;
-
-    MOS_STATUS Initialize();
-};
-
 class VphalInterfacesG8Bdw : public VphalDevice
 {
 public:
@@ -186,9 +174,9 @@ public:
 
     MOS_STATUS Initialize(
         PMOS_INTERFACE  osInterface,
-        PMOS_CONTEXT    osDriverContext,
         bool            bInitVphalState,
-        MOS_STATUS      *eStatus);
+        MOS_STATUS      *eStatus,
+        bool            clearViewMode = false);
 };
 
 class RenderHalInterfacesG8Bdw : public RenderHalDevice

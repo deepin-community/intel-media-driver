@@ -24,15 +24,17 @@
 //! \brief    Defines the common interface for decode status reporter
 //! \details
 //!
-#include <cmath>
 #include "decode_status_report.h"
+#include "decode_allocator.h"
+#include "mos_utilities.h"
 
 namespace decode {
 
     DecodeStatusReport::DecodeStatusReport(
-        DecodeAllocator* allocator, bool enableRcs):
+        DecodeAllocator* allocator, bool enableRcs, PMOS_INTERFACE osInterface):
         m_enableRcs(enableRcs),
-        m_allocator(allocator)
+        m_allocator(allocator),
+        m_osInterface(osInterface)
     {
         m_sizeOfReport = sizeof(DecodeStatusReportData);
     }
@@ -106,15 +108,16 @@ namespace decode {
 
         if (inputParameters)
         {
-            m_statusReportData[submitIndex].codecStatus = CODECHAL_STATUS_UNAVAILABLE;
+            m_statusReportData[submitIndex].codecStatus        = CODECHAL_STATUS_UNAVAILABLE;
             m_statusReportData[submitIndex].statusReportNumber = inputParameters->statusReportFeedbackNumber;
-            m_statusReportData[submitIndex].currDecodedPic = inputParameters->currOriginalPic;
-            m_statusReportData[submitIndex].currDecodedPicRes = inputParameters->currDecodedPicRes;
+            m_statusReportData[submitIndex].currDecodedPic     = inputParameters->currOriginalPic;
+            m_statusReportData[submitIndex].currDecodedPicRes  = inputParameters->currDecodedPicRes;     
 #if (_DEBUG || _RELEASE_INTERNAL)
-            m_statusReportData[submitIndex].currSfcOutputPicRes = inputParameters->sfcOutputPicRes;
-            m_statusReportData[submitIndex].currHistogramOutBuf = inputParameters->histogramOutputBuf;
-            m_statusReportData[submitIndex].frameType = inputParameters->pictureCodingType;
-            m_statusReportData[submitIndex].currFgOutputPicRes = inputParameters->fgOutputPicRes;
+            m_statusReportData[submitIndex].currSfcOutputSurface = inputParameters->sfcOutputSurface;
+            m_statusReportData[submitIndex].currHistogramOutBuf  = inputParameters->histogramOutputBuf;
+            m_statusReportData[submitIndex].frameType            = inputParameters->pictureCodingType;
+            m_statusReportData[submitIndex].secondField          = inputParameters->isSecondField;
+            m_statusReportData[submitIndex].currFgOutputPicRes   = inputParameters->fgOutputPicRes;
 #endif
         }
 
@@ -232,7 +235,12 @@ namespace decode {
         DECODE_CHK_NULL(statusReportData);
         DECODE_CHK_NULL(decodeStatus);
 
-        if (!completed)
+        if(m_osInterface != nullptr && m_osInterface->pfnIsGPUHung(m_osInterface))
+        {
+            statusReportData->codecStatus = CODECHAL_STATUS_INCOMPLETE;
+            DECODE_ASSERTMESSAGE("Gpu hang may have occured.");
+        }
+        else if (!completed)
         {
             statusReportData->codecStatus = CODECHAL_STATUS_ERROR;
             DECODE_ASSERTMESSAGE("Media reset may have occured.");

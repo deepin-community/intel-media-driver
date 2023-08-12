@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,7 +28,14 @@
 
 #include "decode_allocator.h"
 #include "decode_utils.h"
+#include "External/Common/GmmResourceInfoExt.h"
+#include "External/Common/GmmCachePolicyExt.h"
+#include "decode_utils.h"
+#include "media_allocator.h"
+#include "mos_os_cp_interface_specific.h"
+#include "mos_utilities.h"
 #include "decode_resource_array.h"
+#include "mos_interface.h"
 
 namespace decode {
 
@@ -37,8 +44,7 @@ DecodeAllocator::DecodeAllocator(PMOS_INTERFACE osInterface, bool limitedLMemBar
 {
     m_allocator = MOS_New(Allocator, m_osInterface);
 #if (_DEBUG || _RELEASE_INTERNAL)
-    m_forceLockable = ReadUserFeature(
-        __MEDIA_USER_FEATURE_VALUE_FORCE_DECODE_RESOURCE_LOCKABLE_ID, m_osInterface->pOsContext).u32Data;
+    m_forceLockable = ReadUserFeature(m_osInterface->pfnGetUserSettingInstance(m_osInterface), "ForceDecodeResourceLockable", MediaUserSetting::Group::Sequence).Get<uint32_t>();
 #endif
 }
 
@@ -155,7 +161,6 @@ MOS_SURFACE* DecodeAllocator::AllocateSurface(
     return surface;
 }
 
-#if (_DEBUG || _RELEASE_INTERNAL)
 MOS_SURFACE *DecodeAllocator::AllocateLinearSurface(
     const uint32_t width, const uint32_t height, const char *nameOfSurface,
     MOS_FORMAT format, bool isCompressible,
@@ -193,7 +198,6 @@ MOS_SURFACE *DecodeAllocator::AllocateLinearSurface(
 
     return surface;
 }
-#endif
 
 SurfaceArray * DecodeAllocator::AllocateSurfaceArray(
     const uint32_t width, const uint32_t height, const char* nameOfSurface,
@@ -229,8 +233,20 @@ PMHW_BATCH_BUFFER DecodeAllocator::AllocateBatchBuffer(
     // Config setting if running with limited LMem bar config.
     if (m_limitedLMemBar)
     {
-        notLockable = (accessReq == notLockableVideoMem);
-        inSystemMem = (accessReq == lockableSystemMem);
+        if (accessReq == notLockableVideoMem)
+        {
+            if (m_osInterface->osCpInterface->IsHMEnabled())
+            {
+                notLockable = true;
+                inSystemMem = false;
+            }
+        }
+        else
+        {
+            // allocate batch buffer in systemMem with limited LMem bar config due to local memory limitation
+            notLockable = false;
+            inSystemMem = true;
+        }
     }
 
 #if (_DEBUG || _RELEASE_INTERNAL)
@@ -627,48 +643,21 @@ MOS_STATUS DecodeAllocator::RegisterResource(PMOS_RESOURCE osResource)
 
 ResourceUsage DecodeAllocator::ConvertGmmResourceUsage(const GMM_RESOURCE_USAGE_TYPE gmmResUsage)
 {
-    ResourceUsage resUsageType;
-    switch (gmmResUsage)
+    if (nullptr == m_osInterface)
     {
-    case GMM_RESOURCE_USAGE_DECODE_INPUT_BITSTREAM:
-        resUsageType = resourceInputBitstream;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_INPUT_REFERENCE:
-        resUsageType = resourceInputReference;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_INTERNAL_READ:
-        resUsageType = resourceInternalRead;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_INTERNAL_WRITE:
-        resUsageType = resourceInternalWrite;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_INTERNAL_READ_WRITE_CACHE:
-        resUsageType = resourceInternalReadWriteCache;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_INTERNAL_READ_WRITE_NOCACHE:
-        resUsageType = resourceInternalReadWriteNoCache;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_OUTPUT_PICTURE:
-        resUsageType = resourceOutputPicture;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_OUTPUT_STATISTICS_WRITE:
-        resUsageType = resourceStatisticsWrite;
-        break;
-    case GMM_RESOURCE_USAGE_DECODE_OUTPUT_STATISTICS_READ_WRITE:
-        resUsageType = resourceStatisticsReadWrite;
-        break;
-    default:
-        resUsageType = resourceDefault;
+        DECODE_ASSERTMESSAGE("mos interface is nullptr")
+        return resourceDefault;
     }
-    return resUsageType;
+    MOS_HW_RESOURCE_DEF gmmUsage = m_osInterface->pfnGmmToMosResourceUsageType(gmmResUsage);
+    return (ResourceUsage)gmmUsage;
 }
 
 void DecodeAllocator::SetAccessRequirement(
     ResourceAccessReq accessReq, MOS_ALLOC_GFXRES_PARAMS &allocParams)
 {
     // The default setting is lockableVideoMem, just use default setting
-    // if not running with limited LMem bar config.
-    if (!m_limitedLMemBar)
+    // if not running with limited LMem bar config or not enabled HM.
+    if (!m_limitedLMemBar || !m_osInterface->osCpInterface->IsHMEnabled())
     {
         allocParams.Flags.bNotLockable = 0;
         allocParams.dwMemType = MOS_MEMPOOL_VIDEOMEMORY;

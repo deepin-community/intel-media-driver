@@ -27,7 +27,7 @@
 #ifndef __MOS_GPU_CONTEXT_NEXT_H__
 #define __MOS_GPU_CONTEXT_NEXT_H__
 
-#include "mos_os_next.h"
+#include "mos_os.h"
 
 class CmdBufMgrNext;
 class CommandBufferNext;
@@ -64,7 +64,8 @@ public:
     static class GpuContextNext* Create(
         const MOS_GPU_NODE gpuNode,
         CmdBufMgrNext      *cmdBufMgr,
-        GpuContextNext     *reusedContext);
+        GpuContextNext     *reusedContext,
+        OsContextNext      *osContext = nullptr);
 
     //!
     //! \brief    Clear gpu context
@@ -271,5 +272,6 @@ protected:
 
     //! \brief    VE attribute buffer
     MOS_CMD_BUF_ATTRI_VE m_bufAttriVe = {};
+MEDIA_CLASS_DEFINE_END(GpuContextNext)
 };
 #endif  // #ifndef __MOS_GPU_CONTEXT_NEXT_H__

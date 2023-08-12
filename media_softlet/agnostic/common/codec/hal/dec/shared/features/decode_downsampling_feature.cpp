@@ -35,8 +35,8 @@
 namespace decode
 {
 DecodeDownSamplingFeature::DecodeDownSamplingFeature(
-    MediaFeatureManager *featureManager, DecodeAllocator *allocator, CodechalHwInterface *hwInterface):
-    m_hwInterface(hwInterface), m_allocator(allocator)
+    MediaFeatureManager *featureManager, DecodeAllocator *allocator, PMOS_INTERFACE osInterface) :
+    m_osInterface(osInterface), m_allocator(allocator)
 {
     m_featureManager = featureManager;
 }
@@ -72,16 +72,11 @@ MOS_STATUS DecodeDownSamplingFeature::Init(void *setting)
 
     MOS_ZeroMemory(&m_outputSurface, sizeof(m_outputSurface));
 
+    DECODE_CHK_NULL(m_osInterface);
+    m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+
 #if (_DEBUG || _RELEASE_INTERNAL)
-    MOS_USER_FEATURE_VALUE_DATA userFeatureData;
-    PMOS_INTERFACE pOsInterface = m_hwInterface->GetOsInterface();
-    MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_DECODE_HISTOGRAM_DEBUG_ID,
-        &userFeatureData,
-        pOsInterface ? pOsInterface->pOsContext : nullptr);
-    m_histogramDebug = userFeatureData.u32Data ? true : false;
+    m_histogramDebug = ReadUserFeature(m_userSettingPtr, "Decode Histogram Debug", MediaUserSetting::Group::Sequence).Get<bool>();
 #endif
 
     return MOS_STATUS_SUCCESS;
@@ -152,8 +147,10 @@ MOS_STATUS DecodeDownSamplingFeature::Update(void *params)
 
         m_inputSurfaceRegion.m_x      = 0;
         m_inputSurfaceRegion.m_y      = 0;
-        m_inputSurfaceRegion.m_width  = m_basicFeature->m_width;
-        m_inputSurfaceRegion.m_height = m_basicFeature->m_height;
+        m_inputSurfaceRegion.m_width  = (procParams->m_inputSurfaceRegion.m_width == 0 || procParams->m_inputSurfaceRegion.m_width > m_basicFeature->m_width) ?
+            m_basicFeature->m_width : procParams->m_inputSurfaceRegion.m_width;
+        m_inputSurfaceRegion.m_height = (procParams->m_inputSurfaceRegion.m_height == 0 || procParams->m_inputSurfaceRegion.m_height > m_basicFeature->m_height) ?
+            m_basicFeature->m_height : procParams->m_inputSurfaceRegion.m_height;
     }
 
     // Histogram

@@ -26,9 +26,34 @@
 //!
 #ifndef __MOS_OS_VIRTUALENGINE_NEXT_H__
 #define __MOS_OS_VIRTUALENGINE_NEXT_H__
-#include "mos_os_virtualengine.h"
-#include "mos_os_next.h"
+
 #include "mos_os_virtualengine_specific.h"
+#include "mos_os.h"
+#define MOS_VE_HAVE_SECONDARY_CMDBUFFER 0x2
+
+typedef struct _MOS_VIRTUALENGINE_INIT_PARAMS
+{
+    bool bScalabilitySupported;
+
+    //below only valid when scalability is supported
+    bool    bFESeparateSubmit;  //!< for decode only
+    uint8_t ucMaxNumOfSdryCmdBufInOneFrame;
+    uint8_t ucMaxNumPipesInUse;
+    uint8_t ucNumOfSdryCmdBufSets;
+} MOS_VIRTUALENGINE_INIT_PARAMS, *PMOS_VIRTUALENGINE_INIT_PARAMS;
+
+typedef struct _MOS_VIRTUALENGINE_SET_PARAMS
+{
+    bool bSameEngineAsLastSubmission;
+    bool bNeedSyncWithPrevious;
+    bool bSFCInUse;
+
+    //below only valid when scalability is supported
+    bool         bScalableMode;
+    bool         bHaveFrontEndCmds;
+    uint8_t      ucScalablePipeNum;
+    MOS_RESOURCE veBatchBuffer[MOS_MAX_ENGINE_INSTANCE_PER_CLASS];
+} MOS_VIRTUALENGINE_SET_PARAMS, *PMOS_VIRTUALENGINE_SET_PARAMS;
 
 class MosVeInterface
 {
@@ -223,6 +248,7 @@ protected:
 
     MOS_VIRTUALENGINE_HINT_PARAMS ScalabilityHintParams = {};
     MOS_VIRTUALENGINE_HINT_PARAMS SinglePipeHintParams = {};
+MEDIA_CLASS_DEFINE_END(MosVeInterface)
 };
 
 #endif //__MOS_OS_VIRTUALENGINE_SCALABILITY_NEXT_H__

@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2021, Intel Corporation
+# Copyright (c) 2019-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -24,9 +24,14 @@ set(TMP_SOURCES_
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_ief.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_sfc_base.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vp_vebox_cmd_packet.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vp_vebox_cmd_packet_base.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_kernel_obj.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_cmd_packet.cpp
     ${CMAKE_CURRENT_LIST_DIR}/vp_kernel_config.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_fc_kernel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_vebox_hdr_3dlut_kernel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_vebox_hvs_kernel.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_hdr_kernel.cpp
 )
 
 set(TMP_HEADERS_
@@ -35,6 +40,7 @@ set(TMP_HEADERS_
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_ief.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_sfc_base.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_vebox_cmd_packet.h
+    ${CMAKE_CURRENT_LIST_DIR}/vp_vebox_cmd_packet_base.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_sfc_common.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_vebox_common.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_common.h
@@ -42,28 +48,27 @@ set(TMP_HEADERS_
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_kernel_obj.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_render_cmd_packet.h
     ${CMAKE_CURRENT_LIST_DIR}/vp_kernel_config.h
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_fc_kernel.h
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_fc_types.h
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_vebox_hdr_3dlut_kernel.h
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_vebox_hvs_kernel.h
+    ${CMAKE_CURRENT_LIST_DIR}/vp_render_hdr_kernel.h
 )
 
-set(SOURCES_
-    ${SOURCES_}
+set(SOFTLET_VP_SOURCES_
+    ${SOFTLET_VP_SOURCES_}
     ${TMP_SOURCES_}
 )
 
-set(HEADERS_
-    ${HEADERS_}
-    ${TMP_HEADERS_}
-)
-
-set(COMMON_SOURCES_
-    ${COMMON_SOURCES_}
-    ${TMP_SOURCES_}
-)
-
-set(COMMON_HEADERS_
-    ${COMMON_HEADERS_}
+set(SOFTLET_VP_HEADERS_
+    ${SOFTLET_VP_HEADERS_}
     ${TMP_HEADERS_}
 )
 
 source_group( VpHalNext\\Shared FILES ${TMP_SOURCES_} ${TMP_HEADERS_})
-
-media_add_curr_to_include_path()
+set(TMP_SOURCES_ "")
+set(TMP_HEADERS_ "")
+set (SOFTLET_VP_PRIVATE_INCLUDE_DIRS_
+    ${SOFTLET_VP_PRIVATE_INCLUDE_DIRS_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)

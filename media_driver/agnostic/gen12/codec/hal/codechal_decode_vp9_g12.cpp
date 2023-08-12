@@ -85,7 +85,7 @@ CodechalDecodeVp9G12::CodechalDecodeVp9G12(
 
     CODECHAL_DECODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, true, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
 
 #if (_DEBUG || _RELEASE_INTERNAL)
     MOS_USER_FEATURE_VALUE_DATA userFeatureData;
@@ -587,7 +587,7 @@ MOS_STATUS CodechalDecodeVp9G12::AddPicStateMhwCmds(
                 skipMask |= (1 << (i - 1));
             }
         }
-        CODECHAL_DECODE_NORMALMESSAGE("MMC skip masK is %d\n", skipMask);
+        CODECHAL_DECODE_NORMALMESSAGE("MMC skip mask is %d\n", skipMask);
         for (uint8_t i = 1; i < 4; i++)
         {
             //Set each ref surface state as MOS_MEMCOMP_MC to satisfy MmcEnable in AddHcpSurfaceCmd
@@ -798,12 +798,12 @@ MOS_STATUS CodechalDecodeVp9G12 :: DecodeStateLevel()
         }
         else
         {
-            CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StartPredicate(m_miInterface, cmdBufferInUse));
+            CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StartPredicate(m_osInterface, m_miInterface, cmdBufferInUse));
         }
     }
     else
     {
-        CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StartPredicate(m_miInterface, cmdBufferInUse));
+        CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StartPredicate(m_osInterface, m_miInterface, cmdBufferInUse));
     }
 
     if (CodecHalDecodeScalabilityIsScalableMode(m_scalabilityState))
@@ -1051,12 +1051,12 @@ MOS_STATUS CodechalDecodeVp9G12 :: DecodePrimitiveLevel()
         }
         else
         {
-            CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StopPredicate(m_miInterface, cmdBufferInUse));
+            CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StopPredicate(m_osInterface, m_miInterface, cmdBufferInUse));
         }
     }
     else
     {
-        CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StopPredicate(m_miInterface, cmdBufferInUse));
+        CODECHAL_DECODE_CHK_STATUS_RETURN(NullHW::StopPredicate(m_osInterface, m_miInterface, cmdBufferInUse));
     }
 
     MOS_ZeroMemory(&flushDwParams, sizeof(flushDwParams));

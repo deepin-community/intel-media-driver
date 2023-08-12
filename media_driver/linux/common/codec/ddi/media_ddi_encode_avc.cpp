@@ -271,8 +271,8 @@ VAStatus DdiEncodeAvc::ParseMiscParamRC(void *data)
     else
     {
         seqParams->MaxBitRate    = seqParams->TargetBitRate;
-        seqParams->MinBitRate    = (uint32_t)((uint64_t)seqParams->TargetBitRate * (2 * encMiscParamRC->target_percentage - 100) / 100);
         seqParams->TargetBitRate = (uint32_t)((uint64_t)seqParams->TargetBitRate * encMiscParamRC->target_percentage / 100);
+        seqParams->MinBitRate    = seqParams->TargetBitRate;
         vuiParam->cbr_flag       = 0x0;
 
         if (VA_RC_QVBR == m_encodeCtx->uiRCMethod)
@@ -406,7 +406,7 @@ VAStatus DdiEncodeAvc::ParseMiscParamEncQuality(void *data)
 
     DDI_CHK_NULL(seqParams, "nullptr seqParams", VA_STATUS_ERROR_INVALID_PARAMETER);
 
-    seqParams->bForcePanicModeControl = 1;
+    seqParams->bForcePanicModeControl = 0;
     seqParams->bPanicModeDisable = (uint8_t)vaEncMiscParamEncQuality->PanicModeDisable;
     picParams->UserFlags.bUseRawPicForRef = vaEncMiscParamEncQuality->useRawPicForRef;
     m_qcParams->skipCheckDisable            = vaEncMiscParamEncQuality->skipCheckDisable;
@@ -1146,16 +1146,28 @@ VAStatus DdiEncodeAvc::EncodeInCodecHal(uint32_t numSlices)
     encodeParams->pBSBuffer      = m_encodeCtx->pbsBuffer;
     encodeParams->pSlcHeaderData = (void *)m_encodeCtx->pSliceHeaderData;
 
-    CodechalEncoderState *encoder = dynamic_cast<CodechalEncoderState *>(m_encodeCtx->pCodecHal);
-    DDI_CHK_NULL(encoder, "nullptr Codechal encode", VA_STATUS_ERROR_INVALID_PARAMETER);
-
-    if (!encoder->m_mfeEnabled)
+    if (m_encodeCtx->pCodecHal->IsApogeiosEnabled())
     {
         status = m_encodeCtx->pCodecHal->Execute(encodeParams);
         if (MOS_STATUS_SUCCESS != status)
         {
             DDI_ASSERTMESSAGE("DDI:Failed in Codechal!");
             return VA_STATUS_ERROR_ENCODING_ERROR;
+        }
+    }
+    else
+    {
+        CodechalEncoderState *encoder = dynamic_cast<CodechalEncoderState *>(m_encodeCtx->pCodecHal);
+        DDI_CHK_NULL(encoder, "nullptr Codechal encode", VA_STATUS_ERROR_INVALID_PARAMETER);
+
+        if (!encoder->m_mfeEnabled)
+        {
+            status = m_encodeCtx->pCodecHal->Execute(encodeParams);
+            if (MOS_STATUS_SUCCESS != status)
+            {
+                DDI_ASSERTMESSAGE("DDI:Failed in Codechal!");
+                return VA_STATUS_ERROR_ENCODING_ERROR;
+            }
         }
     }
 
@@ -1506,8 +1518,11 @@ VAStatus DdiEncodeAvc::ParseSlcParams(
     DDI_CHK_NULL(m_encodeCtx, "nullptr m_encodeCtx", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(ptr, "nullptr ptr", VA_STATUS_ERROR_INVALID_PARAMETER);
 
-    CodechalEncoderState *encoder = dynamic_cast<CodechalEncoderState *>(m_encodeCtx->pCodecHal);
-    DDI_CHK_NULL(encoder, "nullptr codehal encoder", VA_STATUS_ERROR_INVALID_CONTEXT);
+    if (!m_encodeCtx->pCodecHal->IsApogeiosEnabled())
+    {
+        CodechalEncoderState *encoder = dynamic_cast<CodechalEncoderState *>(m_encodeCtx->pCodecHal);
+        DDI_CHK_NULL(encoder, "nullptr codechal encoder", VA_STATUS_ERROR_INVALID_CONTEXT);
+    }
     VAEncSliceParameterBufferH264 *slc       = (VAEncSliceParameterBufferH264 *)ptr;
     PCODEC_AVC_ENCODE_SLICE_PARAMS slcParams = (CODEC_AVC_ENCODE_SLICE_PARAMS *)m_encodeCtx->pSliceParams;
     PCODEC_AVC_ENCODE_PIC_PARAMS   picParams = (PCODEC_AVC_ENCODE_PIC_PARAMS)((uint8_t *)m_encodeCtx->pPicParams + slc->pic_parameter_set_id * sizeof(CODEC_AVC_ENCODE_PIC_PARAMS));

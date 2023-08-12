@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2021, Intel Corporation
+* Copyright (c) 2019-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -31,7 +31,7 @@
 #include "decode_av1_reference_frames.h"
 #include "decode_av1_temporal_buffers.h"
 #include "decode_av1_tile_coding.h"
-#include "mhw_vdbox_avp_interface.h"
+#include "mhw_vdbox_avp_itf.h"
 #include "decode_internal_target.h"
 
 namespace decode
@@ -42,12 +42,12 @@ namespace decode
         //!
         //! \brief  Av1BasicFeature constructor
         //!
-        Av1BasicFeature(DecodeAllocator *allocator, CodechalHwInterface *hwInterface) :
-                         DecodeBasicFeature(allocator, hwInterface)
+        Av1BasicFeature(DecodeAllocator *allocator, void *hwInterface, PMOS_INTERFACE osInterface) : 
+            DecodeBasicFeature(allocator, hwInterface, osInterface)
         {
-            if (hwInterface != nullptr)
+            if (osInterface != nullptr)
             {
-                m_osInterface  = hwInterface->GetOsInterface();
+                m_osInterface = osInterface;
             }
         };
 
@@ -75,7 +75,7 @@ namespace decode
         //! \return MOS_STATUS
         //!         MOS_STATUS_SUCCESS if success, else fail reason
         //!
-        MOS_STATUS ErrorDetectAndConceal();
+        virtual MOS_STATUS ErrorDetectAndConceal();
 
         //!
         //! \brief    Initialize one of AV1 Decode frame context buffers with default values
@@ -145,6 +145,9 @@ namespace decode
         bool                            m_singleKernelPerfFlag      = true;        //!< Defaut to capture whole kernel execution timing for perf
         PMOS_SURFACE                    m_fgInternalSurf            = nullptr;     //!< Internal film grain surface for AVP+FilmGrain+SFC case
         MOS_SURFACE                     m_fgOutputSurf              = {};          //!< Film Grain output surface from App
+#if (_DEBUG || _RELEASE_INTERNAL)
+        MOS_SURFACE m_fgOutputSurfList[DecodeBasicFeature::m_maxFrameIndex] = {};  //!< Brief film grain applied surfaces
+#endif
 
     protected:
         virtual MOS_STATUS SetRequiredBitstreamSize(uint32_t requiredSize) override;
@@ -152,6 +155,7 @@ namespace decode
         MOS_STATUS SetTileStructs();
         MOS_STATUS SetSegmentData(CodecAv1PicParams &picParams);
         MOS_STATUS GetDecodeTargetFormat(MOS_FORMAT &format);
+        virtual MOS_STATUS CheckProfileAndSubsampling();
 
         //!
         //! \brief    Calculate global motion params
@@ -160,8 +164,10 @@ namespace decode
         //!
         MOS_STATUS CalculateGlobalMotionParams();
 
-        MhwVdboxAvpInterface *m_avpInterface = nullptr;
-        PMOS_INTERFACE        m_osInterface  = nullptr;
+        std::shared_ptr<mhw::vdbox::avp::Itf> m_avpItf = nullptr;
+        PMOS_INTERFACE m_osInterface = nullptr;
+
+    MEDIA_CLASS_DEFINE_END(decode__Av1BasicFeature)
     };
 
 }  // namespace decode

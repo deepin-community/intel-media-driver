@@ -31,11 +31,11 @@
 #define __DECODE_AV1_FEATURE_MANAGER_G12_H__
 
 #include <vector>
-#include "decode_av1_feature_manager.h"
+#include "decode_av1_feature_manager_g12_base.h"
 
 namespace decode
 {
-    class DecodeAv1FeatureManagerG12 : public DecodeAv1FeatureManager
+    class DecodeAv1FeatureManagerG12 : public DecodeAv1FeatureManagerG12_Base
     {
     public:
         //!
@@ -49,8 +49,8 @@ namespace decode
         //! \param  [in] recycleBuf
         //!         Pointer to RecycleResource
         //!
-        DecodeAv1FeatureManagerG12(DecodeAllocator *allocator, CodechalHwInterface *hwInterface)
-            : DecodeAv1FeatureManager(allocator, hwInterface)
+        DecodeAv1FeatureManagerG12(DecodeAllocator *allocator, void *hwInterface, PMOS_INTERFACE osInterface)
+            : DecodeAv1FeatureManagerG12_Base(allocator, hwInterface, osInterface)
         {}
 
         //!
@@ -67,6 +67,7 @@ namespace decode
         //!         MOS_STATUS_SUCCESS if success, else fail reason
         //!
         virtual MOS_STATUS CreateFeatures(void *codecSettings);
+    MEDIA_CLASS_DEFINE_END(decode__DecodeAv1FeatureManagerG12)
     };
 
 }

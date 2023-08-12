@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2021, Intel Corporation
+* Copyright (c) 2017-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,6 +29,7 @@
 
 #include "mos_defs.h"
 #include "mos_os.h"
+#include "media_defs.h"
 #include <math.h>
 
 #define CODEC_MAX_NUM_REF_FRAME             16
@@ -57,6 +58,7 @@
 #define CODECHAL_NUM_UNCOMPRESSED_SURFACE_VP8   128
 #define CODECHAL_NUM_UNCOMPRESSED_SURFACE_HEVC  127 // 7 bits, 0x7f is invalid one
 #define CODECHAL_NUM_UNCOMPRESSED_SURFACE_VP9   128
+#define CODECHAL_NUM_UNCOMPRESSED_SURFACE_AV1   128
 
 #define WIDTH_IN_DW(w)  ((w + 0x3) >> 2)
 
@@ -76,6 +78,40 @@
 #define INVALID_TYPE    10 // keep at end
 
 #define CODECHAL_GET_ARRAY_LENGTH(a)           (sizeof(a) / sizeof(a[0]))
+#define CODECHAL_CACHELINE_SIZE                 64
+#define CODECHAL_PAGE_SIZE                      0x1000
+
+// Params for Huc
+#define HUC_DMEM_OFFSET_RTOS_GEMS                  0x2000
+#define VDBOX_HUC_VDENC_BRC_INIT_KERNEL_DESCRIPTOR 4
+
+#define CODEC_720P_MAX_PIC_WIDTH       1280
+#define CODEC_720P_MAX_PIC_HEIGHT      1280
+
+#define CODEC_MAX_PIC_WIDTH            1920
+#define CODEC_MAX_PIC_HEIGHT           1920                // Tablet usage in portrait mode, image resolution = 1200x1920, so change MAX_HEIGHT to 1920
+
+#define CODEC_2K_MAX_PIC_WIDTH         2048
+#define CODEC_2K_MAX_PIC_HEIGHT        2048
+
+#define CODEC_4K_VC1_MAX_PIC_WIDTH     3840
+#define CODEC_4K_VC1_MAX_PIC_HEIGHT    3840
+
+#define CODEC_4K_MAX_PIC_WIDTH         4096
+#define CODEC_4K_MAX_PIC_HEIGHT        4096
+
+#define CODEC_8K_MAX_PIC_WIDTH         8192
+#define CODEC_8K_MAX_PIC_HEIGHT        8192
+
+#define CODEC_16K_MAX_PIC_WIDTH        16384
+#define CODEC_12K_MAX_PIC_HEIGHT       12288
+#define CODEC_16K_MAX_PIC_HEIGHT       16384
+
+#define CODECHAL_MAD_BUFFER_SIZE                4 // buffer size is 4 bytes
+
+#define CODEC_128_MIN_PIC_WIDTH        128
+#define CODEC_96_MIN_PIC_HEIGHT        96
+#define CODEC_128_MIN_PIC_HEIGHT       128
 
 /*! \brief Flags for various picture properties.
 */
@@ -87,6 +123,7 @@ typedef enum _CODEC_PICTURE_FLAG
     PICTURE_INTERLACED_FRAME        = 0x08,
     PICTURE_SHORT_TERM_REFERENCE    = 0x10,
     PICTURE_LONG_TERM_REFERENCE     = 0x20,
+    PICTURE_RESERVED0               = 0x40,
     PICTURE_INVALID                 = 0x80,
     PICTURE_RESIZE                  = 0xF0,
     PICTURE_MAX_7BITS               = 0xFF
@@ -127,37 +164,6 @@ enum REFLIST
 };
 
 //!
-//! \enum     CODECHAL_STANDARD 
-//! \brief    Codec standard
-//!
-enum CODECHAL_STANDARD
-{
-    // MFX/MFL pipeline
-    CODECHAL_MPEG2      = 0,
-    CODECHAL_VC1        = 1,
-    CODECHAL_AVC        = 2,
-    CODECHAL_JPEG       = 3,
-    CODECHAL_RESERVED   = 4,    //formerly SVC
-    CODECHAL_VP8        = 5,
-    CODECHAL_UNDEFINED  = 9,
-
-    // Cenc Decode
-    CODECHAL_CENC       = 63,
-
-    // HCP pipeline
-    CODECHAL_HCP_BASE   = 64,
-    CODECHAL_HEVC       = CODECHAL_HCP_BASE,
-    CODECHAL_VP9        = CODECHAL_HCP_BASE + 1,
-
-    //AVP pipeline
-    CODECHAL_AVP_BASE   = CODECHAL_HCP_BASE + 2,
-    CODECHAL_AV1        = CODECHAL_AVP_BASE,
-
-    CODECHAL_RESERVED0,
-    CODECHAL_STANDARD_MAX
-};
-
-//!
 //! \enum    CODECHAL_MODE
 //! \brief   Mode requested (high level combination between CODEC_STANDARD and CODEC_FUCNTION).
 //!          Note: These modes are may be used for performance tagging. Be sure to notify tool owners if changing the definitions.
@@ -178,7 +184,8 @@ enum CODECHAL_MODE
     CODECHAL_DECODE_MODE_MVCVLD             = 11,   // Needed for CP. Not in use by Codec HAL.
     CODECHAL_DECODE_MODE_VP9VLD             = 12,
     CODECHAL_DECODE_MODE_CENC               = 13,   // Only for getting HuC-based DRM command size. Not an actual mode.
-    CODECHAL_NUM_DECODE_MODES               = 14,
+    CODECHAL_DECODE_MODE_RESERVED0          = 14,
+    CODECHAL_NUM_DECODE_MODES               = 15,
 
     CODECHAL_ENCODE_MODE_AVC                = 16,   // Must be a power of 2 to match perf report expectations
     CODECHAL_ENCODE_MODE_MPEG2              = 18,
@@ -186,12 +193,14 @@ enum CODECHAL_MODE
     CODECHAL_ENCODE_MODE_JPEG               = 20,
     CODECHAL_ENCODE_MODE_HEVC               = 22,
     CODECHAL_ENCODE_MODE_VP9                = 23,
-    CODECHAL_ENCODE_RESERVED_0              = 24,
+    CODECHAL_ENCODE_MODE_AV1                = 24,
     CODECHAL_NUM_ENCODE_MODES               = 8,
 
-    CODECHAL_NUM_MODES                      = 25,   // Use the value for the last encode mode to determine this
-    CODECHAL_UNSUPPORTED_MODE               = 25,
-    CODECHAL_MODE_MAX                       = 25
+    CODECHAL_Rsvd                           = 25,
+    CODECHAL_NUM_MODES                      = 26,   // Use the value for the last encode mode to determine this
+    CODECHAL_UNSUPPORTED_MODE               = 26,
+    CODECHAL_MODE_MAX                       = 26
+
 };
 
 // Slice group mask
@@ -310,6 +319,36 @@ struct _CODEC_REF_LIST
     };
 };
 
+//!
+//! \struct    CodechalHucStreamoutParams
+//! \brief     Codechal Huc streamout parameters
+//!
+struct CodechalHucStreamoutParams
+{
+    CODECHAL_MODE       mode;
+
+    // Indirect object addr command params
+    PMOS_RESOURCE       dataBuffer;
+    uint32_t            dataSize;              // 4k aligned
+    uint32_t            dataOffset;            // 4k aligned
+    PMOS_RESOURCE       streamOutObjectBuffer;
+    uint32_t            streamOutObjectSize;   // 4k aligned
+    uint32_t            streamOutObjectOffset; //4k aligned
+
+    // Stream object params
+    uint32_t            indStreamInLength;
+    uint32_t            inputRelativeOffset;
+    uint32_t            outputRelativeOffset;
+
+    // Segment Info
+    void               *segmentInfo;
+
+    // Indirect Security State
+    MOS_RESOURCE        hucIndState;
+    uint32_t            curIndEntriesNum;
+    uint32_t            curNumSegments;
+};
+
 /*! \brief High level codec functionality
 */
 typedef enum _CODECHAL_FUNCTION
@@ -372,14 +411,6 @@ typedef enum _CODECHAL_STATUS
     CODECHAL_STATUS_UNAVAILABLE = 3     //!< Indicates that the entry in the status reporting array was not used
 } CODECHAL_STATUS, *PCODECHAL_STATUS;
 
-typedef enum _CODECHAL_SCALING_MODE
-{
-    CODECHAL_SCALING_NEAREST = 0,
-    CODECHAL_SCALING_BILINEAR,
-    CODECHAL_SCALING_AVS,
-    CODECHAL_SCALING_ADV_QUALITY        // !< Advance Perf mode
-} CODECHAL_SCALING_MODE;
-
 typedef enum _CODECHAL_CHROMA_SITING_TYPE
 {
     CODECHAL_CHROMA_SITING_NONE             = 0x00,
@@ -400,6 +431,74 @@ typedef enum _CODECHAL_CHROMA_SUBSAMPLING
     CODECHAL_CHROMA_SUBSAMPLING_CENTER_LEFT,
     CODECHAL_CHROMA_SUBSAMPLING_BOTTOM_LEFT
 } CODECHAL_CHROMA_SUBSAMPLING;
+
+typedef enum _CODECHAL_MEDIA_STATE_TYPE
+{
+    CODECHAL_MEDIA_STATE_OLP                                = 0,
+    CODECHAL_MEDIA_STATE_ENC_NORMAL                         = 1,
+    CODECHAL_MEDIA_STATE_ENC_PERFORMANCE                    = 2,
+    CODECHAL_MEDIA_STATE_ENC_QUALITY                        = 3,
+    CODECHAL_MEDIA_STATE_ENC_I_FRAME_DIST                   = 4,
+    CODECHAL_MEDIA_STATE_32X_SCALING                        = 5,
+    CODECHAL_MEDIA_STATE_16X_SCALING                        = 6,
+    CODECHAL_MEDIA_STATE_4X_SCALING                         = 7,
+    CODECHAL_MEDIA_STATE_32X_ME                             = 8,
+    CODECHAL_MEDIA_STATE_16X_ME                             = 9,
+    CODECHAL_MEDIA_STATE_4X_ME                              = 10,
+    CODECHAL_MEDIA_STATE_BRC_INIT_RESET                     = 11,
+    CODECHAL_MEDIA_STATE_BRC_UPDATE                         = 12,
+    CODECHAL_MEDIA_STATE_BRC_BLOCK_COPY                     = 13,
+    CODECHAL_MEDIA_STATE_HYBRID_PAK_P1                      = 14,
+    CODECHAL_MEDIA_STATE_HYBRID_PAK_P2                      = 15,
+    CODECHAL_MEDIA_STATE_ENC_I_FRAME_CHROMA                 = 16,
+    CODECHAL_MEDIA_STATE_ENC_I_FRAME_LUMA                   = 17,
+    CODECHAL_MEDIA_STATE_MPU_FHB                            = 18,
+    CODECHAL_MEDIA_STATE_TPU_FHB                            = 19,
+    CODECHAL_MEDIA_STATE_PA_COPY                            = 20,
+    CODECHAL_MEDIA_STATE_PL2_COPY                           = 21,
+    CODECHAL_MEDIA_STATE_ENC_ADV                            = 22,
+    CODECHAL_MEDIA_STATE_2X_SCALING                         = 23,
+    CODECHAL_MEDIA_STATE_32x32_PU_MODE_DECISION             = 24,
+    CODECHAL_MEDIA_STATE_16x16_PU_SAD                       = 25,
+    CODECHAL_MEDIA_STATE_16x16_PU_MODE_DECISION             = 26,
+    CODECHAL_MEDIA_STATE_8x8_PU                             = 27,
+    CODECHAL_MEDIA_STATE_8x8_PU_FMODE                       = 28,
+    CODECHAL_MEDIA_STATE_32x32_B_INTRA_CHECK                = 29,
+    CODECHAL_MEDIA_STATE_HEVC_B_MBENC                       = 30,
+    CODECHAL_MEDIA_STATE_RESET_VLINE_STRIDE                 = 31,
+    CODECHAL_MEDIA_STATE_HEVC_B_PAK                         = 32,
+    CODECHAL_MEDIA_STATE_HEVC_BRC_LCU_UPDATE                = 33,
+    CODECHAL_MEDIA_STATE_ME_VDENC_STREAMIN                  = 34,
+    CODECHAL_MEDIA_STATE_VP9_ENC_I_32x32                    = 35,
+    CODECHAL_MEDIA_STATE_VP9_ENC_I_16x16                    = 36,
+    CODECHAL_MEDIA_STATE_VP9_ENC_P                          = 37,
+    CODECHAL_MEDIA_STATE_VP9_ENC_TX                         = 38,
+    CODECHAL_MEDIA_STATE_VP9_DYS                            = 39,
+    CODECHAL_MEDIA_STATE_VP9_PAK_LUMA_RECON                 = 40,
+    CODECHAL_MEDIA_STATE_VP9_PAK_CHROMA_RECON               = 41,
+    CODECHAL_MEDIA_STATE_VP9_PAK_DEBLOCK_MASK               = 42,
+    CODECHAL_MEDIA_STATE_VP9_PAK_LUMA_DEBLOCK               = 43,
+    CODECHAL_MEDIA_STATE_VP9_PAK_CHROMA_DEBLOCK             = 44,
+    CODECHAL_MEDIA_STATE_VP9_PAK_MC_PRED                    = 45,
+    CODECHAL_MEDIA_STATE_VP9_PAK_P_FRAME_LUMA_RECON         = 46,
+    CODECHAL_MEDIA_STATE_VP9_PAK_P_FRAME_LUMA_RECON_32x32   = 47,
+    CODECHAL_MEDIA_STATE_VP9_PAK_P_FRAME_CHROMA_RECON       = 48,
+    CODECHAL_MEDIA_STATE_VP9_PAK_P_FRAME_INTRA_LUMA_RECON   = 49,
+    CODECHAL_MEDIA_STATE_VP9_PAK_P_FRAME_INTRA_CHROMA_RECON = 50,
+    CODECHAL_MEDIA_STATE_PREPROC                            = 51,
+    CODECHAL_MEDIA_STATE_ENC_WP                             = 52,
+    CODECHAL_MEDIA_STATE_HEVC_I_MBENC                       = 53,
+    CODECHAL_MEDIA_STATE_CSC_DS_COPY                        = 54,
+    CODECHAL_MEDIA_STATE_2X_4X_SCALING                      = 55,
+    CODECHAL_MEDIA_STATE_HEVC_LCU64_B_MBENC                 = 56,
+    CODECHAL_MEDIA_STATE_MB_BRC_UPDATE                      = 57,
+    CODECHAL_MEDIA_STATE_STATIC_FRAME_DETECTION             = 58,
+    CODECHAL_MEDIA_STATE_HEVC_ROI                           = 59,
+    CODECHAL_MEDIA_STATE_SW_SCOREBOARD_INIT                 = 60,
+    CODECHAL_NUM_MEDIA_STATES                               = 61
+} CODECHAL_MEDIA_STATE_TYPE;
+C_ASSERT(CODECHAL_NUM_MEDIA_STATES == CODECHAL_MEDIA_STATE_SW_SCOREBOARD_INIT + 1);  //!< update this and add new entry in the default SSEU table for each platform()
+
 
 #define CODECHAL_OFFSETOF(TYPE, ELEMENT)                    ((size_t)&(((TYPE *)0)->ELEMENT))
 #define CODECHAL_OFFSETOF_IN_DW(TYPE, ELEMENT)              (CODECHAL_OFFSETOF(TYPE, ELEMENT) >> 2)
@@ -481,6 +580,19 @@ do                                                                              
 #define CodecHalDecode1stHcpDecPhaseInSinglePipeMode(hcpDecPhase, shortFormat)\
     ((hcpDecPhase == CodechalDecode::CodechalHcpDecodePhaseLegacyS2L && shortFormat)  || \
      (hcpDecPhase == CodechalDecode::CodechalHcpDecodePhaseLegacyLong && !shortFormat))
+
+//| HW parameter initializers
+const MOS_SYNC_PARAMS     g_cInitSyncParams =
+{
+    MOS_GPU_CONTEXT_RENDER,         // GpuContext
+    nullptr,                        // presSyncResource
+    1,                              // uiSemaphoreCount
+    0,                              // uiSemaphoreValue
+    0,                              // uiSemaphoreOffset
+    false,                          // bReadOnly
+    true,                           // bDisableDecodeSyncLock
+    false,                          // bDisableLockForTranscode
+};
 
 // ---------------------------
 // Functions
@@ -603,8 +715,8 @@ static __inline uint32_t CodecHal_GetStandardFromMode(uint32_t mode)
     case CODECHAL_DECODE_MODE_CENC:
         standard = CODECHAL_CENC;
         break;
-    case CODECHAL_ENCODE_RESERVED_0:
-        standard = CODECHAL_RESERVED0;
+    case CODECHAL_ENCODE_MODE_AV1:
+        standard = CODECHAL_AV1;
         break;
     default:
         standard = CODECHAL_UNDEFINED;

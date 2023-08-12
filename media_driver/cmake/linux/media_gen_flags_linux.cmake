@@ -18,6 +18,17 @@
 # ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 # OTHER DEALINGS IN THE SOFTWARE.
 
+# TODO: Remove this option when all Gen options can successfully disable
+#       driver code.
+# Status:
+#   GEN8:  Done
+#   GEN9:  Done
+#   GEN10: Done (TODO: Gen10-specific code)
+#   GEN11: Done
+#   GEN12: TODO
+option(ENABLE_REQUIRED_GEN_CODE "Make per-Gen options disable only media-kernels (not driver code) if driver code is known to be required for a successful build"
+    ON)
+
 option(GEN8 "Enable Gen8 support" ON)
 cmake_dependent_option(GEN8_BDW
     "Enabled BDW support (Gen8)" ON
@@ -46,7 +57,7 @@ cmake_dependent_option(GEN9_CMPV
     "Enabled CMPV support (Gen9)" ON
     "GEN9" OFF)
 
-option(GEN10 "Enable Gen10 support" ON)
+option(GEN10 "Enable Gen10 support" OFF)
 cmake_dependent_option(GEN10_CNL
     "Enabled CNL support (Gen10)" ON
     "GEN10" OFF)
@@ -80,6 +91,42 @@ cmake_dependent_option(GEN12_ADLS
 cmake_dependent_option(GEN12_ADLP
     "Enabled ADLP support (Gen12)" ON
     "GEN12_TGLLP" OFF)
+
+cmake_dependent_option(GEN12_ADLN
+    "Enabled ADLN support (Gen12)" ON
+    "GEN12_TGLLP" OFF)
+
+cmake_dependent_option(Xe_M
+    "Enabled support for Xehp_sdv+ platforms" ON
+    "GEN12" OFF)
+
+cmake_dependent_option(DG2
+    "Enabled DG2 support" ON
+    "Xe_M" OFF)
+
+# Using render IP name for kernel binary
+cmake_dependent_option(XE_HPG
+    "Enabled XE_HPG support" ON
+    "DG2" OFF)
+
+cmake_dependent_option(XEHP_SDV
+    "Enabled Xehp_sdv support" ON
+    "Xe_M" OFF)
+
+cmake_dependent_option(PVC
+    "Enabled PVC support" ON
+    "Xe_M;ENABLE_PRODUCTION_KMD" OFF)
+
+option(MTL "Enable MTL support" ON)
+
+if(MTL)
+    option(XE_LPM_PLUS_SUPPORT "Enable XE_LPM_PLUS support" ON)
+    option(XE_LPG "Enable XE_LPG support" ON)
+endif()
+
+if(MTL)
+    option(Xe_M_plus "Enable Xe_M_plus support" ON)
+endif()
 
 if(GEN8)
     add_definitions(-DIGFX_GEN8_SUPPORTED)
@@ -166,6 +213,33 @@ endif()
 
 if(GEN12_ADLP)
     add_definitions(-DIGFX_GEN12_ADLP_SUPPORTED)
+endif()
+
+if(GEN12_ADLN)
+    add_definitions(-DIGFX_GEN12_ADLN_SUPPORTED)
+endif()
+
+if(DG2)
+    add_definitions(-DIGFX_DG2_SUPPORTED)
+endif()
+
+if(PVC)
+    add_definitions(-DIGFX_PVC_SUPPORTED)
+    add_definitions(-DIGFX_PVC_CMFCPATCH_SUPPORTED)
+endif()
+
+if(XEHP_SDV)
+    add_definitions(-DIGFX_XEHP_SDV_SUPPORTED)
+    add_definitions(-DIGFX_XEHP_SDV_CMFCPATCH_SUPPORTED)
+endif()
+
+if(XE_HPG)
+    add_definitions(-DIGFX_XE_HPG_SUPPORTED)
+    add_definitions(-DIGFX_XE_HPG_CMFCPATCH_SUPPORTED)
+endif()
+
+if(MTL)
+    add_definitions(-DIGFX_MTL_SUPPORTED)
 endif()
 
 include(${MEDIA_EXT_CMAKE}/ext/linux/media_gen_flags_linux_ext.cmake OPTIONAL)

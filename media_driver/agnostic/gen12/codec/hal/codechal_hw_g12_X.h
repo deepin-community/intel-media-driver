@@ -30,6 +30,9 @@
 #include "mhw_mi_hwcmd_g12_X.h"
 #include "mhw_render_hwcmd_g12_X.h"
 #include "mhw_vdbox_avp_interface.h"
+#include "media_sfc_interface_legacy.h"
+
+#include "media_interfaces_mhw_next.h"
 
 //!
 //! \enum MediaStatesAv1FilmGrain
@@ -93,8 +96,8 @@ public:
     //! \return   MOS_STATUS
     //!           MOS_STATUS_SUCCESS if success, else fail reason
     //!
-    MOS_STATUS SetCacheabilitySettings(
-        MHW_MEMORY_OBJECT_CONTROL_PARAMS cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_END_CODEC]) override;
+    virtual MOS_STATUS SetCacheabilitySettings(
+            MHW_MEMORY_OBJECT_CONTROL_PARAMS cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_END_CODEC]) override;
 
     //!
     //! \brief    Calculates the maximum size for AVP picture level commands
@@ -191,6 +194,39 @@ public:
         CodechalSetting *settings) override;
 
     //!
+    //! \brief    Read AVP status for status report
+    //! \param    vdboxIndex
+    //!           [in] the vdbox index
+    //! \param    params
+    //!           [in] the parameters for AVP status read
+    //! \param    cmdBuffer
+    //!           [in, out] the command buffer
+    //! \return   MOS_STATUS
+    //!           MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    MOS_STATUS ReadAvpStatus(
+        MHW_VDBOX_NODE_IND           vdboxIndex,
+        const EncodeStatusReadParams &params,
+        PMOS_COMMAND_BUFFER          cmdBuffer);
+
+    //!
+    //! \brief    Read AVP specific image status for status report
+    //! \param    vdboxIndex
+    //!           [in] the vdbox index
+    //! \param    params
+    //!           [in] the parameters for AVP IMG status read
+    //! \param    cmdBuffer
+    //!           [in, out] the command buffer
+    //! \return   MOS_STATUS
+    //!           MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    MOS_STATUS ReadImageStatusForAvp(
+        MHW_VDBOX_NODE_IND           vdboxIndex,
+        const EncodeStatusReadParams &params,
+        PMOS_COMMAND_BUFFER          cmdBuffer);
+
+
+    //!
     //! \brief    Get film grain kernel info
     //! \details  Get kernel base and size
     //!
@@ -206,5 +242,16 @@ public:
     virtual MOS_STATUS GetFilmGrainKernelInfo(
                 uint8_t*    &kernelBase,
                 uint32_t    &kernelSize) override;
+
+private:
+    //!
+    //! \brief    Called by constructor
+    //!
+    void PrepareCmdSize(CODECHAL_FUNCTION codecFunction);
+
+    //!
+    //! \brief    Called by constructor
+    //!
+    void InternalInit(CODECHAL_FUNCTION codecFunction);
 };
 #endif // __CODECHAL_HW_G12_X_H__

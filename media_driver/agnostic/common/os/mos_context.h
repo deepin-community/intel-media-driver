@@ -83,15 +83,11 @@ public:
     //!
     void CleanUp();
 
-#if MOS_COMMAND_BUFFER_DUMP_SUPPORTED
     //!
-    //! \brief    Unified dump command buffer initialization
-    //! \details  check if dump command buffer was enabled and create the output directory
-    //! \return   MOS_STATUS
-    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //! \brief  Get the adapter info
+    //! \return value of m_adapterInfo
     //!
-    MOS_STATUS CommandBufferDumpInit(PMOS_CONTEXT mosCtx);
-#endif
+    ADAPTER_INFO *GetAdapterInfo() { return m_pAdapterInfo; };
 
     //!
     //! \brief  Get the skuTable
@@ -160,6 +156,9 @@ protected:
     //! \brief  Platform string including product family, chipset family, etc
     PLATFORM                        m_platformInfo = {};
 
+    //! \brief  adapter info
+    PADAPTER_INFO                   m_pAdapterInfo = nullptr;
+
     //! \brief  sku table
     MEDIA_FEATURE_TABLE             m_skuTable = {};
 
@@ -177,9 +176,6 @@ protected:
 
     //! \brief  Flag to mark whether the os context is valid
     bool                            m_osContextValid =  false;
-
-    //! \brief  Whether the current driver is of 64 bit
-    bool                            m_64bit = false;
 
     //! \brief  Whether or not need deallocation on exit
     bool                            m_deallocateOnExit = false;
@@ -216,20 +212,5 @@ protected:
 
     //! \brief   Component info
     MOS_COMPONENT                   m_component = COMPONENT_UNKNOWN;
-
-#if MOS_COMMAND_BUFFER_DUMP_SUPPORTED
-    //! \brief   Command buffer dump.
-    //! \brief   Flag to indicate if Dump command buffer is enabled
-    bool                            m_dumpCommandBuffer = false;
-
-    //! \brief   Indicates that the command buffer should be dumped to a file
-    bool                            m_dumpCommandBufferToFile = false;
-
-    //! \brief   Indicates that the command buffer should be dumped via MOS normal messages
-    bool                            m_dumpCommandBufferAsMessages = false;
-
-    //! \brief   Platform name - maximum 4 bytes length
-    char                            m_platformName[MOS_COMMAND_BUFFER_PLATFORM_LEN] = {0};
-#endif // MOS_COMMAND_BUFFER_DUMP_SUPPORTED
 };
 #endif // #ifndef __MOS_CONTEXT_H__

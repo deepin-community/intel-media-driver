@@ -32,7 +32,7 @@
 #include <vector>
 #include "decode_allocator.h"
 #include "decode_feature_manager.h"
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 #include "decode_av1_tile_coding.h"
 
 namespace decode
@@ -51,8 +51,8 @@ namespace decode
         //! \param  [in] recycleBuf
         //!         Pointer to RecycleResource
         //!
-        DecodeAv1FeatureManager(DecodeAllocator *allocator, CodechalHwInterface *hwInterface)
-            : DecodeFeatureManager(allocator, hwInterface)
+        DecodeAv1FeatureManager(DecodeAllocator *allocator, void *hwInterface, PMOS_INTERFACE osInterface)
+            : DecodeFeatureManager(allocator, hwInterface, osInterface)
         {}
 
         //!
@@ -69,7 +69,9 @@ namespace decode
         //! \return MOS_STATUS
         //!         MOS_STATUS_SUCCESS if success, else fail reason
         //!
-        virtual MOS_STATUS CreateFeatures(void *codecSettings);
+        virtual MOS_STATUS CreateFeatures(void *codecSettings) override;
+
+    MEDIA_CLASS_DEFINE_END(decode__DecodeAv1FeatureManager)
     };
 
 }

@@ -24,6 +24,7 @@
 
 #include "media_cmd_packet.h"
 #include "mhw_sfc.h"
+#include "mhw_vebox_itf.h"
 #include "vp_pipeline_common.h"
 #include "vp_allocator.h"
 #include "vp_packet_shared_context.h"
@@ -35,7 +36,8 @@ enum _PacketType
 {
     VP_PIPELINE_PACKET_UNINITIALIZED  = 0,
     VP_PIPELINE_PACKET_VEBOX,
-    VP_PIPELINE_PACKET_RENDER
+    VP_PIPELINE_PACKET_RENDER,
+    VP_PIPELINE_PACKET_COMPUTE
 };
 using PacketType           = _PacketType;
 
@@ -58,6 +60,23 @@ public:
         VP_SURFACE_SETTING                  &surfSetting,
         VP_EXECUTE_CAPS                     packetCaps) = 0;
 
+    virtual MOS_STATUS PacketInitForReuse(
+        VP_SURFACE         *inputSurface,
+        VP_SURFACE         *outputSurface,
+        VP_SURFACE         *previousSurface,
+        VP_SURFACE_SETTING &surfSetting,
+        VP_EXECUTE_CAPS     packetCaps)
+    {
+        VP_FUNC_CALL();
+        m_packetResourcesPrepared = false;
+        m_PacketCaps              = packetCaps;
+        VP_RENDER_CHK_STATUS_RETURN(SetUpdatedExecuteResource(inputSurface, outputSurface, previousSurface, surfSetting));
+
+        // need to update for DNDI case.
+        m_DNDIFirstFrame = (!m_PacketCaps.bRefValid && (m_PacketCaps.bDN || m_PacketCaps.bDI));
+        return MOS_STATUS_SUCCESS;
+    }
+
     virtual MOS_STATUS Prepare()
     {
         return MOS_STATUS_SUCCESS;
@@ -72,6 +91,16 @@ public:
     {
         return MOS_STATUS_SUCCESS;
     };
+
+    virtual MOS_STATUS SetUpdatedExecuteResource(
+        VP_SURFACE                          *inputSurface,
+        VP_SURFACE                          *outputSurface,
+        VP_SURFACE                          *previousSurface,
+        VP_SURFACE_SETTING &surfSetting)
+    {
+        VP_RENDER_ASSERTMESSAGE("Should not come here!");
+        return MOS_STATUS_SUCCESS;
+    }
 
     PacketType GetPacketId()
     {
@@ -93,6 +122,21 @@ public:
         return m_surfSetting;
     }
 
+    virtual bool ExtraProcessing()
+    {
+        return false;
+    }
+
+    MOS_STATUS UpdateFeature(SwFilterPipe *swFilter)
+    {
+        return MOS_STATUS_SUCCESS;
+    }
+
+    VP_EXECUTE_CAPS GetExecuteCaps()
+    {
+        return m_PacketCaps;
+    }
+
 protected:
     virtual MOS_STATUS VpCmdPacketInit();
     bool IsOutputPipeVebox()
@@ -100,21 +144,28 @@ protected:
         return m_PacketCaps.bVebox && !m_PacketCaps.bSFC && !m_PacketCaps.bRender;
     }
 
+    virtual MOS_STATUS SetMediaFrameTracking(RENDERHAL_GENERIC_PROLOG_PARAMS &genericPrologParams);
+
 public:
     // HW intface to access MHW
     PVP_MHWINTERFACE    m_hwInterface = nullptr;
     VP_EXECUTE_CAPS     m_PacketCaps = {};
     PVpAllocator        &m_allocator;
     VPMediaMemComp      *m_mmc = nullptr;
+    uint32_t            m_DNDIFirstFrame = 0;
+    uint32_t            m_veboxHeapCurState = 0;
 
 protected:
     PacketType                  m_PacketId = VP_PIPELINE_PACKET_UNINITIALIZED;
-    VP_PACKET_SHARED_CONTEXT*   m_packetSharedContext = nullptr;
+    VP_PACKET_SHARED_CONTEXT    *m_packetSharedContext    = nullptr;
     VP_SURFACE_SETTING          m_surfSetting;
-    bool                        m_packetResourcesdPrepared = false;
+    bool                        m_packetResourcesPrepared = false;
+    VpFeatureReport             *m_report                 = nullptr;
 
 private:
     MediaScalability *          m_scalability = nullptr;
+
+MEDIA_CLASS_DEFINE_END(vp__VpCmdPacket)
 };
 }
 #endif // !__VP_CMD_PACKET_H__

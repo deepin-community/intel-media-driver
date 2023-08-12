@@ -8,11 +8,12 @@ Build-Depends:
  debhelper-compat (= 13),
  dh-sequence-libva,
  cmake,
+ libdrm-dev,
  libigdgmm-dev (>= 21.1.1),
  libva-dev (>= 2.12),
  libx11-dev,
  pkg-config,
-Standards-Version: 4.6.0
+Standards-Version: 4.6.2
 Homepage: https://github.com/intel/media-driver
 Vcs-Browser: https://salsa.debian.org/multimedia-team/intel-media-driver
 Vcs-Git: https://salsa.debian.org/multimedia-team/intel-media-driver.git

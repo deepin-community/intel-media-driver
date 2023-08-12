@@ -1,5 +1,5 @@
 ﻿/*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,7 +29,6 @@
 #ifndef __MEDIA_MEM_COMPRESSION_H__
 #define __MEDIA_MEM_COMPRESSION_H__
 
-#include "mhw_render.h"
 #include "mos_os.h"
 #include "mos_os_specific.h"
 
@@ -39,7 +38,7 @@ public:
     //!
     //! \brief    Construct
     //!
-    MediaMemComp(PMOS_INTERFACE osInterface, MhwMiInterface *miInterface);
+    MediaMemComp(PMOS_INTERFACE osInterface);
 
     //!
     //! \brief    Deconstructor
@@ -95,9 +94,16 @@ public:
         MOS_MEMCOMP_STATE &mmcMode);
 
     //!
+    //! \brief    GetResourceMmcFormat
+    //!
+    virtual MOS_STATUS GetResourceMmcFormat(
+        PMOS_RESOURCE resource,
+        uint32_t    &mmcFormat);
+
+    //!
     //! \brief    IsMmcEnabled
     //!
-    bool IsMmcEnabled();
+    virtual bool IsMmcEnabled();
 
     //!
     //! \brief    DisableMmc
@@ -114,6 +120,11 @@ public:
     //!
     MOS_STATUS DecompressResource(PMOS_RESOURCE resource);
 
+    //!
+    //! \brief    IsCompressibleSurfaceAllocable
+    //!
+    bool IsCompressibelSurfaceSupported();
+
 protected:
     //!
     //! \brief    UpdateMmcInUseFeature
@@ -121,23 +132,20 @@ protected:
     virtual MOS_STATUS UpdateMmcInUseFeature();
 
 private:
-
-private:
     //!
     //! \brief    IsMmcFeatureEnabled
     //!
     bool IsMmcFeatureEnabled();
 
-public:
-    // Interface
-    PMOS_INTERFACE              m_osInterface = nullptr;
-    MhwMiInterface              *m_mhwMiInterface = nullptr;
-
 protected:
-    bool                        m_mmcEnabled = false;
-    bool                        m_bComponentMmcEnabled = false;
-    uint32_t                    m_mmcFeatureId = __MOS_USER_FEATURE_KEY_MAX_ID;
-    uint32_t                    m_mmcInuseFeatureId = __MOS_USER_FEATURE_KEY_MAX_ID;
+    PMOS_INTERFACE                m_osInterface = nullptr;
+    bool                          m_mmcEnabled = false;
+    bool                          m_isCompSurfAllocable = false;
+    bool                          m_bComponentMmcEnabled = false;
+    std::string                   m_mmcEnabledKey;
+    std::string                   m_mmcInUseKey;
+    MediaUserSettingSharedPtr     m_userSettingPtr = nullptr;
+MEDIA_CLASS_DEFINE_END(MediaMemComp)
 };
 
 #endif //__MEDIA_MEM_COMPRESSION_H__

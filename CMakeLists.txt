@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2020, Intel Corporation
+# Copyright (c) 2017-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -20,8 +20,12 @@
 
 cmake_minimum_required(VERSION 3.5)
 project(IntelMediaDriver)
+set(MEDIA_VERSION "23.2.3${MEDIA_VERSION_EXTRA}" CACHE STRING "" FORCE)
 
-set(MEDIA_VERSION "21.4.1${MEDIA_VERSION_EXTRA}" CACHE STRING "" FORCE)
+
+
+
+
 
 include(os_release_info.cmake)
 
@@ -52,10 +56,11 @@ cmake_dependent_option( BUILD_KERNELS
 option (BUILD_CMRTLIB "Build and Install cmrtlib together with media driver" ON)
 
 option (ENABLE_PRODUCTION_KMD "Enable Production KMD header files" OFF)
+option (ENABLE_XE_KMD "Enable XE KMD header files" ON)
 
 include(GNUInstallDirs)
 
-if (BUILD_CMRTLIB)
+if (BUILD_CMRTLIB AND NOT CMAKE_WDDM_LINUX)
     add_subdirectory(cmrtlib)
 endif()
 

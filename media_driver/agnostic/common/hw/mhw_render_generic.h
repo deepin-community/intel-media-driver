@@ -28,7 +28,7 @@
 #ifndef __MHW_RENDER_GENERIC_H__
 #define __MHW_RENDER_GENERIC_H__
 
-#include "mhw_render.h"
+#include "mhw_render_legacy.h"
 
 template <class TRenderCmds>
 class MhwRenderInterfaceGeneric : public MhwRenderInterface
@@ -50,12 +50,13 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
 
         typename TRenderCmds::PIPELINE_SELECT_CMD  cmd;
         cmd.DW0.PipelineSelection = (gpGpuPipe) ? cmd.PIPELINE_SELECTION_GPGPU : cmd.PIPELINE_SELECTION_MEDIA;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -66,6 +67,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -80,7 +82,6 @@ public:
         {
             cmd.DW1_2.GeneralStateBaseAddressModifyEnable    = true;
             cmd.DW12.GeneralStateBufferSizeModifyEnable      = true;
-            cmd.DW1_2.GeneralStateMemoryObjectControlState   = params->mocs4GeneralState;
             resourceParams.presResource                      = params->presGeneralState;
             resourceParams.dwOffset                          = 0;
             resourceParams.pdwCmd                            = cmd.DW1_2.Value;
@@ -89,10 +90,17 @@ public:
             // upper bound of the allocated resource will not be set
             resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
 
+            InitMocsParams(resourceParams, &cmd.DW1_2.Value[0], 5, 10);
+
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 m_osInterface,
                 cmdBuffer,
                 &resourceParams));
+
+            if (params->mocs4GeneralState != 0)
+            {
+                cmd.DW1_2.GeneralStateMemoryObjectControlState   = params->mocs4GeneralState;
+            }
 
             cmd.DW12.GeneralStateBufferSize = (params->dwGeneralStateSize + MHW_PAGE_SIZE - 1) / MHW_PAGE_SIZE;
         }
@@ -109,7 +117,6 @@ public:
             // command need to have the modify
             // bit associated with it set to 1.
             cmd.DW4_5.SurfaceStateBaseAddressModifyEnable    = true;
-            cmd.DW4_5.SurfaceStateMemoryObjectControlState   = params->mocs4SurfaceState;
             resourceParams.presResource                      = &cmdBuffer->OsResource;
             resourceParams.dwOffset                          = indirectStateOffset;
             resourceParams.pdwCmd                            = cmd.DW4_5.Value;
@@ -118,16 +125,22 @@ public:
             // upper bound of the allocated resource will not be set
             resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
 
+            InitMocsParams(resourceParams, &cmd.DW4_5.Value[0], 5, 10);
+
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 m_osInterface,
                 cmdBuffer,
                 &resourceParams));
+
+            if (params->mocs4SurfaceState != 0)
+            {
+                cmd.DW4_5.SurfaceStateMemoryObjectControlState = params->mocs4SurfaceState;
+            }
         }
 
         if (params->presDynamicState)
         {
             cmd.DW6_7.DynamicStateBaseAddressModifyEnable    = true;
-            cmd.DW6_7.DynamicStateMemoryObjectControlState   = params->mocs4DynamicState;
             cmd.DW13.DynamicStateBufferSizeModifyEnable      = true;
             resourceParams.presResource                      = params->presDynamicState;
             resourceParams.dwOffset                          = 0;
@@ -138,10 +151,17 @@ public:
             // upper bound of the allocated resource will not be set
             resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
 
+            InitMocsParams(resourceParams, &cmd.DW6_7.Value[0], 5, 10);
+
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 m_osInterface,
                 cmdBuffer,
                 &resourceParams));
+
+            if (params->mocs4DynamicState != 0)
+            {
+                cmd.DW6_7.DynamicStateMemoryObjectControlState = params->mocs4DynamicState;
+            }
 
             cmd.DW13.DynamicStateBufferSize                  = (params->dwDynamicStateSize + MHW_PAGE_SIZE - 1) / MHW_PAGE_SIZE;
 
@@ -152,7 +172,6 @@ public:
         if (params->presIndirectObjectBuffer)
         {
             cmd.DW8_9.IndirectObjectBaseAddressModifyEnable     = true;
-            cmd.DW8_9.IndirectObjectMemoryObjectControlState    = params->mocs4IndirectObjectBuffer;
             cmd.DW14.IndirectObjectBufferSizeModifyEnable       = true;
             resourceParams.presResource                         = params->presIndirectObjectBuffer;
             resourceParams.dwOffset                             = 0;
@@ -162,10 +181,17 @@ public:
             // upper bound of the allocated resource will not be set
             resourceParams.dwUpperBoundLocationOffsetFromCmd    = 0;
 
+            InitMocsParams(resourceParams, &cmd.DW8_9.Value[0], 5, 10);
+
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 m_osInterface,
                 cmdBuffer,
                 &resourceParams));
+
+            if (params->mocs4IndirectObjectBuffer != 0)
+            {
+                cmd.DW8_9.IndirectObjectMemoryObjectControlState = params->mocs4IndirectObjectBuffer;
+            }
 
             cmd.DW14.IndirectObjectBufferSize                   = (params->dwIndirectObjectBufferSize + MHW_PAGE_SIZE - 1) / MHW_PAGE_SIZE;
         }
@@ -174,7 +200,6 @@ public:
         {
             cmd.DW10_11.InstructionBaseAddressModifyEnable   = true;
             cmd.DW15.InstructionBufferSizeModifyEnable       = true;
-            cmd.DW10_11.InstructionMemoryObjectControlState  = params->mocs4InstructionCache;
             resourceParams.presResource                      = params->presInstructionBuffer;
             resourceParams.dwOffset                          = 0;
             resourceParams.pdwCmd                            = cmd.DW10_11.Value;
@@ -183,10 +208,17 @@ public:
             // upper bound of the allocated resource will not be set
             resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
 
+            InitMocsParams(resourceParams, &cmd.DW10_11.Value[0], 5, 10);
+
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 m_osInterface,
                 cmdBuffer,
                 &resourceParams));
+
+            if (params->mocs4InstructionCache != 0)
+            {
+                cmd.DW10_11.InstructionMemoryObjectControlState = params->mocs4InstructionCache;
+            }
 
             cmd.DW15.InstructionBufferSize = (params->dwInstructionBufferSize + MHW_PAGE_SIZE - 1) / MHW_PAGE_SIZE;
         }
@@ -194,7 +226,7 @@ public:
         // stateless dataport access
         cmd.DW3.StatelessDataPortAccessMemoryObjectControlState = params->mocs4StatelessDataport;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -205,6 +237,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -266,7 +299,7 @@ public:
             return MOS_STATUS_INVALID_PARAMETER;
         }
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -277,6 +310,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -305,7 +339,7 @@ public:
         // Send the command only if there is data to load
         if (cmd.DW2.CurbeTotalDataLength)
         {
-            MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+            MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
         }
         else
         {
@@ -321,6 +355,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
         MHW_MI_CHK_NULL(m_stateHeapInterface->pStateHeapInterface);
@@ -348,7 +383,7 @@ public:
 
         if (cmd.DW2.InterfaceDescriptorTotalLength > 0)
         {
-            MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+            MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
         }
         else
         {
@@ -389,6 +424,7 @@ public:
         cmd.DW3.IndirectDataStartAddress    = params->dwIndirectDataStartAddress;
 
         MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(
+            m_osInterface,
             cmdBuffer,
             batchBuffer,
             &cmd,
@@ -397,6 +433,7 @@ public:
         if (params->pInlineData && params->dwInlineDataSize > 0)
         {
             MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(
+                m_osInterface,
                 cmdBuffer,
                 batchBuffer,
                 params->pInlineData,
@@ -412,6 +449,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -448,13 +486,13 @@ public:
         cmd.DW16.GlobalInnerLoopUnitX       = params->GlobalInnerLoopUnit.x;
         cmd.DW16.GlobalInnerLoopUnitY       = params->GlobalInnerLoopUnit.y;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         if (params->pInlineData)
         {
             if (params->InlineDataLength > 0)
             {
-                MHW_MI_CHK_STATUS(Mos_AddCommand(
+                MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(
                     cmdBuffer,
                     params->pInlineData,
                     params->InlineDataLength));
@@ -474,6 +512,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -501,7 +540,7 @@ public:
         cmd.DW13.RightExecutionMask             = 0xffffffff;
         cmd.DW14.BottomExecutionMask            = 0xffffffff;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -511,6 +550,7 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -519,7 +559,7 @@ public:
         cmd.DW2.ChromakeyLowValue   = params->dwLow;
         cmd.DW3.ChromakeyHighValue  = params->dwHigh;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -530,13 +570,14 @@ public:
     {
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
         typename TRenderCmds::STATE_SIP_CMD cmd;
         cmd.DW1_2.SystemInstructionPointer = (uint64_t)(params->dwSipBase >> 4);
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize))
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize))
 
         return MOS_STATUS_SUCCESS;
     }

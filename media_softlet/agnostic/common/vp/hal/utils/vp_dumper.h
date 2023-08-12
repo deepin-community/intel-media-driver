@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -33,14 +33,12 @@
 
 #include "renderhal.h"
 #include "mhw_vebox.h"
-#include "vphal_common.h"       // Common interfaces and structures
+#include "vp_common.h"       // Common interfaces and structures
 #include "vp_pipeline_common.h"
 
 #if !defined(LINUX) && !defined(ANDROID)
 #include "UmdStateSeparation.h"
 #endif
-
-
 
 #define MAX_NAME_LEN            100
 
@@ -64,8 +62,8 @@
 #define VP_SURFACE_DUMP(                                       \
     debuginterface, surf, frameCntr, layerCntr, loc)           \
     if (debuginterface)                                        \
-        VP_DEBUG_CHK_STATUS(debuginterface->DumpVpSurface(     \
-           surf, frameCntr, layerCntr, loc));
+        debuginterface->DumpVpSurface(                         \
+           surf, frameCntr, layerCntr, loc);
 
 //------------------------------------------------------------------------------
 // Dump array of surfaces
@@ -275,17 +273,26 @@ public:
         bool                        bNoDecompWhenLock,
         uint8_t*                    pData);
 
+    virtual MOS_STATUS CopyThenLockResources(
+        PMOS_INTERFACE               pOsInterface,
+        PVPHAL_SURFACE               pSurface,
+        bool                         hasAuxSurf,
+        bool                         enableAuxDump,
+        PMOS_LOCK_PARAMS             pLockFlags,
+        PMOS_RESOURCE                pLockedResource,
+        VPHAL_SURF_DUMP_SURFACE_DEF *pPlanes,
+        uint32_t                    *pdwNumPlanes,
+        uint32_t                    *pdwSize,
+        uint8_t                     *&pData,
+        const char                  *psPathPrefix = nullptr,
+        uint64_t                     iCounter = 0);
 
     VPHAL_SURF_DUMP_SPEC    m_dumpSpec;
 
     //!
     //! \brief    VpSurfaceDumper constuctor
     //!
-    VpSurfaceDumper(PMOS_INTERFACE pOsInterface)
-    :   m_dumpSpec(),
-        m_osInterface(pOsInterface)
-    {
-    };
+    VpSurfaceDumper(PMOS_INTERFACE pOsInterface);
 
     //!
     //! \brief    VpSurfaceDumper destuctor
@@ -350,6 +357,8 @@ public:
     //!
     void GetSurfaceDumpSpec();
 
+    void GetSurfaceDumpSpecForVPSolo(VPHAL_SURF_DUMP_SPEC * pDumpSpec, MediaUserSetting::Value outValue);
+
 protected:
     //!
     //! \brief    Convert a string to loc enum type
@@ -390,6 +399,7 @@ protected:
     PMOS_INTERFACE              m_osInterface;
     char                        m_dumpPrefix[MAX_PATH];     // Called frequently, so avoid repeated stack resizing with member data
     char                        m_dumpLoc[MAX_PATH];        // to avoid recursive call from diff owner but sharing the same buffer
+    MediaUserSettingSharedPtr   m_userSettingPtr = nullptr; // userSettingInstance
 
 private:
 
@@ -427,6 +437,7 @@ private:
         uint32_t*                           pdwSize,
         bool                                auxEnable,
         bool                                isDeswizzled);
+
     //!
     //! \brief    Parse dump location
     //! \details  Take dump location strings and break down into individual post-
@@ -461,6 +472,8 @@ private:
     //!
     char* WhitespaceTrim(
         char*                       ptr);
+
+MEDIA_CLASS_DEFINE_END(VpSurfaceDumper)
 };
 
 
@@ -476,11 +489,7 @@ public:
     //!
     //! \brief    VphalParameterDumper constuctor
     //!
-    VpParameterDumper(PMOS_INTERFACE pOsInterface)
-    :   m_dumpSpec(),
-        m_osInterface(pOsInterface)
-    {
-    };
+    VpParameterDumper(PMOS_INTERFACE pOsInterface);
 
     //!
     //! \brief    Get VPHAL Parameters Dump Spec
@@ -592,7 +601,7 @@ protected:
 
 private:
     PMOS_INTERFACE  m_osInterface;
-
+    MediaUserSettingSharedPtr m_userSettingPtr = nullptr;  // userSettingInstance
     //!
     //! \brief    Gets Debug Whole Format String
     //! \param    [in] format
@@ -610,6 +619,15 @@ private:
     //!           String of the tile type
     //!
     const char * GetTileTypeStr(MOS_TILE_TYPE tile_type);
+
+    //!
+    //! \brief    Gets Debug Tile Mode String
+    //! \param    [in] tilemode
+    //!           Mos tile mode
+    //! \return   const char *
+    //!           String of the tile type
+    //!
+    const char *GetTileModeGMMStr(MOS_TILE_MODE_GMM tile_mode);
 
     //!
     //! \brief    Gets Debug Surface Type String
@@ -691,6 +709,17 @@ private:
     //!           String of vphal denoise level
     //!
     const char * GetDenoiseModeStr(VPHAL_NOISELEVEL noise_level);
+
+    //!
+    //! \brief    Gets Debug HVS Denoise Mode String
+    //! \param    [in] hvs denoise mode
+    //!           vphal hvsdn mode
+    //! \return   const char *
+    //!           String of vphal hvs denoise mode
+    //!
+    const char *GetHVSDenoiseModeStr(VPHAL_HVSDN_MODE hvs_dn_mode);
+
+MEDIA_CLASS_DEFINE_END(VpParameterDumper)
 };
 
 //!
@@ -795,6 +824,7 @@ public:
     static const char * GetFormatStr(
         MOS_FORMAT                format);
 
+MEDIA_CLASS_DEFINE_END(VpDumperTool)
 };
 #endif // (_DEBUG || _RELEASE_INTERNAL)
 

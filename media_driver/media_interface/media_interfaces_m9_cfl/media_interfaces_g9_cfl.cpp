@@ -27,41 +27,40 @@
 #include "media_interfaces_g9_kbl.h"
 #include "media_interfaces_g9_cfl.h"
 
-extern template class MediaInterfacesFactory<MhwInterfaces>;
-extern template class MediaInterfacesFactory<MmdDevice>;
-extern template class MediaInterfacesFactory<CodechalDevice>;
-extern template class MediaInterfacesFactory<CMHalDevice>;
-extern template class MediaInterfacesFactory<MosUtilDevice>;
-extern template class MediaInterfacesFactory<VphalDevice>;
-extern template class MediaInterfacesFactory<RenderHalDevice>;
-extern template class MediaInterfacesFactory<Nv12ToP010Device>;
-extern template class MediaInterfacesFactory<DecodeHistogramDevice>;
+extern template class MediaFactory<uint32_t, MhwInterfaces>;
+extern template class MediaFactory<uint32_t, MmdDevice>;
+extern template class MediaFactory<uint32_t, CodechalDevice>;
+extern template class MediaFactory<uint32_t, CMHalDevice>;
+extern template class MediaFactory<uint32_t, VphalDevice>;
+extern template class MediaFactory<uint32_t, RenderHalDevice>;
+extern template class MediaFactory<uint32_t, Nv12ToP010Device>;
+extern template class MediaFactory<uint32_t, DecodeHistogramDevice>;
 
 static bool cflRegisteredVphal =
-    MediaInterfacesFactory<VphalDevice>::
-    RegisterHal<VphalInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, VphalDevice>::
+    Register<VphalInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
 
 static bool cflRegisteredMhw =
-    MediaInterfacesFactory<MhwInterfaces>::
-    RegisterHal<MhwInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, MhwInterfaces>::
+    Register<MhwInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
 
-#ifdef _MMC_SUPPORTED
+#if defined(_MMC_SUPPORTED) && defined(ENABLE_KERNELS) && !defined(_FULL_OPEN_SOURCE)
 static bool cflRegisteredMmd =
-    MediaInterfacesFactory<MmdDevice>::
-    RegisterHal<MmdDeviceG9Kbl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, MmdDevice>::
+    Register<MmdDeviceG9Kbl>((uint32_t)IGFX_COFFEELAKE);
 #endif
 
 static bool cflRegisteredNv12ToP010 =
-    MediaInterfacesFactory<Nv12ToP010Device>::
-    RegisterHal<Nv12ToP010DeviceG9Kbl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, Nv12ToP010Device>::
+    Register<Nv12ToP010DeviceG9Kbl>((uint32_t)IGFX_COFFEELAKE);
 
 static bool cflRegisteredCodecHal =
-    MediaInterfacesFactory<CodechalDevice>::
-    RegisterHal<CodechalInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, CodechalDevice>::
+    Register<CodechalInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
 
 static bool cflRegisteredCMHal =
-    MediaInterfacesFactory<CMHalDevice>::
-    RegisterHal<CMHalInterfacesG9Cfl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, CMHalDevice>::
+    Register<CMHalInterfacesG9Cfl>((uint32_t)IGFX_COFFEELAKE);
 
 #define PLATFORM_INTEL_CFL 17
 #define GENX_SKL           5
@@ -107,17 +106,13 @@ MOS_STATUS CMHalInterfacesG9Cfl::Initialize(CM_HAL_STATE *pCmState)
     return MOS_STATUS_SUCCESS;
 }
 
-static bool cflRegisteredMosUtil =
-    MediaInterfacesFactory<MosUtilDevice>::
-    RegisterHal<MosUtilDeviceG9Kbl>((uint32_t)IGFX_COFFEELAKE);
-
 static bool cflRegisteredRenderHal =
-    MediaInterfacesFactory<RenderHalDevice>::
-    RegisterHal<RenderHalInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
+    MediaFactory<uint32_t, RenderHalDevice>::
+    Register<RenderHalInterfacesG9Kbl>((uint32_t)IGFX_COFFEELAKE);
 
 static bool cflRegisteredDecodeHistogram =
-MediaInterfacesFactory<DecodeHistogramDevice>::
-RegisterHal<DecodeHistogramDeviceG9Cfl>((uint32_t)IGFX_COFFEELAKE);
+MediaFactory<uint32_t, DecodeHistogramDevice>::
+Register<DecodeHistogramDeviceG9Cfl>((uint32_t)IGFX_COFFEELAKE);
 
 MOS_STATUS DecodeHistogramDeviceG9Cfl::Initialize(
     CodechalHwInterface       *hwInterface,
@@ -135,6 +130,9 @@ MOS_STATUS DecodeHistogramDeviceG9Cfl::Initialize(
 }
 
 #define IP_VERSION_M9_0 0x0900
+static bool cflRegisteredHwInfo =
+    MediaFactory<uint32_t, MediaInterfacesHwInfoDevice>::Register<MediaInterfacesHwInfoDeviceG9Cfl>((uint32_t)IGFX_COFFEELAKE);
+
 MOS_STATUS MediaInterfacesHwInfoDeviceG9Cfl::Initialize(PLATFORM platform)
 {
     m_hwInfo.SetDeviceInfo(IP_VERSION_M9_0, platform.usRevId);

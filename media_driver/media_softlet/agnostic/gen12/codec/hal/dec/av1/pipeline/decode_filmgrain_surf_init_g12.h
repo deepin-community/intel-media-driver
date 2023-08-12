@@ -42,7 +42,7 @@ public:
     //!
     //! \brief  AV1 Decode Film Grain constructor
     //!
-    FilmGrainSurfaceInit(DecodePipeline *pipeline, MediaTask *task, uint8_t numVdbox);
+    FilmGrainSurfaceInit(DecodePipeline *pipeline, MediaTask *task, uint8_t numVdbox, CodechalHwInterface* hwInterface);
 
     //!
     //! \brief  AV1 Decode Film Grain destructor
@@ -100,6 +100,8 @@ private:
     DecodeAllocator *       m_allocator            = nullptr;        //!< Resource allocator
     HucCopyPktG12 *         m_surfInitPkt          = nullptr;        //!< Surface init packet
     PMOS_BUFFER             m_tmpInitBuf           = nullptr;        //!< Init buffer filled with 0
+    CodechalHwInterface    *m_hwInterface          = nullptr;
+    MEDIA_CLASS_DEFINE_END(decode__FilmGrainSurfaceInit)
 };
 }  // namespace decode
 #endif

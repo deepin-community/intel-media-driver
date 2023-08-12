@@ -28,11 +28,12 @@
 
 #include "bitstream_writer.h"
 #include "codec_def_common_encode.h"
+#include "codec_def_encode.h"
+#include "codec_def_encode_hevc.h"
 #include <exception>
 #include <array>
 #include <numeric>
 #include <algorithm>
-#include "codechal_encoder_base.h"
 
 enum NALU_TYPE
 {
@@ -578,6 +579,8 @@ public:
         if (bThrow)
             throw std::logic_error(msg);
     }
+
+MEDIA_CLASS_DEFINE_END(HevcHeaderPacker)
 };
 
 #endif

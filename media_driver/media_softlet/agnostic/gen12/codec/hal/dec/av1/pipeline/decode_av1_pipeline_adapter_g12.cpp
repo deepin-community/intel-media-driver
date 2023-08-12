@@ -30,10 +30,11 @@
 DecodeAv1PipelineAdapterG12::DecodeAv1PipelineAdapterG12(
     CodechalHwInterface *   hwInterface,
     CodechalDebugInterface *debugInterface)
-    : DecodePipelineAdapter(hwInterface, debugInterface)
+    : DecodePipelineAdapter(*hwInterface, debugInterface)
 {
-    DECODE_ASSERT(m_osInterface != nullptr);
-    Mos_CheckVirtualEngineSupported(m_osInterface, true, true);
+    DECODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
+    m_hwInterface = hwInterface;
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
     Mos_SetVirtualEngineSupported(m_osInterface, true);
 }
 
@@ -122,6 +123,13 @@ MOS_GPU_CONTEXT DecodeAv1PipelineAdapterG12::GetDecodeContext()
     DECODE_FUNC_CALL();
 
     return m_decoder->GetDecodeContext();
+}
+
+GPU_CONTEXT_HANDLE DecodeAv1PipelineAdapterG12::GetDecodeContextHandle()
+{
+    DECODE_FUNC_CALL();
+
+    return m_decoder->GetDecodeContextHandle();
 }
 
 #ifdef _DECODE_PROCESSING_SUPPORTED

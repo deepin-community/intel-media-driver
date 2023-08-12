@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -24,115 +24,28 @@
 //! \brief     Common interface used in MOS LINUX OS
 //! \details   Common interface used in MOS LINUX OS
 //!
-#include "mos_os_specific_next.h"
 
-#include "mos_os_next.h"
-#include "mos_util_debug_next.h"
 #include <unistd.h>
 #include <dlfcn.h>
-#include "hwinfo_linux.h"
-#include "media_fourcc.h"
 #include <stdlib.h>
-
-#include "mos_graphicsresource_next.h"
-#include "mos_context_specific.h"
-#include "mos_gpucontext_specific.h"
-#include "mos_gpucontextmgr_next.h"
-
-#if MOS_MEDIASOLO_SUPPORTED
-#include "mos_os_solo.h"
-#endif // MOS_MEDIASOLO_SUPPORTED
-#include "mos_solo_generic.h"
 
 #include <sys/ipc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
 #include <sys/types.h>
 
-GpuContextSpecific * MosOsSpecificNext::Linux_GetGpuContext(PMOS_INTERFACE pOsInterface, uint32_t gpuContextHandle)
-{
-    MOS_OS_FUNCTION_ENTER;
+#include "mos_os_next.h"
+#include "mos_util_debug.h"
+#include "hwinfo_linux.h"
+#include "media_fourcc.h"
+#include "mos_graphicsresource_next.h"
+#include "mos_gpucontext_specific_next.h"
+#include "mos_gpucontextmgr_next.h"
 
-    if (pOsInterface == nullptr || pOsInterface->osContextPtr == nullptr)
-    {
-        MOS_OS_ASSERTMESSAGE("invalid input parameters!");
-        return nullptr;
-    }
-
-    auto osCxtSpecific = static_cast<OsContextSpecific *>(pOsInterface->osContextPtr);
-
-    auto gpuContextMgr = osCxtSpecific->GetGpuContextMgr();
-    if (gpuContextMgr == nullptr)
-    {
-        MOS_OS_ASSERTMESSAGE("m_gpuContextMgr cannot be nullptr");
-        return nullptr;
-    }
-
-    auto gpuContext = gpuContextMgr->GetGpuContext(gpuContextHandle);
-    if (gpuContext == nullptr)
-    {
-        MOS_OS_ASSERTMESSAGE("cannot find the gpuContext corresponding to the active gpuContextHandle");
-        return nullptr;
-    }
-
-    auto gpuContextSpecific = static_cast<GpuContextSpecific *>(gpuContext);
-
-    return gpuContextSpecific;
-}
-
-GMM_RESOURCE_FORMAT MosOsSpecificNext::Mos_Specific_ConvertMosFmtToGmmFmt(
-    MOS_FORMAT format)
-{
-    switch (format)
-    {
-        case Format_Buffer      : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_Buffer_2D   : return GMM_FORMAT_GENERIC_8BIT;               // matching size as format
-        case Format_L8          : return GMM_FORMAT_GENERIC_8BIT;               // matching size as format
-        case Format_L16         : return GMM_FORMAT_L16_UNORM_TYPE;
-        case Format_STMM        : return GMM_FORMAT_R8_UNORM_TYPE;              // matching size as format
-        case Format_AI44        : return GMM_FORMAT_GENERIC_8BIT;               // matching size as format
-        case Format_IA44        : return GMM_FORMAT_GENERIC_8BIT;               // matching size as format
-        case Format_R5G6B5      : return GMM_FORMAT_B5G6R5_UNORM_TYPE;
-        case Format_R8G8B8      : return GMM_FORMAT_R8G8B8_UNORM;
-        case Format_X8R8G8B8    : return GMM_FORMAT_B8G8R8X8_UNORM_TYPE;
-        case Format_A8R8G8B8    : return GMM_FORMAT_B8G8R8A8_UNORM_TYPE;
-        case Format_X8B8G8R8    : return GMM_FORMAT_R8G8B8X8_UNORM_TYPE;
-        case Format_A8B8G8R8    : return GMM_FORMAT_R8G8B8A8_UNORM_TYPE;
-        case Format_R32F        : return GMM_FORMAT_R32_FLOAT_TYPE;
-        case Format_V8U8        : return GMM_FORMAT_GENERIC_16BIT;              // matching size as format
-        case Format_YUY2        : return GMM_FORMAT_YUY2;
-        case Format_UYVY        : return GMM_FORMAT_UYVY;
-        case Format_P8          : return GMM_FORMAT_RENDER_8BIT_TYPE;           // matching size as format
-        case Format_A8          : return GMM_FORMAT_A8_UNORM_TYPE;
-        case Format_AYUV        : return GMM_FORMAT_R8G8B8A8_UINT_TYPE;
-        case Format_NV12        : return GMM_FORMAT_NV12_TYPE;
-        case Format_NV21        : return GMM_FORMAT_NV21_TYPE;
-        case Format_YV12        : return GMM_FORMAT_YV12_TYPE;
-        case Format_R32U        : return GMM_FORMAT_R32_UINT_TYPE;
-        case Format_R32S        : return GMM_FORMAT_R32_SINT_TYPE;
-        case Format_RAW         : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_444P        : return GMM_FORMAT_MFX_JPEG_YUV444_TYPE;
-        case Format_422H        : return GMM_FORMAT_MFX_JPEG_YUV422H_TYPE;
-        case Format_422V        : return GMM_FORMAT_MFX_JPEG_YUV422V_TYPE;
-        case Format_IMC3        : return GMM_FORMAT_IMC3_TYPE;
-        case Format_411P        : return GMM_FORMAT_MFX_JPEG_YUV411_TYPE;
-        case Format_411R        : return GMM_FORMAT_MFX_JPEG_YUV411R_TYPE;
-        case Format_RGBP        : return GMM_FORMAT_RGBP_TYPE;
-        case Format_BGRP        : return GMM_FORMAT_BGRP_TYPE;
-        case Format_R8U         : return GMM_FORMAT_R8_UINT_TYPE;
-        case Format_R8UN        : return GMM_FORMAT_R8_UNORM;
-        case Format_R16U        : return GMM_FORMAT_R16_UINT_TYPE;
-        case Format_R16F        : return GMM_FORMAT_R16_FLOAT_TYPE;
-        case Format_P010        : return GMM_FORMAT_P010_TYPE;
-        case Format_P016        : return GMM_FORMAT_P016_TYPE;
-        case Format_Y216        : return GMM_FORMAT_Y216_TYPE;
-        case Format_Y416        : return GMM_FORMAT_Y416_TYPE;
-        case Format_P208        : return GMM_FORMAT_P208_TYPE;
-        case Format_Y210        : return GMM_FORMAT_Y210_TYPE;
-        case Format_Y410        : return GMM_FORMAT_Y410_TYPE;
-        default                 : return GMM_FORMAT_INVALID;
-    }
-}
+#if MOS_MEDIASOLO_SUPPORTED
+#include "mos_os_solo.h"
+#endif // MOS_MEDIASOLO_SUPPORTED
+#include "mos_solo_generic.h"
 
 
 #if MOS_COMMAND_RESINFO_DUMP_SUPPORTED
@@ -162,8 +75,9 @@ void GpuCmdResInfoDumpNext::StoreCmdResPtr(PMOS_INTERFACE pOsInterface, const vo
     {
         return;
     }
-    auto gpuContext = MosOsSpecificNext::Linux_GetGpuContext(pOsInterface, pOsInterface->CurrentGpuContextHandle);
-    MOS_OS_ASSERT(gpuContext != nullptr);
+
+    auto gpuContext = MosInterface::GetGpuContext(pOsInterface->osStreamState, pOsInterface->CurrentGpuContextHandle);
+    MOS_OS_CHK_NULL_NO_STATUS_RETURN(gpuContext);
 
     auto pResTmp1 = (const MOS_RESOURCE *)(pRes);
     auto pResTmp2 = (GpuCmdResInfo *)MOS_AllocMemory(sizeof(GpuCmdResInfo));
@@ -198,8 +112,8 @@ void GpuCmdResInfoDumpNext::ClearCmdResPtrs(PMOS_INTERFACE pOsInterface) const
         return;
     }
 
-    auto gpuContext = MosOsSpecificNext::Linux_GetGpuContext(pOsInterface, pOsInterface->CurrentGpuContextHandle);
-    MOS_OS_ASSERT(gpuContext != nullptr);
+    auto gpuContext = MosInterface::GetGpuContext(pOsInterface->osStreamState, pOsInterface->CurrentGpuContextHandle);
+    MOS_OS_CHK_NULL_NO_STATUS_RETURN(gpuContext);
 
     auto &cmdResInfoPtrs = gpuContext->GetCmdResPtrs();
 
@@ -244,8 +158,13 @@ void GpuCmdResInfoDumpNext::Dump(const void *cmdResInfoPtr, std::ofstream &outpu
 
 const std::vector<const void *> &GpuCmdResInfoDumpNext::GetCmdResPtrs(PMOS_INTERFACE pOsInterface) const
 {
-    const auto *gpuContext = MosOsSpecificNext::Linux_GetGpuContext(pOsInterface, pOsInterface->CurrentGpuContextHandle);
-    MOS_OS_ASSERT(gpuContext != nullptr);
+    const auto *gpuContext = MosInterface::GetGpuContext(pOsInterface->osStreamState, pOsInterface->CurrentGpuContextHandle);
+    if(gpuContext == nullptr)
+    {
+        MOS_OS_ASSERTMESSAGE("gpuContext == nullptr");
+        static const std::vector<const void*> dummyVec = {nullptr};
+        return dummyVec;
+    }
 
     return gpuContext->GetCmdResPtrs();
 }

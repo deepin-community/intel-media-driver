@@ -30,15 +30,16 @@
 #define __MEDIA_DECODE_MEM_COMPRESSION_H__
 
 #include "media_mem_compression.h"
-#include "codechal_utilities.h"
+#include "codec_hw_next.h"
 
+class MhwMiInterface;
 class DecodeMemComp : public MediaMemComp
 {
 public:
     //!
     //! \brief    Construct
     //!
-    DecodeMemComp(CodechalHwInterface *hwInterface);
+    DecodeMemComp(CodechalHwInterfaceNext *hwInterface, PMOS_INTERFACE osInterface = nullptr);
 
     //!
     //! \brief    Copy constructor
@@ -49,6 +50,11 @@ public:
     //! \brief    Copy assignment operator
     //!
     DecodeMemComp& operator=(const DecodeMemComp&) = delete;
+
+    //!
+    //! \brief    IsMmcEnabled
+    //!
+    bool IsMmcEnabled();
 
     //!
     //! \brief    Destructor
@@ -67,9 +73,12 @@ protected:
     uint32_t                m_compressModeId  = 0;
 #endif
 
-    void InitDecodeMmc(CodechalHwInterface *hwInterface);
+    void InitDecodeMmc(CodechalHwInterfaceNext *hwInterface);
 
     bool m_mmcEnabledForDecode = false;  //!< Indicate if mmc is enabled for decode
+    std::shared_ptr<mhw::mi::Itf> m_miItf; //!< Point to MI interface
+
+MEDIA_CLASS_DEFINE_END(DecodeMemComp)
 };
 
 #endif //__MEDIA_DECODE_MEM_COMPRESSION_H__

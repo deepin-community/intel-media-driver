@@ -60,6 +60,7 @@ public:
 
 protected:
     virtual bool IsVeboxInputFormatSupport(PVPHAL_SURFACE pSrcSurface);
+MEDIA_CLASS_DEFINE_END(vp__VPFeatureManagerM12_0)
 };
 
 }

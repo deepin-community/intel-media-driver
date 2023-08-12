@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2011-2020, Intel Corporation
+* Copyright (c) 2011-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -25,21 +25,7 @@
 //!
 #include "codechal_hw.h"
 #include "codechal_setting.h"
-
-#define VDBOX_HUC_VDENC_BRC_INIT_KERNEL_DESCRIPTOR 4
-
-//| HW parameter initializers
-const MOS_SYNC_PARAMS     g_cInitSyncParams =
-{
-    MOS_GPU_CONTEXT_RENDER,         // GpuContext
-    nullptr,                        // presSyncResource
-    1,                              // uiSemaphoreCount
-    0,                              // uiSemaphoreValue
-    0,                              // uiSemaphoreOffset
-    false,                          // bReadOnly
-    true,                           // bDisableDecodeSyncLock
-    false,                          // bDisableLockForTranscode
-};
+#include "mos_os_cp_interface_specific.h"
 
 CodechalHwInterface::CodechalHwInterface(
     PMOS_INTERFACE    osInterface,
@@ -48,10 +34,6 @@ CodechalHwInterface::CodechalHwInterface(
     bool              disableScalability)
 {
     CODECHAL_HW_FUNCTION_ENTER;
-
-#if MHW_HWCMDPARSER_ENABLED
-    mhw::HwcmdParser::InitInstance(osInterface);
-#endif
 
     // Basic intialization
     m_osInterface = osInterface;
@@ -84,51 +66,15 @@ CodechalHwInterface::CodechalHwInterface(
     MOS_ZeroMemory(&m_conditionalBbEndDummy, sizeof(m_conditionalBbEndDummy));
 }
 
-#ifdef IGFX_MHW_INTERFACES_NEXT_SUPPORT
-CodechalHwInterface::CodechalHwInterface(
+CodechalHwInterface *CodechalHwInterface::Create(
     PMOS_INTERFACE    osInterface,
     CODECHAL_FUNCTION codecFunction,
-    MhwInterfacesNext *mhwInterfacesNext,
+    MhwInterfaces     *mhwInterfaces,
     bool              disableScalability)
 {
-    CODECHAL_HW_FUNCTION_ENTER;
-
-#if MHW_HWCMDPARSER_ENABLED
-    mhw::HwcmdParser::InitInstance(osInterface);
-#endif
-
-    // Basic intialization
-    // Basic intialization
-    m_osInterface = osInterface;
-
-    m_osInterface->pfnGetPlatform(m_osInterface, &m_platform);
-
-    m_skuTable = m_osInterface->pfnGetSkuTable(m_osInterface);
-    m_waTable = m_osInterface->pfnGetWaTable(m_osInterface);
-
-    CODECHAL_HW_ASSERT(m_skuTable);
-    CODECHAL_HW_ASSERT(m_waTable);
-
-    // Init sub-interfaces
-    m_cpInterface = mhwInterfacesNext->m_cpInterface;
-    m_mfxInterface = mhwInterfacesNext->m_mfxInterface;
-    m_hcpInterface = mhwInterfacesNext->m_hcpInterface;
-    m_hucInterface = mhwInterfacesNext->m_hucInterface;
-    m_vdencInterface = mhwInterfacesNext->m_vdencInterface;
-    m_veboxInterface = mhwInterfacesNext->m_veboxInterface;
-    m_sfcInterface = mhwInterfacesNext->m_sfcInterface;
-    m_miInterface = mhwInterfacesNext->m_miInterface;
-    m_renderInterface = mhwInterfacesNext->m_renderInterface;
-
-    m_stateHeapSettings = MHW_STATE_HEAP_SETTINGS();
-    m_disableScalability = disableScalability;
-
-    MOS_ZeroMemory(&m_hucDmemDummy, sizeof(m_hucDmemDummy));
-    MOS_ZeroMemory(&m_dummyStreamIn, sizeof(m_dummyStreamIn));
-    MOS_ZeroMemory(&m_dummyStreamOut, sizeof(m_dummyStreamOut));
-    MOS_ZeroMemory(&m_conditionalBbEndDummy, sizeof(m_conditionalBbEndDummy));
+    return MOS_New(CodechalHwInterface,
+        osInterface, codecFunction, mhwInterfaces, disableScalability);
 }
-#endif
 
 MOS_STATUS CodechalHwInterface::SetCacheabilitySettings(
     MHW_MEMORY_OBJECT_CONTROL_PARAMS cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_END_CODEC])
@@ -560,7 +506,7 @@ MOS_STATUS CodechalHwInterface::GetVdencStateCommandsDataSize(
         commands += m_miInterface->GetMiFlushDwCmdSize();
         commands += m_miInterface->GetMiBatchBufferStartCmdSize();
     }
-    else if (standard == CODECHAL_RESERVED0)
+    else if (standard == CODECHAL_AV1)
     {
         commands += m_miInterface->GetMiFlushDwCmdSize();
         commands += m_miInterface->GetMiBatchBufferStartCmdSize();
@@ -659,7 +605,9 @@ MOS_STATUS CodechalHwInterface::GetStreamoutCommandSize(
 MOS_STATUS CodechalHwInterface::Initialize(
     CodechalSetting *settings)
 {
-    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+    MOS_STATUS                  eStatus         = MOS_STATUS_SUCCESS;
+    MediaUserSettingSharedPtr   userSettingPtr  = nullptr;
+    uint32_t                    value           = 0;
 
     CODECHAL_HW_FUNCTION_ENTER;
 
@@ -685,19 +633,19 @@ MOS_STATUS CodechalHwInterface::Initialize(
     }
 
 #if (_DEBUG || _RELEASE_INTERNAL)
-    MOS_USER_FEATURE_VALUE_DATA userFeatureData;
-    MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_SSEU_SETTING_OVERRIDE_ID,
-        &userFeatureData,
-        m_osInterface->pOsContext);
-    if (userFeatureData.i32Data != 0xDEADC0DE)
+    userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    ReadUserSettingForDebug(
+        userSettingPtr,
+        value,
+        __MEDIA_USER_FEATURE_VALUE_SSEU_SETTING_OVERRIDE,
+        MediaUserSetting::Group::Device);
+
+    if (value != 0xDEADC0DE)
     {
-        m_numRequestedEuSlicesOverride = userFeatureData.i32Data & 0xFF;              // Bits 0-7
-        m_numRequestedSubSlicesOverride = (userFeatureData.i32Data >> 8) & 0xFF;      // Bits 8-15
-        m_numRequestedEusOverride = (userFeatureData.i32Data >> 16) & 0xFFFF;         // Bits 16-31
-        m_numRequestedOverride = true;
+        m_numRequestedEuSlicesOverride  = value & 0xFF;              // Bits 0-7
+        m_numRequestedSubSlicesOverride = (value >> 8) & 0xFF;      // Bits 8-15
+        m_numRequestedEusOverride       = (value >> 16) & 0xFFFF;         // Bits 16-31
+        m_numRequestedOverride          = true;
     }
 #endif
 
@@ -736,6 +684,7 @@ MOS_STATUS CodechalHwInterface::AddVdencBrcImgBuffer(
 
     uint32_t mfxAvcImgStateSize = m_mfxInterface->GetAvcImgStateSize();
     uint32_t vdencAvcCostStateSize = m_vdencInterface->GetVdencAvcCostStateSize();
+    uint32_t vdencCmd3Size = m_vdencInterface->GetVdencCmd3Size();
     uint32_t vdencAvcImgStateSize = m_vdencInterface->GetVdencAvcImgStateSize();
 
     MOS_ZeroMemory(&lockFlags, sizeof(MOS_LOCK_PARAMS));
@@ -748,7 +697,7 @@ MOS_STATUS CodechalHwInterface::AddVdencBrcImgBuffer(
 
     MOS_ZeroMemory(&constructedCmdBuf, sizeof(MOS_COMMAND_BUFFER));
     constructedCmdBuf.pCmdBase = (uint32_t *)data;
-    constructedCmdBuf.iRemaining = mfxAvcImgStateSize + vdencAvcCostStateSize + vdencAvcImgStateSize;
+    constructedCmdBuf.iRemaining = mfxAvcImgStateSize + vdencAvcCostStateSize + vdencCmd3Size + vdencAvcImgStateSize;
 
     // Set MFX_IMAGE_STATE command
     constructedCmdBuf.pCmdPtr = (uint32_t *)data;
@@ -758,12 +707,16 @@ MOS_STATUS CodechalHwInterface::AddVdencBrcImgBuffer(
     // Set VDENC_COST_STATE command
     constructedCmdBuf.pCmdPtr = (uint32_t *)(data + mfxAvcImgStateSize);
     constructedCmdBuf.iOffset = mfxAvcImgStateSize;
-    m_vdencInterface->AddVdencAvcCostStateCmd(&constructedCmdBuf, nullptr, params);
+    MHW_MI_CHK_STATUS(m_vdencInterface->AddVdencAvcCostStateCmd(&constructedCmdBuf, nullptr, params));
 
-    // Set VDENC_IMAGE_STATE command
+    // Set VDENC_CMD3 command
     constructedCmdBuf.pCmdPtr = (uint32_t *)(data + mfxAvcImgStateSize + vdencAvcCostStateSize);
     constructedCmdBuf.iOffset = mfxAvcImgStateSize + vdencAvcCostStateSize;
+    MHW_MI_CHK_STATUS(m_vdencInterface->AddVdencCmd3Cmd(&constructedCmdBuf, nullptr, params));
 
+    // Set VDENC_IMAGE_STATE command
+    constructedCmdBuf.pCmdPtr = (uint32_t *)(data + mfxAvcImgStateSize + vdencAvcCostStateSize + vdencCmd3Size);
+    constructedCmdBuf.iOffset = mfxAvcImgStateSize + vdencAvcCostStateSize + vdencCmd3Size;
     MHW_MI_CHK_STATUS(m_vdencInterface->AddVdencImgStateCmd(&constructedCmdBuf, nullptr, params));
 
     // Add batch buffer end insertion flag
@@ -1567,7 +1520,7 @@ MOS_STATUS CodechalHwInterface::ReadMfcStatus(
 
     CODECHAL_HW_CHK_NULL_RETURN(cmdBuffer);
 
-    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > m_mfxInterface->GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
+    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
     MmioRegistersMfx* mmioRegisters = SelectVdboxAndGetMmioRegister(vdboxIndex, cmdBuffer);
 
     MHW_MI_FLUSH_DW_PARAMS flushDwParams;
@@ -1640,7 +1593,7 @@ MOS_STATUS CodechalHwInterface::ReadImageStatus(
 
     CODECHAL_HW_CHK_NULL_RETURN(cmdBuffer);
 
-    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > m_mfxInterface->GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
+    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
     MmioRegistersMfx* mmioRegisters = SelectVdboxAndGetMmioRegister(vdboxIndex, cmdBuffer);
 
     MOS_RESOURCE *osResource;
@@ -1717,7 +1670,7 @@ MOS_STATUS CodechalHwInterface::ReadBrcPakStatistics(
     CODECHAL_HW_CHK_NULL_RETURN(cmdBuffer);
     CODECHAL_HW_CHK_NULL_RETURN(params.presBrcPakStatisticBuffer);
 
-    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > m_mfxInterface->GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
+    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
     MmioRegistersMfx* mmioRegisters = SelectVdboxAndGetMmioRegister(vdboxIndex, cmdBuffer);
 
     MHW_MI_STORE_REGISTER_MEM_PARAMS miStoreRegMemParams;
@@ -1763,7 +1716,7 @@ MOS_STATUS CodechalHwInterface::ReadHcpStatus(
 
     CODECHAL_HW_CHK_NULL_RETURN(cmdBuffer);
 
-    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > m_mfxInterface->GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
+    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > GetMaxVdboxIndex()), "ERROR - vdbox index exceed the maximum");
 
     MHW_MI_FLUSH_DW_PARAMS flushDwParams;
     MOS_ZeroMemory(&flushDwParams, sizeof(flushDwParams));
@@ -1804,7 +1757,7 @@ MOS_STATUS CodechalHwInterface::ReadImageStatusForHcp(
 
     CODECHAL_HW_CHK_NULL_RETURN(cmdBuffer);
 
-    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > m_mfxInterface->GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
+    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
 
     auto mmioRegisters = m_hcpInterface->GetMmioRegisters(vdboxIndex);
 
@@ -1840,7 +1793,7 @@ MOS_STATUS CodechalHwInterface::ReadBrcPakStatisticsForHcp(
     CODECHAL_HW_CHK_NULL_RETURN(cmdBuffer);
     CODECHAL_HW_CHK_NULL_RETURN(params.presBrcPakStatisticBuffer);
 
-    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > m_mfxInterface->GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
+    CODECHAL_HW_CHK_COND_RETURN((vdboxIndex > GetMaxVdboxIndex()),"ERROR - vdbox index exceed the maximum");
 
     auto mmioRegisters = m_hcpInterface->GetMmioRegisters(vdboxIndex);
 

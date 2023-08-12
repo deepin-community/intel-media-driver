@@ -38,7 +38,7 @@ public:
     VpScalingFilter(
         PVP_MHWINTERFACE vpMhwInterface);
 
-    ~VpScalingFilter()
+    virtual ~VpScalingFilter()
     {
         Destroy();
     };
@@ -78,6 +78,14 @@ protected:
         uint32_t                   *pdwSurfaceWidth,
         uint32_t                   *pdwSurfaceHeight);
 
+    MOS_STATUS SetTargetRectangle(
+        uint16_t iWidthAlignUnit,
+        uint16_t iHeightAlignUnit,
+        uint16_t oWidthAlignUnit,
+        uint16_t oHeightAlignUnit,
+        float    scaleX,
+        float    scaleY);
+
     //!
     //! \brief    Get width and height align unit of input format
     //! \param    [in] format
@@ -97,7 +105,8 @@ protected:
         bool                    bOutput,
         bool                    bRotateNeeded,
         uint16_t                &widthAlignUnit,
-        uint16_t                &heightAlignUnit);
+        uint16_t                &heightAlignUnit,
+        bool                    isInterlacedScaling);
 
     //!
     //! \brief    check whether colorfill enable or not
@@ -135,7 +144,7 @@ protected:
     MOS_STATUS SetRectSurfaceAlignment(bool isOutputSurf, uint32_t &width, uint32_t &height, RECT &rcSrc, RECT &rcDst);
 
 protected:
-    FeatureParamScaling          m_scalingParams;
+    FeatureParamScaling          m_scalingParams     = {};
     SFC_SCALING_PARAMS          *m_sfcScalingParams  = nullptr;
     float                        fScaleX             = 0.0f;
     float                        fScaleY             = 0.0f;
@@ -150,6 +159,8 @@ protected:
     bool                         m_bVdbox            = false;
     CODECHAL_STANDARD            m_codecStandard     = CODECHAL_STANDARD_MAX;
     CodecDecodeJpegChromaType    m_jpegChromaType    = jpegYUV400;
+
+MEDIA_CLASS_DEFINE_END(vp__VpScalingFilter)
 };
 
 struct HW_FILTER_SCALING_PARAM : public HW_FILTER_PARAM
@@ -169,6 +180,8 @@ public:
 private:
 
     HW_FILTER_SCALING_PARAM         m_Params = {};
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilterScalingParameter)
 };
 
 class VpSfcScalingParameter : public VpPacketParameter
@@ -183,6 +196,8 @@ private:
     MOS_STATUS Initialize(HW_FILTER_SCALING_PARAM &params);
 
     VpScalingFilter m_ScalingFilter;
+
+MEDIA_CLASS_DEFINE_END(vp__VpSfcScalingParameter)
 };
 
 class PolicySfcScalingHandler : public PolicyFeatureHandler
@@ -204,10 +219,16 @@ public:
         HW_FILTER_SCALING_PARAM* scalingParam = (HW_FILTER_SCALING_PARAM*)(&param);
         return VpSfcScalingParameter::Create(*scalingParam);
     }
+
+    virtual MOS_STATUS UpdateUnusedFeature(VP_EXECUTE_CAPS caps, SwFilter &feature, SwFilterPipe &featurePipe, SwFilterPipe &executePipe, bool isInputPipe, int index);
+
+
 private:
     uint32_t Get1stPassScaledSize(uint32_t input, uint32_t output, bool is2PassNeeded);
 
     PacketParamFactory<VpSfcScalingParameter> m_PacketParamFactory;
+
+MEDIA_CLASS_DEFINE_END(vp__PolicySfcScalingHandler)
 };
 
 class PolicySfcColorFillHandler : public PolicyFeatureHandler
@@ -235,6 +256,8 @@ public:
     {
         return nullptr;
     }
+
+MEDIA_CLASS_DEFINE_END(vp__PolicySfcColorFillHandler)
 };
 
 class PolicySfcAlphaHandler : public PolicyFeatureHandler
@@ -262,6 +285,8 @@ public:
     {
         return nullptr;
     }
+
+MEDIA_CLASS_DEFINE_END(vp__PolicySfcAlphaHandler)
 };
 }
 #endif // !__VP_SCALING_FILTER_H__

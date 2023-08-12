@@ -26,7 +26,7 @@
 #ifndef __DECODE_AV1_PIPELINE_G12_H__
 #define __DECODE_AV1_PIPELINE_G12_H__
 
-#include "decode_av1_pipeline.h"
+#include "decode_av1_pipeline_g12_base.h"
 #include "codec_def_decode_av1.h"
 #include "decode_filmgrain_surf_init_g12.h"
 #include "decode_filmgrain_presubpipeline_g12.h"
@@ -39,7 +39,7 @@ namespace decode
     class FilmGrainPreSubPipeline;
     class FilmGrainPostSubPipeline;
     class Av1DecodePktG12;
-    class Av1PipelineG12 : public Av1Pipeline, public HucPacketCreatorG12
+    class Av1PipelineG12 : public Av1PipelineG12_Base, public HucPacketCreatorG12
     {
     public:
         //!
@@ -140,10 +140,12 @@ namespace decode
         FilmGrainSurfaceInit        *m_fgCoordValSurfInitPipeline = nullptr;
         FilmGrainPreSubPipeline     *m_fgGenNoiseSubPipeline = nullptr;    //!< Film Grain Generate Noise sub pipeline, used as pre-subpipeline before HW decoding
         FilmGrainPostSubPipeline    *m_fgAppNoiseSubPipeline = nullptr;    //!< Film Grain Apply Noise sub pipeline, used as post-subpipeline after HW decoding
+        bool                         m_allowVirtualNodeReassign = false;   //!< Whether allow virtual node reassign
 
     private:
         Av1DecodePktG12 *m_av1DecodePkt = nullptr;
 
+    MEDIA_CLASS_DEFINE_END(decode__Av1PipelineG12)
     };
 }
 #endif // !__DECODE_AV1_PIPELINE_G12_H__

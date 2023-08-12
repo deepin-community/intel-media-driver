@@ -30,10 +30,6 @@
 
 #include "mhw_vebox.h"
 
-#define HDR_OETF_1DLUT_POINT_NUMBER                  256
-#define MHW_FORWARD_GAMMA_SEGMENT_CONTROL_POINT      1024
-#define MHW_VEBOX_STARTING_INDEX                     0
-
 template <class TVeboxCmds>
 class MhwVeboxInterfaceGeneric : public MhwVeboxInterface
 {
@@ -58,6 +54,7 @@ public:
     MOS_STATUS AddVeboxVertexTable(
         MHW_CSPACE           ColorSpace)
     {
+        MHW_FUNCTION_ENTER;
         PMHW_VEBOX_HEAP         pVeboxHeap;
         uint32_t                uiOffset;
         uint32_t                uSize;
@@ -72,7 +69,7 @@ public:
         pVertexTable = (typename TVeboxCmds::VEBOX_VERTEX_TABLE_CMD *)(pVeboxHeap->pLockedDriverResourceMem +
                                                  pVeboxHeap->uiVertexTableOffset +
                                                  uiOffset);
-        memset(pVertexTable, 0, uSize);
+        MOS_ZeroMemory(pVertexTable, uSize);
         if (ColorSpace == MHW_CSpace_BT601 || ColorSpace == MHW_CSpace_xvYCC601)
         {
             MOS_SecureMemcpy(pVertexTable, uSize, g_VeboxVertexTableBT601, uSize);
@@ -94,12 +91,14 @@ public:
         PMOS_COMMAND_BUFFER                     pCmdBuffer,
         PMHW_VEBOX_SURFACE_STATE_CMD_PARAMS     pVeboxSurfaceStateCmdParams)
     {
+        MHW_FUNCTION_ENTER;
         MOS_STATUS eStatus;
         bool       bOutputValid;
 
         typename TVeboxCmds::VEBOX_SURFACE_STATE_CMD cmd1, cmd2;
 
         MEDIA_FEATURE_TABLE    *pSkuTable = nullptr;
+        MHW_CHK_NULL(m_osInterface);
         pSkuTable = m_osInterface->pfnGetSkuTable(m_osInterface);
         MHW_CHK_NULL(pSkuTable);
         MHW_CHK_NULL(pCmdBuffer);
@@ -123,7 +122,7 @@ public:
             MHW_NORMALMESSAGE("Align Input Height as 8x due to 3DlutEnable");
         }
 
-        Mos_AddCommand(pCmdBuffer, &cmd1, cmd1.byteSize);
+        m_osInterface->pfnAddCommand(pCmdBuffer, &cmd1, cmd1.byteSize);
         MHW_NORMALMESSAGE("Vebox input Height: %d, Width: %d;", cmd1.DW2.Height, cmd1.DW2.Width);
 
         // Setup Surface State for Output surface
@@ -149,7 +148,7 @@ public:
                 MHW_NORMALMESSAGE("Align Output Height as 8x due to 3DlutEnable");
             }
 
-            Mos_AddCommand(pCmdBuffer, &cmd2, cmd2.byteSize);
+            m_osInterface->pfnAddCommand(pCmdBuffer, &cmd2, cmd2.byteSize);
             MHW_NORMALMESSAGE("Vebox output Height: %d, Width: %d;", cmd2.DW2.Height, cmd2.DW2.Width);
         }
 
@@ -197,6 +196,7 @@ protected:
         typename TVeboxCmds::VEBOX_STD_STE_STATE_CMD     *pVeboxStdSteState,
         PMHW_COLORPIPE_PARAMS                            pColorPipeParams)
     {
+        MHW_FUNCTION_ENTER;
         MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
         MHW_CHK_NULL(pVeboxStdSteState);
@@ -284,6 +284,15 @@ protected:
             }
         }
 
+        if (pColorPipeParams->bEnableSTD)
+        {
+            if (nullptr == pColorPipeParams->StdParams.param || pColorPipeParams->StdParams.paraSizeInBytes > pVeboxStdSteState->byteSize)
+            {
+                MHW_CHK_STATUS_RETURN(MOS_STATUS_INVALID_PARAMETER);
+            }
+
+            MOS_SecureMemcpy(pVeboxStdSteState, pColorPipeParams->StdParams.paraSizeInBytes, pColorPipeParams->StdParams.param, pColorPipeParams->StdParams.paraSizeInBytes);
+        }
     finish:
         return eStatus;
     }
@@ -304,6 +313,7 @@ protected:
         typename TVeboxCmds::VEBOX_ALPHA_AOI_STATE_CMD   *pVeboxAlphaAoiState,
         bool                                             bEnableLACE)
     {
+        MHW_FUNCTION_ENTER;
         MHW_CHK_NULL_NO_STATUS_RETURN(pVeboxAceLaceState);
         MHW_CHK_NULL_NO_STATUS_RETURN(pVeboxAlphaAoiState);
 
@@ -338,6 +348,7 @@ protected:
         typename TVeboxCmds::VEBOX_TCC_STATE_CMD *pVeboxTccState,
         PMHW_COLORPIPE_PARAMS                    pColorPipeParams)
     {
+        MHW_FUNCTION_ENTER;
         MHW_CHK_NULL_NO_STATUS_RETURN(pVeboxTccState);
         MHW_CHK_NULL_NO_STATUS_RETURN(pColorPipeParams);
 
@@ -366,6 +377,7 @@ protected:
         typename TVeboxCmds::VEBOX_FRONT_END_CSC_STATE_CMD *pVeboxFecscState,
         PMHW_VEBOX_IECP_PARAMS                pVeboxIecpParams)
     {
+        MHW_FUNCTION_ENTER;
         PMHW_CAPPIPE_PARAMS pCapPipeParams = nullptr;
 
         MHW_CHK_NULL_NO_STATUS_RETURN(pVeboxFecscState);
@@ -494,6 +506,7 @@ protected:
         PMHW_CAPPIPE_PARAMS                        pCapPipeParams,
         const unsigned int                         uCoeffValue)
     {
+        MHW_FUNCTION_ENTER;
         typename TVeboxCmds::VEBOX_CCM_STATE_CMD *pCcm = nullptr;
 
         MHW_CHK_NULL_NO_STATUS_RETURN(pVeboxIecpState);
@@ -540,6 +553,7 @@ protected:
         typename TVeboxCmds::VEBOX_PROCAMP_STATE_CMD *pVeboxProcampState,
         PMHW_PROCAMP_PARAMS                           pProcAmpParams)
     {
+        MHW_FUNCTION_ENTER;
         MHW_CHK_NULL_NO_STATUS_RETURN(pVeboxProcampState);
         MHW_CHK_NULL_NO_STATUS_RETURN(pProcAmpParams);
 
@@ -561,6 +575,7 @@ protected:
         PMHW_VEBOX_IECP_PARAMS                    pVeboxIecpParams,
         typename TVeboxCmds::VEBOX_IECP_STATE_CMD *pVeboxIecpState)
     {
+        MHW_FUNCTION_ENTER;
         PMHW_ACE_PARAMS             pAceParams;
         PMHW_VEBOX_HEAP             pVeboxHeap;
         int32_t                     uiOffset;
@@ -613,6 +628,7 @@ protected:
     void AddVeboxCapPipeState(
         PMHW_CAPPIPE_PARAMS pCapPipeParams)
     {
+        MHW_FUNCTION_ENTER;
         typename TVeboxCmds::VEBOX_CAPTURE_PIPE_STATE_CMD *pVeboxCapPipeState, CapPipCmd;
 
         PMHW_VEBOX_HEAP pVeboxHeap;

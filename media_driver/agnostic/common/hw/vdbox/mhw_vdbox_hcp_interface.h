@@ -31,12 +31,10 @@
 #include "mhw_vdbox.h"
 #include "mhw_mi.h"
 #include "codec_def_encode_hevc.h"
+#include "mhw_vdbox_hcp_def.h"
 
 #define MHW_HCP_WORST_CASE_LCU_CU_TU_INFO        (26 * MHW_CACHELINE_SIZE) // 18+4+4
 #define MHW_HCP_WORST_CASE_LCU_CU_TU_INFO_REXT   (35 * MHW_CACHELINE_SIZE) // 27+4+4
-
-#define MHW_HCP_WORST_CASE_CU_TU_INFO            (4 * MHW_CACHELINE_SIZE) // 2+1+1
-#define MHW_HCP_WORST_CASE_CU_TU_INFO_REXT       (6 * MHW_CACHELINE_SIZE) // 4+1+1
 
 struct MHW_VDBOX_HEVC_PIC_STATE
 {
@@ -349,6 +347,16 @@ public:
         hevcSliceP  = 1,
         hevcSliceI  = 2
     };
+    //!
+    //! \brief    Get max vdbox index
+    //!
+    //! \return   MHW_VDBOX_NODE_IND
+    //!           max vdbox index got
+    //!
+    inline MHW_VDBOX_NODE_IND GetMaxVdboxIndex()
+    {
+        return MEDIA_IS_SKU(m_skuTable, FtrVcs2) ? MHW_VDBOX_NODE_2 : MHW_VDBOX_NODE_1;
+    }
 
 protected:
     PMOS_INTERFACE              m_osInterface = nullptr; //!< Pointer to OS interface
@@ -383,6 +391,10 @@ protected:
     static const HevcSliceType  m_hevcBsdSliceType[3]; //!< HEVC Slice Types for Long Format
 
     std::shared_ptr<void> m_hcpItfNew = nullptr;
+
+#if MOS_EVENT_TRACE_DUMP_SUPPORTED
+    bool bMMCReported = false;
+#endif
 
     //!
     //! \brief    Constructor

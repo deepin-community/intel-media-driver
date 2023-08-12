@@ -26,18 +26,12 @@
 //!
 
 #include "cm_wrapper.h"
-
+#include "cm_rt_umd.h"
 #include "cm_device_rt.h"
 #include "cm_surface_2d_rt.h"
 #include "media_libva_util.h"
 #include "cm_extension_creator.h"
 #include "mos_os_specific.h"
-
-extern MOS_FORMAT Mos_Specific_FmtOsToMos(
-    MOS_OS_FORMAT     format);
-
-extern MOS_OS_FORMAT Mos_Specific_FmtMosToOs(
-    MOS_FORMAT     format);
 
 using CMRT_UMD::CmDeviceRT;
 //!
@@ -67,9 +61,9 @@ int32_t CreateCmDeviceFromVA(VADriverContextP vaDriverCtx,
     mediaCtx = DdiMedia_GetMediaContext(vaDriverCtx);
 
     // allocate cmCtx
-    cmCtx = (PCM_CONTEXT)MOS_AllocAndZeroMemory(sizeof(CM_CONTEXT));
+    cmCtx = MOS_New(CM_CONTEXT);
     CM_CHK_NULL_RETURN_WITH_MSG(cmCtx, CM_INVALID_UMD_CONTEXT, "Null cmCtx!");
-
+    cmCtx->cmHal                  = nullptr;
     // init cmCtx
     cmCtx->mosCtx.bufmgr          = mediaCtx->pDrmBufMgr;
     cmCtx->mosCtx.m_gpuContextMgr = mediaCtx->m_gpuContextMgr;
@@ -77,19 +71,20 @@ int32_t CreateCmDeviceFromVA(VADriverContextP vaDriverCtx,
     cmCtx->mosCtx.fd              = mediaCtx->fd;
     cmCtx->mosCtx.wRevision       = 0;
     cmCtx->mosCtx.iDeviceId       = mediaCtx->iDeviceId;
-    cmCtx->mosCtx.SkuTable        = mediaCtx->SkuTable;
-    cmCtx->mosCtx.WaTable         = mediaCtx->WaTable;
-    cmCtx->mosCtx.gtSystemInfo    = *(mediaCtx->pGtSystemInfo);
-    cmCtx->mosCtx.platform        = mediaCtx->platform;
+    cmCtx->mosCtx.m_skuTable        = mediaCtx->SkuTable;
+    cmCtx->mosCtx.m_waTable         = mediaCtx->WaTable;
+    cmCtx->mosCtx.m_gtSystemInfo    = *(mediaCtx->pGtSystemInfo);
+    cmCtx->mosCtx.m_platform        = mediaCtx->platform;
     cmCtx->mosCtx.pGmmClientContext = mediaCtx->pGmmClientContext;
     cmCtx->mosCtx.m_osDeviceContext = mediaCtx->m_osDeviceContext;
     cmCtx->mosCtx.m_apoMosEnabled   = mediaCtx->m_apoMosEnabled;
     cmCtx->mosCtx.m_auxTableMgr     = mediaCtx->m_auxTableMgr;
     cmCtx->mosCtx.pPerfData         = (PERF_DATA *)MOS_AllocAndZeroMemory(sizeof(PERF_DATA));
+    cmCtx->mosCtx.m_userSettingPtr  = mediaCtx->m_userSettingPtr;
 
     if (cmCtx->mosCtx.pPerfData == nullptr)
     {
-        MOS_FreeMemAndSetNull(cmCtx);  // free cm ctx
+        MOS_Delete(cmCtx);  // free cm ctx
         CM_ASSERTMESSAGE("Failed to allocate perfData in mos context \n");
         return CM_OUT_OF_HOST_MEMORY;
     }
@@ -98,7 +93,7 @@ int32_t CreateCmDeviceFromVA(VADriverContextP vaDriverCtx,
     hRes = CreateCmDevice(&(cmCtx->mosCtx), device, devOption);
     if(hRes != CM_SUCCESS)
     {
-        MOS_FreeMemAndSetNull(cmCtx); // free cm ctx
+        MOS_Delete(cmCtx);  // free cm ctx
         CM_ASSERTMESSAGE("Failed to call CmDevice::Create Error %d \n",hRes);
         return hRes;
     }
@@ -111,7 +106,7 @@ int32_t CreateCmDeviceFromVA(VADriverContextP vaDriverCtx,
     {
         CmDeviceRT::Destroy(deviceRT); // destroy cm device
         device = nullptr;
-        MOS_FreeMemAndSetNull(cmCtx); // free cm ctx
+        MOS_Delete(cmCtx);  // free cm ctx
         DdiMediaUtil_UnLockMutex(&mediaCtx->CmMutex);
         CM_ASSERTMESSAGE("CM Context number exceeds maximum.");
         return VA_STATUS_ERROR_INVALID_CONTEXT;
@@ -180,7 +175,7 @@ int32_t DestroyCmDeviceFromVA(VADriverContextP vaDriverCtx, CmDevice *device)
     MOS_FreeMemAndSetNull(cmCtx->mosCtx.pPerfData);
 
     // destroy Cm context
-    MOS_FreeMemAndSetNull(cmCtx);
+    MOS_Delete(cmCtx);
 
     DdiMediaUtil_ReleasePVAContextFromHeap(mediaCtx->pCmCtxHeap, index);
 
@@ -256,7 +251,7 @@ MOS_FORMAT CmOSFmtToMosFmt(CM_OSAL_SURFACE_FORMAT format)
       case CM_SURFACE_FORMAT_R8U:  return Format_R8U;
       case CM_SURFACE_FORMAT_R16U: return Format_R16U;
       default:
-        return Mos_Specific_FmtOsToMos(format);
+          return MosInterface::OsFmtToMosFmt(format);
     }
 }
 
@@ -269,7 +264,7 @@ CM_OSAL_SURFACE_FORMAT  CmMosFmtToOSFmt(MOS_FORMAT format)
         case Format_R8U:   return CM_SURFACE_FORMAT_R8U;
         case Format_R16U:  return CM_SURFACE_FORMAT_R16U;
         default:
-           return Mos_Specific_FmtMosToOs(format);
+           return (CM_OSAL_SURFACE_FORMAT)MosInterface::MosFmtToOsFmt(format);
     }
 }
 

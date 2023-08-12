@@ -31,7 +31,7 @@
 
 #include "decode_allocator.h"
 #include "decode_utils.h"
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 
 namespace decode {
 
@@ -40,9 +40,9 @@ class BufferOpInf
 {
 public:
     virtual ~BufferOpInf() {}
-    virtual MOS_STATUS Init(CodechalHwInterface& hwInterface, DecodeAllocator& allocator, BasicFeature& basicFeature)
+    virtual MOS_STATUS Init(void *hwInterface, DecodeAllocator &allocator, BasicFeature &basicFeature)
     {
-        m_hwInterface  = &hwInterface;
+        m_hwInterface  = hwInterface;
         m_allocator    = &allocator;
         m_basicFeature = &basicFeature;
         return MOS_STATUS_SUCCESS;
@@ -54,10 +54,11 @@ public:
     virtual bool IsAvailable(BufferType* &buffer) { return true; }
     virtual void Destroy(BufferType* &buffer) = 0;
 
-protected:
-    CodechalHwInterface* m_hwInterface  = nullptr;
+    void*                m_hwInterface  = nullptr;
     DecodeAllocator*     m_allocator    = nullptr;
     BasicFeature*        m_basicFeature = nullptr;
+
+MEDIA_CLASS_DEFINE_END(decode__BufferOpInf)
 };
 
 template<typename BufferType, typename BufferOp, typename BasicFeature>
@@ -67,7 +68,8 @@ public:
     //!
     //! \brief  RefrenceAssociatedBuffer constructor
     //!
-    RefrenceAssociatedBuffer() {};
+    RefrenceAssociatedBuffer() 
+    {};
 
     //!
     //! \brief  RefrenceAssociatedBuffer deconstructor
@@ -102,7 +104,7 @@ public:
     //! \return  MOS_STATUS
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
-    MOS_STATUS Init(CodechalHwInterface& hwInterface, DecodeAllocator& allocator, BasicFeature& basicFeature,
+    MOS_STATUS Init(void* hwInterface, DecodeAllocator& allocator, BasicFeature& basicFeature,
                     uint32_t initialAllocNum)
     {
         DECODE_FUNC_CALL();
@@ -225,7 +227,6 @@ public:
         return buffer;
     }
 
-protected:
     //!
     //! \brief  Figure out buffer for current picture, and add it to active buffer list
     //! \param  [in] frameIdx
@@ -276,6 +277,7 @@ protected:
         return MOS_STATUS_SUCCESS;
     }
 
+protected:
     //!
     //! \brief  Update buffers corresponding to reference list
     //! \param  [in] curFrameIdx
@@ -352,6 +354,8 @@ protected:
     std::map<uint32_t, BufferType*> m_activeBuffers;           //!< Active buffers corresponding to current reference frame list
     std::vector<BufferType*>        m_availableBuffers;        //!< Buffers in idle
     BufferType*                     m_currentBuffer = nullptr; //!< Point to buffer of current picture
+
+MEDIA_CLASS_DEFINE_END(decode__RefrenceAssociatedBuffer)
 };
 
 }

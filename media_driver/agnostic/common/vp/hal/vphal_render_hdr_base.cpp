@@ -309,7 +309,7 @@ MOS_STATUS VpHal_HdrUpdatePerLayerPipelineStates(
             StageEnables.EOTFEnable = 1;
         }
 
-        if (!IS_RGB64_FLOAT_FORMAT(pTarget->Format) && StageEnables.EOTFEnable)
+        if (!IS_RGB64_FLOAT_FORMAT(pTarget->Format) && (StageEnables.EOTFEnable || IS_RGB64_FLOAT_FORMAT(pSrc->Format)))
         {
             StageEnables.OETFEnable = 1;
         }
@@ -1628,6 +1628,7 @@ MOS_STATUS VpHal_HdrGetYuvRangeAndOffset(
     case CSpace_BT601_FullRange:
     case CSpace_BT709_FullRange:
     case CSpace_BT601Gray_FullRange:
+    case CSpace_BT2020_FullRange:
         *pLumaOffset = 0.0f;
         *pLumaExcursion = 255.0f;
         *pChromaZero = 128.0f;
@@ -1640,7 +1641,6 @@ MOS_STATUS VpHal_HdrGetYuvRangeAndOffset(
     case CSpace_xvYCC709: // since matrix is the same as 709, use the same range
     case CSpace_BT601Gray:
     case CSpace_BT2020:
-    case CSpace_BT2020_FullRange:
         *pLumaOffset = 16.0f;
         *pLumaExcursion = 219.0f;
         *pChromaZero = 128.0f;
@@ -1688,6 +1688,7 @@ MOS_STATUS VpHal_HdrGetRgbRangeAndOffset(
     switch (cspace)
     {
     case CSpace_sRGB:
+    case CSpace_BT2020_RGB:
         *pRgbOffset = 0.0f;
         *pRgbExcursion = 255.0f;
         break;

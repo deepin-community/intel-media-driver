@@ -330,13 +330,21 @@ void DdiMedia_FreeProtectedSessionHeap(
     if (nullptr == mediaContextHeapBase)
         return;
 
-    for (int32_t elementId = 0; elementId < ctxNums; ++elementId)
+    for (int32_t elementId = 0; ctxNums > 0  && elementId < contextHeap->uiAllocatedHeapElements; ++elementId)
     {
         PDDI_MEDIA_VACONTEXT_HEAP_ELEMENT mediaContextHeapElmt = &mediaContextHeapBase[elementId];
-        if (nullptr == mediaContextHeapElmt->pVaContext)
-            continue;
-        VAContextID vaCtxID = (VAContextID)(mediaContextHeapElmt->uiVaContextID + vaContextOffset);
-        DdiMediaProtected::DdiMedia_DestroyProtectedSession(ctx, vaCtxID);
+        if (nullptr != mediaContextHeapElmt)
+        {
+            if (nullptr == mediaContextHeapElmt->pVaContext)
+                continue;
+            VAContextID vaCtxID = (VAContextID)(mediaContextHeapElmt->uiVaContextID + vaContextOffset);
+            DdiMediaProtected::DdiMedia_DestroyProtectedSession(ctx, vaCtxID);
+        }
+        else
+        {
+            DDI_ASSERTMESSAGE("DDI: Invalid mediaContextHeapElmt");
+        }
+        ctxNums--;
     }
 }
 

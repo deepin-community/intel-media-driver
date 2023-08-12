@@ -34,6 +34,8 @@
 #include "igvpkrn_g12_tgllp_cmfcpatch.h"
 #endif
 #include "vp_kernel_config_m12_base.h"
+#include "vp_scalability_multipipe.h"
+#include "vp_scalability_singlepipe.h"
 
 extern const Kdll_RuleEntry         g_KdllRuleTable_g12lp[];
 extern const Kdll_RuleEntry         g_KdllRuleTable_g12lpcmfc[];
@@ -103,7 +105,8 @@ MOS_STATUS VpPlatformInterfaceG12Tgllp::CreateSfcRender(SfcRenderBase *&sfcRende
 
     sfcRender = MOS_New(SfcRenderM12,
             vpMhwinterface,
-            allocator);
+            allocator,
+            true);
     VP_PUBLIC_CHK_NULL_RETURN(sfcRender);
 
     VpIef *iefObj = MOS_New(VpIef);
@@ -182,7 +185,7 @@ MOS_STATUS vp::VpPlatformInterfaceG12Tgllp::VeboxQueryStatLayout(VEBOX_STAT_QUER
 
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    VPHAL_RENDER_ASSERT(pQuery);
+    VP_RENDER_ASSERT(pQuery);
 
     switch (queryType)
     {
@@ -203,7 +206,7 @@ MOS_STATUS vp::VpPlatformInterfaceG12Tgllp::VeboxQueryStatLayout(VEBOX_STAT_QUER
         break;
 
     default:
-        VPHAL_RENDER_ASSERTMESSAGE("Vebox Statistics Layout Query, type ('%d') is not implemented.", queryType);
+        VP_RENDER_ASSERTMESSAGE("Vebox Statistics Layout Query, type ('%d') is not implemented.", queryType);
         eStatus = MOS_STATUS_UNKNOWN;
         break;
     }
@@ -217,4 +220,65 @@ VpKernelConfig &VpPlatformInterfaceG12Tgllp::GetKernelConfig()
 
     static VpKernelConfigM12_Base kernelConfig;
     return kernelConfig;
+}
+
+MOS_STATUS VpPlatformInterfaceG12Tgllp::GetInputFrameWidthHeightAlignUnit(
+    PVP_MHWINTERFACE          pvpMhwInterface,
+    uint32_t                 &widthAlignUnit,
+    uint32_t                 &heightAlignUnit,
+    bool                      bVdbox,
+    CODECHAL_STANDARD         codecStandard,
+    CodecDecodeJpegChromaType jpegChromaType)
+{
+    VP_FUNC_CALL();
+
+    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+    VP_PUBLIC_CHK_NULL_RETURN(pvpMhwInterface);
+    VP_PUBLIC_CHK_NULL_RETURN(pvpMhwInterface->m_sfcInterface);
+
+    VP_PUBLIC_CHK_STATUS_RETURN(pvpMhwInterface->m_sfcInterface->GetInputFrameWidthHeightAlignUnit(widthAlignUnit, heightAlignUnit, bVdbox, codecStandard, jpegChromaType));
+
+    return eStatus;
+}
+
+MOS_STATUS VpPlatformInterfaceG12Tgllp::GetVeboxHeapInfo(
+    PVP_MHWINTERFACE          pvpMhwInterface,
+    const MHW_VEBOX_HEAP    **ppVeboxHeap)
+{
+    VP_FUNC_CALL();
+
+    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+    VP_PUBLIC_CHK_NULL_RETURN(pvpMhwInterface);
+    VP_PUBLIC_CHK_NULL_RETURN(pvpMhwInterface->m_veboxInterface);
+
+    const MHW_VEBOX_HEAP *pVeboxHeap = nullptr;
+
+    VP_RENDER_CHK_STATUS_RETURN(pvpMhwInterface->m_veboxInterface->GetVeboxHeapInfo(
+        &pVeboxHeap));
+    *ppVeboxHeap = (const MHW_VEBOX_HEAP *)pVeboxHeap;
+
+    return eStatus;
+}
+
+bool VpPlatformInterfaceG12Tgllp::IsVeboxScalabilityWith4KNotSupported(
+        VP_MHWINTERFACE          vpMhwInterface)
+{
+    if (vpMhwInterface.m_veboxInterface && !(vpMhwInterface.m_veboxInterface->m_veboxScalabilitywith4K))
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
+}
+
+MOS_STATUS VpPlatformInterfaceG12Tgllp::ConfigureVpScalability(VP_MHWINTERFACE &vpMhwInterface)
+{
+    VP_FUNC_CALL();
+
+    vpMhwInterface.pfnCreateSinglePipe = vp::VpScalabilitySinglePipe::CreateSinglePipe;
+    vpMhwInterface.pfnCreateMultiPipe  = vp::VpScalabilityMultiPipe::CreateMultiPipe;
+
+    return MOS_STATUS_SUCCESS;
 }

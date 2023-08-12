@@ -27,7 +27,7 @@
 #include "codechal_encode_mpeg2_g9.h"
 #include "igcodeckrn_g9.h"
 
-struct KernelHeader
+struct KernelHeaderMpegG9
 {
     uint32_t m_kernelCount;
 
@@ -1658,7 +1658,7 @@ MOS_STATUS CodechalEncodeMpeg2G9::GetKernelHeaderAndSize(
     CODECHAL_ENCODE_CHK_NULL_RETURN(krnHeader);
     CODECHAL_ENCODE_CHK_NULL_RETURN(krnSize);
 
-    auto kernelHeaderTable = (KernelHeader *)binary;
+    auto kernelHeaderTable = (KernelHeaderMpegG9 *)binary;
     PCODECHAL_KERNEL_HEADER currKrnHeader;
 
     if (operation == ENC_SCALING4X)
@@ -1915,6 +1915,7 @@ MOS_STATUS CodechalEncodeMpeg2G9::SendMeSurfaces(
     CODECHAL_ENCODE_CHK_NULL_RETURN(cmdBuffer);
 
     auto meBindingTable = &m_meBindingTable;
+    CODECHAL_ENCODE_CHK_NULL_RETURN(meBindingTable);
     PMOS_SURFACE currScaledSurface = m_trackedBuf->Get4xDsSurface(CODEC_CURR_TRACKED_BUFFER);
     PMOS_SURFACE meMvDataBuffer = &m_4xMEMVDataBuffer;
 

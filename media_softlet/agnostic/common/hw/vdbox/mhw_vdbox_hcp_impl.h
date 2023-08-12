@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,6 +30,13 @@
 
 #include "mhw_vdbox_hcp_itf.h"
 #include "mhw_impl.h"
+#include "mhw_vdbox_hcp_def.h"
+
+#define MHW_HCP_WORST_CASE_LCU_CU_TU_INFO (26 * MHW_CACHELINE_SIZE)       // 18+4+4
+#define MHW_HCP_WORST_CASE_LCU_CU_TU_INFO_REXT (35 * MHW_CACHELINE_SIZE)  // 27+4+4
+
+#define MHW_HCP_WORST_CASE_CU_TU_INFO (4 * MHW_CACHELINE_SIZE)       // 2+1+1
+#define MHW_HCP_WORST_CASE_CU_TU_INFO_REXT (6 * MHW_CACHELINE_SIZE)  // 4+1+1
 
 namespace mhw
 {
@@ -164,7 +171,7 @@ public:
                 colStoreSizeLCU[1][1] = 3;
                 colStoreSizeLCU[1][2] = 3;
             }
-            colStoreSzLCU = colStoreSizeLCU[(maxBitDepth == 8) ? 0 : 1][par.dwCtbLog2SizeY - 4];
+            colStoreSzLCU = colStoreSizeLCU[(maxBitDepth == 8) ? 0 : 1][par.dwCtbLog2SizeY > 3 ? par.dwCtbLog2SizeY - 4 : 0];
             bufferSize    = colStoreSzLCU * MHW_CACHELINE_SIZE * heightInCtb;
             break;
         }
@@ -198,7 +205,7 @@ public:
                 colStoreSizeLCU[1][1] = 3;
                 colStoreSizeLCU[1][2] = 6;
             }
-            colStoreSzLCU = colStoreSizeLCU[(maxBitDepth == 8) ? 0 : 1][par.dwCtbLog2SizeY - 4];
+            colStoreSzLCU = colStoreSizeLCU[(maxBitDepth == 8) ? 0 : 1][par.dwCtbLog2SizeY > 3 ? par.dwCtbLog2SizeY - 4 : 0];
             bufferSize    = colStoreSzLCU * MHW_CACHELINE_SIZE * heightInCtb;
             break;
         }
@@ -223,7 +230,7 @@ public:
                 uiRowStoreSizeLCU[1][1] = 5;
                 uiRowStoreSizeLCU[1][2] = 8;
             }
-            rowStoreSzLCU = uiRowStoreSizeLCU[(maxBitDepth < 12) ? 0 : 1][par.dwCtbLog2SizeY - 4];
+            rowStoreSzLCU = uiRowStoreSizeLCU[(maxBitDepth < 12) ? 0 : 1][par.dwCtbLog2SizeY > 3 ? par.dwCtbLog2SizeY - 4 : 0];
             bufferSize    = rowStoreSzLCU * MHW_CACHELINE_SIZE * widthInCtb;
             break;
         }
@@ -248,7 +255,7 @@ public:
                 uiRowStoreSizeLCU[1][1] = 10;
                 uiRowStoreSizeLCU[1][2] = 16;
             }
-            rowStoreSzLCU = uiRowStoreSizeLCU[(maxBitDepth < 12) ? 0 : 1][par.dwCtbLog2SizeY - 4];
+            rowStoreSzLCU = uiRowStoreSizeLCU[(maxBitDepth < 12) ? 0 : 1][par.dwCtbLog2SizeY > 3 ? par.dwCtbLog2SizeY - 4 : 0];
             bufferSize    = rowStoreSzLCU * MHW_CACHELINE_SIZE * widthInCtb;
             break;
         }
@@ -265,7 +272,7 @@ public:
                 return eStatus;
             }
 
-            formatMultFactor = formatMultFactorTab[chromaFormat - 1][par.dwCtbLog2SizeY - 4];
+            formatMultFactor = formatMultFactorTab[chromaFormat - 1][par.dwCtbLog2SizeY > 3 ? par.dwCtbLog2SizeY - 4 : 0];
             colStoreSzLCU    = formatMultFactor;
             bufferSize       = colStoreSzLCU * MHW_CACHELINE_SIZE * heightInCtb;
             break;
@@ -292,6 +299,99 @@ public:
             else
             {
                 bufferSize = widthInCtb * heightInCtb * MHW_HCP_WORST_CASE_CU_TU_INFO_REXT + widthInCtb * heightInCtb + maxFrameSize * 3;
+            }
+            bufferSize = MOS_ALIGN_CEIL(bufferSize, MHW_CACHELINE_SIZE);
+            break;
+        default:
+            eStatus = MOS_STATUS_INVALID_PARAMETER;
+            break;
+        }
+
+        size = bufferSize;
+
+        return eStatus;
+    }
+
+    MOS_STATUS GetVP9BufSize(const HcpBufferSizePar &par, uint32_t &size) override
+    {
+        MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+
+        MHW_FUNCTION_ENTER;
+
+        uint32_t bufferSize            = 0;
+        uint32_t dblkRsbSizeMultiplier = 0;
+        uint32_t dblkCsbSizeMultiplier = 0;
+        uint32_t intraPredMultiplier   = 0;
+
+        uint8_t               maxBitDepth   = par.ucMaxBitDepth;
+        uint32_t              widthInSb     = par.dwPicWidth;
+        uint32_t              heightInSb    = par.dwPicHeight;
+        uint32_t              widthInMinCb  = widthInSb * 64 / 8;  //using smallest cb to get max width
+        uint32_t              heightInMinCb = heightInSb * 64 / 8;
+        HCP_CHROMA_FORMAT_IDC chromaFormat  = (HCP_CHROMA_FORMAT_IDC)par.ucChromaFormat;
+        uint32_t              maxFrameSize  = par.dwMaxFrameSize;
+
+        if (chromaFormat == HCP_CHROMA_FORMAT_YUV420)
+        {
+            dblkRsbSizeMultiplier = (maxBitDepth > 8) ? 36 : 18;
+            dblkCsbSizeMultiplier = (maxBitDepth > 8) ? 34 : 17;
+            intraPredMultiplier   = (maxBitDepth > 8) ? 4 : 2;
+        }
+        else if (chromaFormat == HCP_CHROMA_FORMAT_YUV444)
+        {
+            dblkRsbSizeMultiplier = (maxBitDepth > 8) ? 54 : 27;
+            dblkCsbSizeMultiplier = (maxBitDepth > 8) ? 50 : 25;
+            intraPredMultiplier   = (maxBitDepth > 8) ? 6 : 3;
+        }
+        else
+        {
+            eStatus = MOS_STATUS_INVALID_PARAMETER;
+            MHW_ASSERTMESSAGE("Format not supported.");
+            return eStatus;
+        }
+
+        switch (par.bufferType)
+        {
+        case HCP_INTERNAL_BUFFER_TYPE::DBLK_LINE:
+        case HCP_INTERNAL_BUFFER_TYPE::DBLK_TILE_LINE:
+            bufferSize = widthInSb * dblkRsbSizeMultiplier * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::DBLK_TILE_COL:
+            bufferSize = heightInSb * dblkCsbSizeMultiplier * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::META_LINE:
+        case HCP_INTERNAL_BUFFER_TYPE::META_TILE_LINE:
+            bufferSize = widthInSb * 5 * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::META_TILE_COL:
+            bufferSize = heightInSb * 5 * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::CURR_MV_TEMPORAL:
+        case HCP_INTERNAL_BUFFER_TYPE::COLL_MV_TEMPORAL:
+            bufferSize = widthInSb * heightInSb * 9 * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::SEGMENT_ID:
+            bufferSize = widthInSb * heightInSb * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::HVD_LINE:
+        case HCP_INTERNAL_BUFFER_TYPE::HVD_TILE:
+            bufferSize = widthInSb * MHW_CACHELINE_SIZE;
+            break;
+            // scalable mode specific buffers
+        case HCP_INTERNAL_BUFFER_TYPE::INTRA_PRED_UP_RIGHT_COL:
+        case HCP_INTERNAL_BUFFER_TYPE::INTRA_PRED_LFT_RECON_COL:
+            bufferSize = intraPredMultiplier * heightInSb * MHW_CACHELINE_SIZE;
+            break;
+        case HCP_INTERNAL_BUFFER_TYPE::CABAC_STREAMOUT:
+            // From sas, cabac stream out buffer size =
+            // (#LCU) in picture * (Worst case LCU_CU_TU_info) + 1 byte aligned per LCU + Bitstream Size * 3
+            if ((chromaFormat == HCP_CHROMA_FORMAT_YUV420) && (maxBitDepth == 8))
+            {
+                bufferSize = widthInMinCb * heightInMinCb * MHW_HCP_WORST_CASE_CU_TU_INFO + widthInMinCb * heightInMinCb + maxFrameSize * 3;
+            }
+            else
+            {
+                bufferSize = widthInMinCb * heightInMinCb * MHW_HCP_WORST_CASE_CU_TU_INFO_REXT + widthInMinCb * heightInMinCb + maxFrameSize * 3;
             }
             bufferSize = MOS_ALIGN_CEIL(bufferSize, MHW_CACHELINE_SIZE);
             break;
@@ -481,98 +581,155 @@ public:
         return MOS_STATUS_SUCCESS;
     }
 
+    bool IsRowStoreCachingSupported() override
+    {
+        return m_rowstoreCachingSupported;
+    }
+
+    uint32_t GetPakHWTileSizeRecordSize() override
+    {
+        return m_pakHWTileSizeRecordSize;
+    }
+
+    uint32_t GetHcpVp9PicStateCommandSize() override
+    {
+        // Just return success here, please implement logic in platform sepecific impl class.
+        return MOS_STATUS_SUCCESS;
+    }
+
+    uint32_t GetHcpVp9SegmentStateCommandSize() override
+    {
+        // Just return success here, please implement logic in platform sepecific impl class.
+        return MOS_STATUS_SUCCESS;
+    }
+
+    MOS_STATUS GetHcpStateCommandSize(
+        uint32_t                        mode,
+        uint32_t                       *commandsSize,
+        uint32_t                       *patchListSize,
+        PMHW_VDBOX_STATE_CMDSIZE_PARAMS params) override
+    {
+        // Just return success here, please implement logic in platform sepecific impl class.
+        return MOS_STATUS_SUCCESS;
+    }
+
+    MOS_STATUS GetHcpPrimitiveCommandSize(
+        uint32_t  mode,
+        uint32_t *commandsSize,
+        uint32_t *patchListSize,
+        bool      modeSpecific) override
+    {
+        // Just return success here, please implement logic in platform sepecific impl class.
+        return MOS_STATUS_SUCCESS;
+    }
+
 private:
-    bool m_rowstoreCachingSupported = false;
+    bool     m_rowstoreCachingSupported = false;
+    uint32_t m_pakHWTileSizeRecordSize  = sizeof(HCPPakHWTileSizeRecord);
 
     virtual MOS_STATUS InitRowstoreUserFeatureSettings()
     {
         MHW_FUNCTION_ENTER;
 
-        MOS_USER_FEATURE_VALUE_DATA userFeatureData;
-
-        MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+        bool rowstoreCachingDisableDefaultValue = false;
         if (m_osItf->bSimIsActive)
         {
-            // GEN12 can support row store cache
-            userFeatureData.u32Data = 1;
+            // Disable RowStore Cache on simulation by default
+            rowstoreCachingDisableDefaultValue = true;
         }
         else
         {
-            userFeatureData.u32Data = 0;
+            rowstoreCachingDisableDefaultValue = false;
         }
-
-        userFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
+        m_rowstoreCachingSupported = !rowstoreCachingDisableDefaultValue;
 #if (_DEBUG || _RELEASE_INTERNAL)
-        MOS_UserFeature_ReadValue_ID(
-            nullptr,
-            __MEDIA_USER_FEATURE_VALUE_ROWSTORE_CACHE_DISABLE_ID,
-            &userFeatureData,
-            m_osItf->pOsContext);
+        auto userSettingPtr = m_osItf->pfnGetUserSettingInstance(m_osItf);
+        {
+            MediaUserSetting::Value outValue;
+            ReadUserSettingForDebug(userSettingPtr,
+                outValue,
+                "Disable RowStore Cache",
+                MediaUserSetting::Group::Device,
+                rowstoreCachingDisableDefaultValue,
+                true);
+            m_rowstoreCachingSupported = !(outValue.Get<bool>());
+        }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-        m_rowstoreCachingSupported = userFeatureData.i32Data ? false : true;
 
         if (m_rowstoreCachingSupported)
         {
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+            m_hevcDatRowStoreCache.supported = true;
 #if (_DEBUG || _RELEASE_INTERNAL)
-            MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_HEVCDATROWSTORECACHE_DISABLE_ID,
-                &userFeatureData,
-                m_osItf->pOsContext);
+            {
+                MediaUserSetting::Value outValue;
+                ReadUserSettingForDebug(userSettingPtr,
+                    outValue,
+                    "DisableHevcDatRowStoreCache",
+                    MediaUserSetting::Group::Device);
+                m_hevcDatRowStoreCache.supported = !(outValue.Get<bool>());
+            }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-            m_hevcDatRowStoreCache.supported = userFeatureData.i32Data ? false : true;
 
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+            m_hevcDfRowStoreCache.supported = true;
 #if (_DEBUG || _RELEASE_INTERNAL)
-            MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_HEVCDFROWSTORECACHE_DISABLE_ID,
-                &userFeatureData,
-                m_osItf->pOsContext);
+            {
+                MediaUserSetting::Value outValue;
+                ReadUserSettingForDebug(userSettingPtr,
+                    outValue,
+                    "DisableHevcDfRowStoreCache",
+                    MediaUserSetting::Group::Device);
+                m_hevcDfRowStoreCache.supported = !(outValue.Get<bool>());
+            }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-            m_hevcDfRowStoreCache.supported = userFeatureData.i32Data ? false : true;
 
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+            m_hevcSaoRowStoreCache.supported = true;
 #if (_DEBUG || _RELEASE_INTERNAL)
-            MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_HEVCSAOROWSTORECACHE_DISABLE_ID,
-                &userFeatureData,
-                m_osItf->pOsContext);
+            {
+                MediaUserSetting::Value outValue;
+                ReadUserSettingForDebug(userSettingPtr,
+                    outValue,
+                    "DisableHevcSaoRowStoreCache",
+                    MediaUserSetting::Group::Device);
+                m_hevcSaoRowStoreCache.supported = !(outValue.Get<bool>());
+            }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-            m_hevcSaoRowStoreCache.supported  = userFeatureData.i32Data ? false : true;
             m_hevcHSaoRowStoreCache.supported = m_hevcSaoRowStoreCache.supported;
 
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+            m_vp9HvdRowStoreCache.supported = true;
 #if (_DEBUG || _RELEASE_INTERNAL)
-            MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_VP9_HVDROWSTORECACHE_DISABLE_ID,
-                &userFeatureData,
-                m_osItf->pOsContext);
+            {
+                MediaUserSetting::Value outValue;
+                ReadUserSettingForDebug(userSettingPtr,
+                    outValue,
+                    "DisableVp9HvdRowStoreCache",
+                    MediaUserSetting::Group::Device);
+                m_vp9HvdRowStoreCache.supported = !(outValue.Get<bool>());
+            }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-            m_vp9HvdRowStoreCache.supported = userFeatureData.i32Data ? false : true;
 
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+            m_vp9DatRowStoreCache.supported = true;
 #if (_DEBUG || _RELEASE_INTERNAL)
-            MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_VP9_DATROWSTORECACHE_DISABLE_ID,
-                &userFeatureData,
-                m_osItf->pOsContext);
+            {
+                MediaUserSetting::Value outValue;
+                ReadUserSettingForDebug(userSettingPtr,
+                    outValue,
+                    "DisableVp9DatRowStoreCache",
+                    MediaUserSetting::Group::Device);
+                m_vp9DatRowStoreCache.supported = !(outValue.Get<bool>());
+            }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-            m_vp9DatRowStoreCache.supported = userFeatureData.i32Data ? false : true;
 
-            MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+            m_vp9DfRowStoreCache.supported = true;
 #if (_DEBUG || _RELEASE_INTERNAL)
-            MOS_UserFeature_ReadValue_ID(
-                nullptr,
-                __MEDIA_USER_FEATURE_VALUE_VP9_DFROWSTORECACHE_DISABLE_ID,
-                &userFeatureData,
-                m_osItf->pOsContext);
+            {
+                MediaUserSetting::Value outValue;
+                ReadUserSettingForDebug(userSettingPtr,
+                    outValue,
+                    "DisableVp9DfRowStoreCache",
+                    MediaUserSetting::Group::Device);
+                m_vp9DfRowStoreCache.supported = !(outValue.Get<bool>());
+            }
 #endif  // _DEBUG || _RELEASE_INTERNAL
-            m_vp9DfRowStoreCache.supported = userFeatureData.i32Data ? false : true;
         }
 
         return MOS_STATUS_SUCCESS;
@@ -608,7 +765,7 @@ private:
 protected:
     using base_t = Itf;
 
-    HcpMmioRegisters m_mmioRegisters[MHW_VDBOX_NODE_MAX] = {};                    //!< hcp mmio registers
+    HcpMmioRegisters m_mmioRegisters[MHW_VDBOX_NODE_MAX] = {}; //!< hcp mmio registers
 
     vdbox::RowStoreCache m_hevcDatRowStoreCache  = {};
     vdbox::RowStoreCache m_hevcDfRowStoreCache   = {};
@@ -628,18 +785,43 @@ protected:
         InitMmioRegisters();
     }
 
+    virtual ~Impl()
+    {
+        MHW_FUNCTION_ENTER;
+
+#if (_DEBUG || _RELEASE_INTERNAL)
+        if (m_hevcDatRowStoreCache.enabled ||
+            m_hevcDfRowStoreCache.enabled ||
+            m_hevcSaoRowStoreCache.enabled ||
+            m_hevcHSaoRowStoreCache.enabled ||
+            m_vp9HvdRowStoreCache.enabled ||
+            m_vp9DatRowStoreCache.enabled ||
+            m_vp9DfRowStoreCache.enabled)
+        {
+            // Report rowstore cache usage status to regkey
+            ReportUserSettingForDebug(
+                m_userSettingPtr,
+                __MEDIA_USER_FEATURE_VALUE_IS_CODEC_ROW_STORE_CACHE_ENABLED,
+                1,
+                MediaUserSetting::Group::Device);
+        }
+#endif
+
+    }
+
     _MHW_SETCMD_OVERRIDE_DECL(HCP_SURFACE_STATE)
     {
         _MHW_SETCMD_CALLBASE(HCP_SURFACE_STATE);
 
-#define DO_FIELDS()                                                                                           \
-    DO_FIELD(DW1, SurfaceId, params.surfaceStateId);                                                          \
-    DO_FIELD(DW1, SurfacePitchMinus1, params.surfacePitchMinus1);                                             \
-    DO_FIELD(DW2, SurfaceFormat, static_cast<uint32_t>(params.surfaceFormat));                                \
-    DO_FIELD(DW2, YOffsetForUCbInPixel, params.yOffsetForUCbInPixel);                                         \
-    DO_FIELD(DW3, YOffsetForVCr, params.yOffsetForVCr);                                                       \
-    DO_FIELD(DW4, MemoryCompressionEnable, MmcEnabled(params.mmcState) ? ((~params.mmcSkipMask) & 0xff) : 0); \
-    DO_FIELD(DW4, CompressionType, MmcRcEnabled(params.mmcState) ? 0xff : 0);                                 \
+#define DO_FIELDS()                                                                      \
+    DO_FIELD(DW1, SurfaceId, params.surfaceStateId);                                     \
+    DO_FIELD(DW1, SurfacePitchMinus1, params.surfacePitchMinus1);                        \
+    DO_FIELD(DW2, SurfaceFormat, static_cast<uint32_t>(params.surfaceFormat));           \
+    DO_FIELD(DW2, YOffsetForUCbInPixel, params.yOffsetForUCbInPixel);                    \
+    DO_FIELD(DW3, YOffsetForVCr, params.yOffsetForVCr);                                  \
+    DO_FIELD(DW3, DefaultAlphaValue, params.defaultAlphaValue);                          \
+    DO_FIELD(DW4, MemoryCompressionEnable, params.refsMmcEnable & (~params.mmcSkipMask)); \
+    DO_FIELD(DW4, CompressionType, params.refsMmcType);                                  \
     DO_FIELD(DW4, CompressionFormat, params.dwCompressionFormat);
 
 #include "mhw_hwcmd_process_cmdfields.h"
@@ -649,83 +831,134 @@ protected:
     {
         _MHW_SETCMD_CALLBASE(HCP_PIC_STATE);
 
-#define DO_FIELDS()                                                                                                 \
-    DO_FIELD(DW1, Framewidthinmincbminus1, params.framewidthinmincbminus1);                                         \
-    DO_FIELD(DW1, PakTransformSkipEnable, params.transformSkipEnabled);                                             \
-    DO_FIELD(DW1, Frameheightinmincbminus1, params.frameheightinmincbminus1);                                       \
-    DO_FIELD(DW2, Mincusize, params.mincusize);                                                                     \
-    DO_FIELD(DW2, CtbsizeLcusize, params.ctbsizeLcusize);                                                           \
-    DO_FIELD(DW2, Maxtusize, params.maxtusize);                                                                     \
-    DO_FIELD(DW2, Mintusize, params.mintusize);                                                                     \
-    DO_FIELD(DW2, ChromaSubsampling, params.chromaSubsampling);                                                     \
-    DO_FIELD(DW2, Minpcmsize, 0);                                                                                   \
-    DO_FIELD(DW2, Maxpcmsize, 0);                                                                                   \
-    DO_FIELD(DW3, Colpicisi, 0);                                                                                    \
-    DO_FIELD(DW3, Curpicisi, 0);                                                                                    \
-    DO_FIELD(DW4, SampleAdaptiveOffsetEnabledFlag, params.sampleAdaptiveOffsetEnabled);                             \
-    DO_FIELD(DW4, PcmEnabledFlag, 0);                                                                               \
-    DO_FIELD(DW4, CuQpDeltaEnabledFlag, params.cuQpDeltaEnabledFlag);                                               \
-    DO_FIELD(DW4, DiffCuQpDeltaDepthOrNamedAsMaxDqpDepth, params.diffCuQpDeltaDepth);                               \
-    DO_FIELD(DW4, PcmLoopFilterDisableFlag, params.pcmLoopFilterDisableFlag);                                       \
-    DO_FIELD(DW4, ConstrainedIntraPredFlag, 0);                                                                     \
-    DO_FIELD(DW4, Log2ParallelMergeLevelMinus2, 0);                                                                 \
-    DO_FIELD(DW4, SignDataHidingFlag, 0);                                                                           \
-    DO_FIELD(DW4, EntropyCodingSyncEnabledFlag, 0);                                                                 \
-    DO_FIELD(DW4, WeightedPredFlag, params.weightedPredFlag);                                                       \
-    DO_FIELD(DW4, WeightedBipredFlag, params.weightedBipredFlag);                                                   \
-    DO_FIELD(DW4, Fieldpic, 0);                                                                                     \
-    DO_FIELD(DW4, Bottomfield, 0);                                                                                  \
-    DO_FIELD(DW4, AmpEnabledFlag, params.ampEnabledFlag);                                                           \
-    DO_FIELD(DW4, TransquantBypassEnableFlag, params.transquantBypassEnableFlag);                                   \
-    DO_FIELD(DW4, StrongIntraSmoothingEnableFlag, params.strongIntraSmoothingEnableFlag);                           \
-    DO_FIELD(DW4, CuPacketStructure, 0);                                                                            \
-    DO_FIELD(DW4, TransformSkipEnabledFlag, params.transformSkipEnabled);                                           \
-    DO_FIELD(DW4, TilesEnabledFlag, params.tilesEnabledFlag);                                                       \
-    DO_FIELD(DW4, LoopFilterAcrossTilesEnabledFlag, params.loopFilterAcrossTilesEnabled);                           \
-    DO_FIELD(DW5, PicCbQpOffset, params.picCbQpOffset);                                                             \
-    DO_FIELD(DW5, PicCrQpOffset, params.picCrQpOffset);                                                             \
-    DO_FIELD(DW5, MaxTransformHierarchyDepthIntraOrNamedAsTuMaxDepthIntra, params.maxTransformHierarchyDepthIntra); \
-    DO_FIELD(DW5, MaxTransformHierarchyDepthInterOrNamedAsTuMaxDepthInter, params.maxTransformHierarchyDepthInter); \
-    DO_FIELD(DW5, PcmSampleBitDepthChromaMinus1, params.pcmSampleBitDepthChromaMinus1);                             \
-    DO_FIELD(DW5, PcmSampleBitDepthLumaMinus1, params.pcmSampleBitDepthLumaMinus1);                                 \
-    DO_FIELD(DW5, BitDepthChromaMinus8, params.bitDepthChromaMinus8);                                               \
-    DO_FIELD(DW5, BitDepthLumaMinus8, params.bitDepthLumaMinus8);                                                   \
-    DO_FIELD(DW6, LcuMaxBitsizeAllowed, params.lcuMaxBitsizeAllowed);                                               \
-    DO_FIELD(DW6, Nonfirstpassflag, 0);                                                                             \
-    DO_FIELD(DW6, LcuMaxBitSizeAllowedMsb2its, params.lcuMaxBitSizeAllowedMsb2its);                                 \
-    DO_FIELD(DW6, LcumaxbitstatusenLcumaxsizereportmask, 0);                                                        \
-    DO_FIELD(DW6, FrameszoverstatusenFramebitratemaxreportmask, 0);                                                 \
-    DO_FIELD(DW6, FrameszunderstatusenFramebitrateminreportmask, 0);                                                \
-    DO_FIELD(DW6, LoadSlicePointerFlag, 0);                                                                         \
-    DO_FIELD(DW18, Minframesize, params.minframesize);                                                              \
-    DO_FIELD(DW18, Minframesizeunits, params.minframesizeunits);                                                    \
-    DO_FIELD(DW19, RdoqEnable, params.rdoqEnable);                                                                  \
-    DO_FIELD(DW19, SseEnable, params.sseEnable);                                                                    \
-    DO_FIELD(DW19, RhodomainRateControlEnable, params.rhodomainRateControlEnable);                                  \
-    DO_FIELD(DW19, Rhodomainframelevelqp, params.rhodomainframelevelqp);                                            \
-    DO_FIELD(DW19, FractionalQpAdjustmentEnable, params.fractionalQpAdjustmentEnable);                              \
-    DO_FIELD(DW19, FirstSliceSegmentInPicFlag, 1);                                                                  \
-    DO_FIELD(DW19, PakDynamicSliceModeEnable, params.pakDynamicSliceModeEnable);                                    \
-    DO_FIELD(DW19, SlicePicParameterSetId, params.slicePicParameterSetId);                                          \
-    DO_FIELD(DW19, Nalunittypeflag, params.nalunittypeflag);                                                        \
-    DO_FIELD(DW19, NoOutputOfPriorPicsFlag, params.noOutputOfPriorPicsFlag);                                        \
-    DO_FIELD(DW19, PartialFrameUpdateMode, params.partialFrameUpdateMode);                                          \
-    DO_FIELD(DW19, TemporalMvPredDisable, params.temporalMvPredDisable);                                            \
-    DO_FIELD(DW20, Intratucountbasedrdoqdisable, params.intratucountbasedrdoqdisable);                              \
-    DO_FIELD(DW21, SliceSizeThresholdInBytes, params.sliceSizeThresholdInBytes);                                    \
-    DO_FIELD(DW22, TargetSliceSizeInBytes, params.targetSliceSizeInBytes);                                          \
-    DO_FIELD(DW34, IntraBoundaryFilteringDisabledFlag, params.intraBoundaryFilteringDisabledFlag);                  \
-    DO_FIELD(DW34, MotionVectorResolutionControlIdc, params.motionVectorResolutionControlIdc);                      \
-    DO_FIELD(DW34, PpsCurrPicRefEnabledFlag, params.ppsCurrPicRefEnabledFlag);                                      \
-    DO_FIELD(DW34, IbcMotionCompensationBufferReferenceIdc, params.ibcMotionCompensationBufferReferenceIdc);        \
-    DO_FIELD(DW35, IbcConfiguration, params.ibcConfiguration);                                                      \
-    DO_FIELD(DW35, PaletteModeEnabledFlag, params.paletteModeEnabledFlag);                                          \
-    DO_FIELD(DW35, MonochromePaletteFlag, 0);                                                                       \
-    DO_FIELD(DW35, PaletteMaxSize, params.paletteMaxSize);                                                          \
-    DO_FIELD(DW35, DeltaPaletteMaxPredictorSize, params.deltaPaletteMaxPredictorSize);                              \
-    DO_FIELD(DW35, LumaBitDepthEntryMinus8, params.lumaBitDepthEntryMinus8);                                        \
-    DO_FIELD(DW35, ChromaBitDepthEntryMinus8, params.chromaBitDepthEntryMinus8);                                    \
-    DO_FIELD(DW37, Rdoqintratuthreshold, params.rdoqintratuthreshold);
+#define DO_FIELDS()                                                                                                                                                    \
+        DO_FIELD(DW1, Framewidthinmincbminus1, params.framewidthinmincbminus1);                                                                                        \
+        DO_FIELD(DW1, PakTransformSkipEnable, (params.bDecodeInUse ? false : params.transformSkipEnabled));                                                            \
+        DO_FIELD(DW1, Frameheightinmincbminus1, params.frameheightinmincbminus1);                                                                                      \
+        DO_FIELD(DW2, Mincusize, params.mincusize);                                                                                                                    \
+        DO_FIELD(DW2, CtbsizeLcusize, params.ctbsizeLcusize);                                                                                                          \
+        DO_FIELD(DW2, Maxtusize, params.maxtusize);                                                                                                                    \
+        DO_FIELD(DW2, Mintusize, params.mintusize);                                                                                                                    \
+        DO_FIELD(DW2, ChromaSubsampling, params.chromaSubsampling);                                                                                                    \
+        DO_FIELD(DW2, Minpcmsize, params.minpcmsize);                                                                                                                  \
+        DO_FIELD(DW2, Maxpcmsize, params.maxpcmsize);                                                                                                                  \
+        DO_FIELD(DW3, Colpicisi, 0);                                                                                                                                   \
+        DO_FIELD(DW3, Curpicisi, 0);                                                                                                                                   \
+        DO_FIELD(DW3, Log2Maxtransformskipsize, params.log2Maxtransformskipsize);                                                                                      \
+        DO_FIELD(DW4, SampleAdaptiveOffsetEnabledFlag, params.sampleAdaptiveOffsetEnabled);                                                                            \
+        DO_FIELD(DW4, PcmEnabledFlag, params.pcmEnabledFlag);                                                                                                          \
+        DO_FIELD(DW4, CuQpDeltaEnabledFlag, params.cuQpDeltaEnabledFlag);                                                                                              \
+        DO_FIELD(DW4, DiffCuQpDeltaDepthOrNamedAsMaxDqpDepth, params.diffCuQpDeltaDepth);                                                                              \
+        DO_FIELD(DW4, PcmLoopFilterDisableFlag, params.pcmLoopFilterDisableFlag);                                                                                      \
+        DO_FIELD(DW4, ConstrainedIntraPredFlag, params.constrainedIntraPredFlag);                                                                                      \
+        DO_FIELD(DW4, Log2ParallelMergeLevelMinus2, params.log2ParallelMergeLevelMinus2);                                                                              \
+        DO_FIELD(DW4, SignDataHidingFlag, params.signDataHidingFlag);                                                                                                  \
+        DO_FIELD(DW4, EntropyCodingSyncEnabledFlag, params.entropyCodingSyncEnabled);                                                                                  \
+        DO_FIELD(DW4, WeightedPredFlag, params.weightedPredFlag);                                                                                                      \
+        DO_FIELD(DW4, WeightedBipredFlag, params.weightedBipredFlag);                                                                                                  \
+        DO_FIELD(DW4, Fieldpic, params.fieldpic);                                                                                                                      \
+        DO_FIELD(DW4, Bottomfield, params.bottomfield);                                                                                                                \
+        DO_FIELD(DW4, AmpEnabledFlag, params.ampEnabledFlag);                                                                                                          \
+        DO_FIELD(DW4, TransquantBypassEnableFlag, params.transquantBypassEnableFlag);                                                                                  \
+        DO_FIELD(DW4, StrongIntraSmoothingEnableFlag, params.strongIntraSmoothingEnableFlag);                                                                          \
+        DO_FIELD(DW4, CuPacketStructure, 0);                                                                                                                           \
+        DO_FIELD(DW4, TransformSkipEnabledFlag, params.transformSkipEnabled);                                                                                          \
+        DO_FIELD(DW4, TilesEnabledFlag, params.tilesEnabledFlag);                                                                                                      \
+        DO_FIELD(DW4, LoopFilterAcrossTilesEnabledFlag, params.loopFilterAcrossTilesEnabled);                                                                          \
+        DO_FIELD(DW5, PicCbQpOffset, params.picCbQpOffset);                                                                                                            \
+        DO_FIELD(DW5, PicCrQpOffset, params.picCrQpOffset);                                                                                                            \
+        DO_FIELD(DW5, MaxTransformHierarchyDepthIntraOrNamedAsTuMaxDepthIntra, params.maxTransformHierarchyDepthIntra);                                                \
+        DO_FIELD(DW5, MaxTransformHierarchyDepthInterOrNamedAsTuMaxDepthInter, params.maxTransformHierarchyDepthInter);                                                \
+        DO_FIELD(DW5, PcmSampleBitDepthChromaMinus1, params.pcmSampleBitDepthChromaMinus1);                                                                            \
+        DO_FIELD(DW5, PcmSampleBitDepthLumaMinus1, params.pcmSampleBitDepthLumaMinus1);                                                                                \
+        DO_FIELD(DW5, BitDepthChromaMinus8, params.bitDepthChromaMinus8);                                                                                              \
+        DO_FIELD(DW5, BitDepthLumaMinus8, params.bitDepthLumaMinus8);                                                                                                  \
+        DO_FIELD(DW6, LcuMaxBitsizeAllowed, params.lcuMaxBitsizeAllowed);                                                                                              \
+        DO_FIELD(DW6, Nonfirstpassflag, params.bNotFirstPass);                                                                                                                            \
+        DO_FIELD(DW6, LcuMaxBitSizeAllowedMsb2its, params.lcuMaxBitSizeAllowedMsb2its);                                                                                \
+        DO_FIELD(DW6, LcumaxbitstatusenLcumaxsizereportmask, 0);                                                                                                       \
+        DO_FIELD(DW6, FrameszoverstatusenFramebitratemaxreportmask, 0);                                                                                                \
+        DO_FIELD(DW6, FrameszunderstatusenFramebitrateminreportmask, 0);                                                                                               \
+        DO_FIELD(DW6, LoadSlicePointerFlag, 0);                                                                                                                        \
+        DO_FIELD(DW18, Minframesize, params.minframesize);                                                                                                             \
+        DO_FIELD(DW18, Minframesizeunits, params.minframesizeunits);                                                                                                   \
+        DO_FIELD(DW19, RdoqEnable, params.rdoqEnable);                                                                                                                 \
+        DO_FIELD(DW19, SseEnable, params.sseEnable);                                                                                                                   \
+        DO_FIELD(DW19, RhodomainRateControlEnable, params.rhodomainRateControlEnable);                                                                                 \
+        DO_FIELD(DW19, Rhodomainframelevelqp, params.rhodomainframelevelqp);                                                                                           \
+        DO_FIELD(DW19, FractionalQpAdjustmentEnable, params.fractionalQpAdjustmentEnable);                                                                             \
+        DO_FIELD(DW19, FirstSliceSegmentInPicFlag, params.bDecodeInUse ? 0 : 1);                                                                                       \
+        DO_FIELD(DW19, PakDynamicSliceModeEnable, params.pakDynamicSliceModeEnable);                                                                                   \
+        DO_FIELD(DW19, SlicePicParameterSetId, params.slicePicParameterSetId);                                                                                         \
+        DO_FIELD(DW19, Nalunittypeflag, params.nalunittypeflag);                                                                                                       \
+        DO_FIELD(DW19, NoOutputOfPriorPicsFlag, params.noOutputOfPriorPicsFlag);                                                                                       \
+        DO_FIELD(DW19, PartialFrameUpdateMode, params.partialFrameUpdateMode);                                                                                         \
+        DO_FIELD(DW19, TemporalMvPredDisable, params.temporalMvPredDisable);                                                                                           \
+        DO_FIELD(DW20, Intratucountbasedrdoqdisable, params.intratucountbasedrdoqdisable);                                                                             \
+        DO_FIELD(DW21, SliceSizeThresholdInBytes, params.sliceSizeThresholdInBytes);                                                                                   \
+        DO_FIELD(DW22, TargetSliceSizeInBytes, params.targetSliceSizeInBytes);                                                                                         \
+        DO_FIELD(DW34, IntraBoundaryFilteringDisabledFlag, params.intraBoundaryFilteringDisabledFlag);                                                                 \
+        DO_FIELD(DW34, MotionVectorResolutionControlIdc, params.motionVectorResolutionControlIdc);                                                                     \
+        DO_FIELD(DW34, PpsCurrPicRefEnabledFlag, params.ppsCurrPicRefEnabledFlag);                                                                                     \
+        DO_FIELD(DW34, IbcMotionCompensationBufferReferenceIdc, params.ibcMotionCompensationBufferReferenceIdc);                                                       \
+        DO_FIELD(DW35, IbcConfiguration, params.ibcConfiguration);                                                                                                     \
+        DO_FIELD(DW35, PaletteModeEnabledFlag, params.paletteModeEnabledFlag);                                                                                         \
+        DO_FIELD(DW35, MonochromePaletteFlag, 0);                                                                                                                      \
+        DO_FIELD(DW35, PaletteMaxSize, params.paletteMaxSize);                                                                                                         \
+        DO_FIELD(DW35, DeltaPaletteMaxPredictorSize, params.deltaPaletteMaxPredictorSize);                                                                             \
+        DO_FIELD(DW35, LumaBitDepthEntryMinus8, params.lumaBitDepthEntryMinus8);                                                                                       \
+        DO_FIELD(DW35, ChromaBitDepthEntryMinus8, params.chromaBitDepthEntryMinus8);                                                                                   \
+        DO_FIELD(DW37, Rdoqintratuthreshold, params.rdoqintratuthreshold);                                                                                             \
+                                                                                                                                                                       \
+        if (params.bDecodeInUse && params.pHevcExtPicParams)                                                                                                           \
+        {                                                                                                                                                              \
+            auto hevcExtPicParams = params.pHevcExtPicParams;                                                                                                          \
+            DO_FIELD(DW2, ChromaQpOffsetListEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.chroma_qp_offset_list_enabled_flag);                          \
+            DO_FIELD(DW2, DiffCuChromaQpOffsetDepth, hevcExtPicParams->diff_cu_chroma_qp_offset_depth);                                                                \
+            DO_FIELD(DW2, ChromaQpOffsetListLenMinus1, hevcExtPicParams->chroma_qp_offset_list_len_minus1);                                                            \
+            DO_FIELD(DW2, Log2SaoOffsetScaleLuma, hevcExtPicParams->log2_sao_offset_scale_luma);                                                                       \
+            DO_FIELD(DW2, Log2SaoOffsetScaleChroma, hevcExtPicParams->log2_sao_offset_scale_chroma);                                                                   \
+            DO_FIELD(DW3, CrossComponentPredictionEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.cross_component_prediction_enabled_flag);               \
+            DO_FIELD(DW3, CabacBypassAlignmentEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.cabac_bypass_alignment_enabled_flag);                       \
+            DO_FIELD(DW3, PersistentRiceAdaptationEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.persistent_rice_adaptation_enabled_flag);               \
+            DO_FIELD(DW3, IntraSmoothingDisabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.intra_smoothing_disabled_flag);                                  \
+            DO_FIELD(DW3, ExplicitRdpcmEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.explicit_rdpcm_enabled_flag);                                      \
+            DO_FIELD(DW3, ImplicitRdpcmEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.implicit_rdpcm_enabled_flag);                                      \
+            DO_FIELD(DW3, TransformSkipContextEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.transform_skip_context_enabled_flag);                       \
+            DO_FIELD(DW3, TransformSkipRotationEnabledFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.transform_skip_rotation_enabled_flag);                     \
+            DO_FIELD(DW3, HighPrecisionOffsetsEnableFlag, hevcExtPicParams->PicRangeExtensionFlags.fields.high_precision_offsets_enabled_flag);                        \
+            DO_FIELD(DW32, CbQpOffsetList0, hevcExtPicParams->cb_qp_offset_list[0]);                                                                                   \
+            DO_FIELD(DW32, CbQpOffsetList1, hevcExtPicParams->cb_qp_offset_list[1]);                                                                                   \
+            DO_FIELD(DW32, CbQpOffsetList2, hevcExtPicParams->cb_qp_offset_list[2]);                                                                                   \
+            DO_FIELD(DW32, CbQpOffsetList3, hevcExtPicParams->cb_qp_offset_list[3]);                                                                                   \
+            DO_FIELD(DW32, CbQpOffsetList4, hevcExtPicParams->cb_qp_offset_list[4]);                                                                                   \
+            DO_FIELD(DW32, CbQpOffsetList5, hevcExtPicParams->cb_qp_offset_list[5]);                                                                                   \
+            DO_FIELD(DW33, CrQpOffsetList0, hevcExtPicParams->cr_qp_offset_list[0]);                                                                                   \
+            DO_FIELD(DW33, CrQpOffsetList1, hevcExtPicParams->cr_qp_offset_list[1]);                                                                                   \
+            DO_FIELD(DW33, CrQpOffsetList2, hevcExtPicParams->cr_qp_offset_list[2]);                                                                                   \
+            DO_FIELD(DW33, CrQpOffsetList3, hevcExtPicParams->cr_qp_offset_list[3]);                                                                                   \
+            DO_FIELD(DW33, CrQpOffsetList4, hevcExtPicParams->cr_qp_offset_list[4]);                                                                                   \
+            DO_FIELD(DW33, CrQpOffsetList5, hevcExtPicParams->cr_qp_offset_list[5]);                                                                                   \
+        }                                                                                                                                                              \
+                                                                                                                                                                       \
+        if (params.bDecodeInUse && params.pHevcSccPicParams)                                                                                                           \
+        {                                                                                                                                                              \
+            auto hevcSccPicParams = params.pHevcSccPicParams;                                                                                                          \
+            DO_FIELD(DW34, PpsActCrQpOffsetPlus3, hevcSccPicParams->pps_act_cr_qp_offset_plus3);                                                                       \
+            DO_FIELD(DW34, PpsActCbQpOffsetPlus5, hevcSccPicParams->pps_act_cb_qp_offset_plus5);                                                                       \
+            DO_FIELD(DW34, PpsActYOffsetPlus5, hevcSccPicParams->pps_act_y_qp_offset_plus5);                                                                           \
+            DO_FIELD(DW34, PpsSliceActQpOffsetsPresentFlag, hevcSccPicParams->PicSCCExtensionFlags.fields.pps_slice_act_qp_offsets_present_flag);                      \
+            DO_FIELD(DW34, ResidualAdaptiveColourTransformEnabledFlag, hevcSccPicParams->PicSCCExtensionFlags.fields.residual_adaptive_colour_transform_enabled_flag); \
+            DO_FIELD(DW34, DeblockingFilterOverrideEnabledFlag, params.deblockingFilterOverrideEnabled);                                                               \
+            DO_FIELD(DW34, PpsDeblockingFilterDisabledFlag, params.ppsDeblockingFilterDisabled);                                                                       \
+            DO_FIELD(DW35, IbcMotionVectorErrorHandlingDisable, 0);                                                                                                    \
+        }                                                                                                                                                              \
+                                                                                                                                                                       \
+        if (params.bDecodeInUse && params.requestCRC)                                                                                                                  \
+        {                                                                                                                                                              \
+            DO_FIELD(DW36, FrameCrcEnable, 1);                                                                                                                         \
+            DO_FIELD(DW36, FrameCrcType, 0);                                                                                                                           \
+        }
 
 #include "mhw_hwcmd_process_cmdfields.h"
     }
@@ -750,6 +983,7 @@ protected:
     DO_FIELD(DW3, Intrareffetchdisable, params.intrareffetchdisable);                                                   \
     DO_FIELD(DW3, Lastsliceoftile, params.lastSliceInTile);                                                             \
     DO_FIELD(DW3, Lastsliceoftilecolumn, params.lastSliceInTileColumn);                                                 \
+    DO_FIELD(DW3, CuChromaQpOffsetEnabledFlag, params.cuChromaQpOffsetEnable);                                          \
     DO_FIELD(DW4, SliceHeaderDisableDeblockingFilterFlag, params.deblockingFilterDisable);                              \
     DO_FIELD(DW4, SliceTcOffsetDiv2OrFinalTcOffsetDiv2Encoder, params.tcOffsetDiv2);                                    \
     DO_FIELD(DW4, SliceBetaOffsetDiv2OrFinalBetaOffsetDiv2Encoder, params.betaOffsetDiv2);                              \
@@ -772,12 +1006,19 @@ protected:
     DO_FIELD(DW7, TailInsertionEnable, params.tailInsertionEnable);                                                     \
     DO_FIELD(DW7, SlicedataEnable, params.slicedataEnable);                                                             \
     DO_FIELD(DW7, HeaderInsertionEnable, params.headerInsertionEnable);                                                 \
+    DO_FIELD(DW7, DependentSliceDueToTileSplit, params.bIsNotFirstTile);                                                \
     DO_FIELD(DW8, IndirectPakBseDataStartOffsetWrite, params.indirectPakBseDataStartOffsetWrite);                       \
     DO_FIELD(DW9, TransformskipLambda, params.transformskiplambda);                                                     \
     DO_FIELD(DW10, TransformskipNumzerocoeffsFactor0, params.transformskipNumzerocoeffsFactor0);                        \
     DO_FIELD(DW10, TransformskipNumnonzerocoeffsFactor0, params.transformskipNumnonzerocoeffsFactor0);                  \
     DO_FIELD(DW10, TransformskipNumzerocoeffsFactor1, params.transformskipNumzerocoeffsFactor1);                        \
-    DO_FIELD(DW10, TransformskipNumnonzerocoeffsFactor1, params.transformskipNumnonzerocoeffsFactor1);
+    DO_FIELD(DW10, TransformskipNumnonzerocoeffsFactor1, params.transformskipNumnonzerocoeffsFactor1);                  \
+    DO_FIELD(DW11, Originalslicestartctbx, params.originalSliceStartCtbX);                                              \
+    DO_FIELD(DW11, Originalslicestartctby, params.originalSliceStartCtbY);                                              \
+    DO_FIELD(DW12, SliceActYQpOffset, params.sliceActYQpOffset);                                                        \
+    DO_FIELD(DW12, SliceActCbQpOffset, params.sliceActCbQpOffset);                                                      \
+    DO_FIELD(DW12, SliceActCrQpOffset, params.sliceActCrQpOffset);                                                      \
+    DO_FIELD(DW12, UseIntegerMvFlag, params.useIntegerMvFlag);
 
 #include "mhw_hwcmd_process_cmdfields.h"
     }
@@ -791,154 +1032,153 @@ protected:
         resourceParams.dwLsbNum      = MHW_VDBOX_HCP_UPPER_BOUND_STATE_SHIFT;
         resourceParams.HwCommandType = MOS_MFX_INDIRECT_OBJ_BASE_ADDR;
 
-        if (params.presMvObjectBuffer)
+        if (params.bDecodeInUse)
         {
-            resourceParams.presResource                      = params.presMvObjectBuffer;
-            resourceParams.dwOffset                          = params.dwMvObjectOffset;
-            resourceParams.pdwCmd                            = (cmd.DW6_7.Value);
-            resourceParams.dwLocationInCmd                   = _MHW_CMD_DW_LOCATION(DW6_7);
-            resourceParams.dwSize                            = MOS_ALIGN_CEIL(params.dwMvObjectSize, 0x1000);
-            resourceParams.bIsWritable                       = false;
-            resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
+            MHW_MI_CHK_NULL(params.presDataBuffer);
 
-            InitMocsParams(resourceParams, &cmd.HcpIndirectCuObjectObjectMemoryAddressAttributes.DW0.Value, 1, 6);
+            InitMocsParams(resourceParams, &cmd.HcpIndirectBitstreamObjectMemoryAddressAttributes.DW0.Value, 1, 6);
 
-            MHW_MI_CHK_STATUS(AddResourceToCmd(
-                this->m_osItf,
-                this->m_currentCmdBuf,
-                &resourceParams));
+            resourceParams.presResource    = params.presDataBuffer;
+            resourceParams.dwOffset        = params.dwDataOffset;
+            resourceParams.pdwCmd          = (cmd.HcpIndirectBitstreamObjectBaseAddress.DW0_1.Value);
+            resourceParams.dwLocationInCmd = 1;
+            resourceParams.dwSize          = params.dwDataSize;
+            resourceParams.bIsWritable     = false;
 
-            cmd.HcpIndirectCuObjectObjectMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpIndirectCuObjectObjectMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_MFX_INDIRECT_MV_OBJECT_CODEC].Value;
-        }
-
-        if (params.presPakBaseObjectBuffer)
-        {
-            resourceParams.presResource                      = params.presPakBaseObjectBuffer;
-            resourceParams.dwOffset                          = params.presPakBaseObjectBuffer->dwResourceOffset;
-            resourceParams.pdwCmd                            = (cmd.DW9_10.Value);
-            resourceParams.dwLocationInCmd                   = _MHW_CMD_DW_LOCATION(DW9_10);
-            resourceParams.dwSize                            = MOS_ALIGN_FLOOR(params.dwPakBaseObjectSize, 0x1000);
-            resourceParams.bIsWritable                       = true;
+            // upper bound of the allocated resource will be set at 3 DW apart from address location
             resourceParams.dwUpperBoundLocationOffsetFromCmd = 3;
 
-            InitMocsParams(resourceParams, &cmd.HcpPakBseObjectAddressMemoryAddressAttributes.DW0.Value, 1, 6);
-
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.HcpPakBseObjectAddressMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpPakBseObjectAddressMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_MFC_INDIRECT_PAKBASE_OBJECT_CODEC].Value;
 
             resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
         }
 
-        if (params.presCompressedHeaderBuffer)
+        if (!params.bDecodeInUse)
         {
-            resourceParams.presResource    = params.presCompressedHeaderBuffer;
-            resourceParams.dwOffset        = 0;
-            resourceParams.pdwCmd          = (cmd.DW14_15.Value);
-            resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW14_15);
-            resourceParams.dwSize          = params.dwCompressedHeaderSize;
-            resourceParams.bIsWritable     = false;
+            if (params.presMvObjectBuffer)
+            {
+                resourceParams.presResource                      = params.presMvObjectBuffer;
+                resourceParams.dwOffset                          = params.dwMvObjectOffset;
+                resourceParams.pdwCmd                            = (cmd.DW6_7.Value);
+                resourceParams.dwLocationInCmd                   = _MHW_CMD_DW_LOCATION(DW6_7);
+                resourceParams.dwSize                            = MOS_ALIGN_CEIL(params.dwMvObjectSize, 0x1000);
+                resourceParams.bIsWritable                       = false;
+                resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
 
-            InitMocsParams(resourceParams, &cmd.HcpVp9PakCompressedHeaderSyntaxStreaminMemoryAddressAttributes.DW0.Value, 1, 6);
+                InitMocsParams(resourceParams, &cmd.HcpIndirectCuObjectObjectMemoryAddressAttributes.DW0.Value, 1, 6);
 
-            MHW_MI_CHK_STATUS(AddResourceToCmd(
-                this->m_osItf,
-                this->m_currentCmdBuf,
-                &resourceParams));
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
+            }
 
-            cmd.HcpVp9PakCompressedHeaderSyntaxStreaminMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpVp9PakCompressedHeaderSyntaxStreaminMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_COMPRESSED_HEADER_BUFFER_CODEC].Value;
-        }
+            if (params.presPakBaseObjectBuffer)
+            {
+                resourceParams.presResource                      = params.presPakBaseObjectBuffer;
+                resourceParams.dwOffset                          = params.presPakBaseObjectBuffer->dwResourceOffset;
+                resourceParams.pdwCmd                            = (cmd.DW9_10.Value);
+                resourceParams.dwLocationInCmd                   = _MHW_CMD_DW_LOCATION(DW9_10);
+                resourceParams.dwSize                            = MOS_ALIGN_FLOOR(params.dwPakBaseObjectSize, 0x1000);
+                resourceParams.bIsWritable                       = true;
+                resourceParams.dwUpperBoundLocationOffsetFromCmd = 3;
 
-        if (params.presProbabilityCounterBuffer)
-        {
-            resourceParams.presResource    = params.presProbabilityCounterBuffer;
-            resourceParams.dwOffset        = params.dwProbabilityCounterOffset;
-            resourceParams.pdwCmd          = (cmd.DW17_18.Value);
-            resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW17_18);
-            resourceParams.dwSize          = params.dwProbabilityCounterSize;
-            resourceParams.bIsWritable     = true;
+                InitMocsParams(resourceParams, &cmd.HcpPakBseObjectAddressMemoryAddressAttributes.DW0.Value, 1, 6);
 
-            InitMocsParams(resourceParams, &cmd.HcpVp9PakProbabilityCounterStreamoutMemoryAddressAttributes.DW0.Value, 1, 6);
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
 
-            MHW_MI_CHK_STATUS(AddResourceToCmd(
-                this->m_osItf,
-                this->m_currentCmdBuf,
-                &resourceParams));
+                resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
+            }
 
-            cmd.HcpVp9PakProbabilityCounterStreamoutMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpVp9PakProbabilityCounterStreamoutMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_VP9_PROBABILITY_COUNTER_BUFFER_CODEC].Value;
-        }
+            if (params.presCompressedHeaderBuffer)
+            {
+                resourceParams.presResource    = params.presCompressedHeaderBuffer;
+                resourceParams.dwOffset        = 0;
+                resourceParams.pdwCmd          = (cmd.DW14_15.Value);
+                resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW14_15);
+                resourceParams.dwSize          = params.dwCompressedHeaderSize;
+                resourceParams.bIsWritable     = false;
 
-        if (params.presProbabilityDeltaBuffer)
-        {
-            resourceParams.presResource    = params.presProbabilityDeltaBuffer;
-            resourceParams.dwOffset        = 0;
-            resourceParams.pdwCmd          = (cmd.DW20_21.Value);
-            resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW20_21);
-            resourceParams.dwSize          = params.dwProbabilityDeltaSize;
-            resourceParams.bIsWritable     = false;
+                InitMocsParams(resourceParams, &cmd.HcpVp9PakCompressedHeaderSyntaxStreaminMemoryAddressAttributes.DW0.Value, 1, 6);
 
-            InitMocsParams(resourceParams, &cmd.HcpVp9PakProbabilityDeltasStreaminMemoryAddressAttributes.DW0.Value, 1, 6);
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
+            }
 
-            MHW_MI_CHK_STATUS(AddResourceToCmd(
-                this->m_osItf,
-                this->m_currentCmdBuf,
-                &resourceParams));
+            if (params.presProbabilityCounterBuffer)
+            {
+                resourceParams.presResource    = params.presProbabilityCounterBuffer;
+                resourceParams.dwOffset        = params.dwProbabilityCounterOffset;
+                resourceParams.pdwCmd          = (cmd.DW17_18.Value);
+                resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW17_18);
+                resourceParams.dwSize          = params.dwProbabilityCounterSize;
+                resourceParams.bIsWritable     = true;
 
-            cmd.HcpVp9PakProbabilityDeltasStreaminMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpVp9PakProbabilityDeltasStreaminMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_PROBABILITY_DELTA_BUFFER_CODEC].Value;
-        }
+                InitMocsParams(resourceParams, &cmd.HcpVp9PakProbabilityCounterStreamoutMemoryAddressAttributes.DW0.Value, 1, 6);
 
-        if (params.presTileRecordBuffer)
-        {
-            resourceParams.presResource    = params.presTileRecordBuffer;
-            resourceParams.dwOffset        = 0;
-            resourceParams.pdwCmd          = (cmd.DW23_24.Value);
-            resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW23_24);
-            resourceParams.dwSize          = params.dwTileRecordSize;
-            resourceParams.bIsWritable     = true;
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
+            }
 
-            InitMocsParams(resourceParams, &cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value, 1, 6);
+            if (params.presProbabilityDeltaBuffer)
+            {
+                resourceParams.presResource    = params.presProbabilityDeltaBuffer;
+                resourceParams.dwOffset        = 0;
+                resourceParams.pdwCmd          = (cmd.DW20_21.Value);
+                resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW20_21);
+                resourceParams.dwSize          = params.dwProbabilityDeltaSize;
+                resourceParams.bIsWritable     = false;
 
-            MHW_MI_CHK_STATUS(AddResourceToCmd(
-                this->m_osItf,
-                this->m_currentCmdBuf,
-                &resourceParams));
+                InitMocsParams(resourceParams, &cmd.HcpVp9PakProbabilityDeltasStreaminMemoryAddressAttributes.DW0.Value, 1, 6);
 
-            cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_TILE_RECORD_BUFFER_CODEC].Value;
-        }
-        else if (params.presPakTileSizeStasBuffer)
-        {
-            resourceParams.presResource    = params.presPakTileSizeStasBuffer;
-            resourceParams.dwOffset        = params.dwPakTileSizeRecordOffset;
-            resourceParams.pdwCmd          = (cmd.DW23_24.Value);
-            resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW23_24);
-            resourceParams.dwSize          = params.dwPakTileSizeStasBufferSize;
-            resourceParams.bIsWritable     = WRITE_WA;
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
+            }
 
-            InitMocsParams(resourceParams, &cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value, 1, 6);
+            if (params.presTileRecordBuffer)
+            {
+                resourceParams.presResource    = params.presTileRecordBuffer;
+                resourceParams.dwOffset        = 0;
+                resourceParams.pdwCmd          = (cmd.DW23_24.Value);
+                resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW23_24);
+                resourceParams.dwSize          = params.dwTileRecordSize;
+                resourceParams.bIsWritable     = true;
 
-            MHW_MI_CHK_STATUS(AddResourceToCmd(
-                this->m_osItf,
-                this->m_currentCmdBuf,
-                &resourceParams));
+                InitMocsParams(resourceParams, &cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value, 1, 6);
 
-            cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_TILE_SIZE_STAS_BUFFER_CODEC].Value;
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
+            }
+            else if (params.presPakTileSizeStasBuffer)
+            {
+                resourceParams.presResource    = params.presPakTileSizeStasBuffer;
+                resourceParams.dwOffset        = params.dwPakTileSizeRecordOffset;
+                resourceParams.pdwCmd          = (cmd.DW23_24.Value);
+                resourceParams.dwLocationInCmd = _MHW_CMD_DW_LOCATION(DW23_24);
+                resourceParams.dwSize          = params.dwPakTileSizeStasBufferSize;
+                resourceParams.bIsWritable     = WRITE_WA;
+
+                InitMocsParams(resourceParams, &cmd.HcpVp9PakTileRecordStreamoutMemoryAddressAttributes.DW0.Value, 1, 6);
+
+                MHW_MI_CHK_STATUS(AddResourceToCmd(
+                    this->m_osItf,
+                    this->m_currentCmdBuf,
+                    &resourceParams));
+            }
         }
 
         return MOS_STATUS_SUCCESS;
@@ -965,12 +1205,141 @@ protected:
     {
         _MHW_SETCMD_CALLBASE(HCP_BSD_OBJECT);
 
-        return MOS_STATUS_SUCCESS;
+        #define DO_FIELDS()                                             \
+            DO_FIELD(DW1, IndirectBsdDataLength, params.bsdDataLength); \
+            DO_FIELD(DW2, IndirectDataStartAddress, params.bsdDataStartOffset);
+
+#include "mhw_hwcmd_process_cmdfields.h"
     }
 
     _MHW_SETCMD_OVERRIDE_DECL(HCP_TILE_STATE)
     {
         _MHW_SETCMD_CALLBASE(HCP_TILE_STATE);
+
+        cmd.DW1.Numtilecolumnsminus1 = params.numTileColumnsMinus1;
+        cmd.DW1.Numtilerowsminus1    = params.numTileRowsMinus1;
+
+        uint32_t column       = params.numTileColumnsMinus1 + 1;
+        uint32_t lastDwEleNum = column % 4;
+        uint32_t count        = column / 4;
+
+        for (uint8_t i = 0; i < 5; i++)
+        {
+            cmd.CtbColumnPositionOfTileColumn[i].DW0.Value = 0;
+        }
+
+        for (uint8_t i = 0; i < 6; i++)
+        {
+            cmd.CtbRowPositionOfTileRow[i].DW0.Value = 0;
+        }
+
+        cmd.CtbColumnPositionMsb.DW0.Value = 0;
+        cmd.CtbColumnPositionMsb.DW1.Value = 0;
+        cmd.CtbRowPositionMsb.DW0.Value    = 0;
+        cmd.CtbRowPositionMsb.DW1.Value    = 0;
+
+        uint32_t colCumulativeValue = 0;
+        uint32_t rowCumulativeValue = 0;
+
+        // Column Position
+        for (uint32_t i = 0; i < count; i++)
+        {
+            uint32_t &CtbColumnMsbValue = ((i << 3) >> 5) == 0 ? cmd.CtbColumnPositionMsb.DW0.Value : cmd.CtbColumnPositionMsb.DW1.Value;
+
+            cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos0I = colCumulativeValue & 0xFF; // lower 8bits
+            CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 0)); // MSB 2bits
+            colCumulativeValue                               += params.pTileColWidth[4 * i];
+
+            cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos1I = colCumulativeValue & 0xFF; // lower 8bits
+            CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 2)); // MSB 2bits
+            colCumulativeValue                               += params.pTileColWidth[4 * i + 1];
+
+            cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos2I = colCumulativeValue & 0xFF; // lower 8bits
+            CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 4)); // MSB 2bits
+            colCumulativeValue                               += params.pTileColWidth[4 * i + 2];
+
+            cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos3I = colCumulativeValue & 0xFF; // lower 8bits
+            CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 6)); // MSB 2bits
+            colCumulativeValue                               += params.pTileColWidth[4 * i + 3];
+        }
+
+        if (lastDwEleNum)
+        {
+            uint32_t  i                 = count;
+            uint32_t &CtbColumnMsbValue = ((i << 3) >> 5) == 0 ? cmd.CtbColumnPositionMsb.DW0.Value : cmd.CtbColumnPositionMsb.DW1.Value;
+
+            if (i < 5)
+            {
+                cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos0I = colCumulativeValue & 0xFF; // lower 8bits
+                CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 0)); // MSB 2bits
+
+                if (lastDwEleNum > 1)
+                {
+                    colCumulativeValue                               += params.pTileColWidth[4 * i];
+                    cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos1I = colCumulativeValue & 0xFF;  //lower 8bits
+                    CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 2)); // MSB 2bits
+
+                    if (lastDwEleNum > 2)
+                    {
+                        colCumulativeValue                               += params.pTileColWidth[4 * i + 1];
+                        cmd.CtbColumnPositionOfTileColumn[i].DW0.Ctbpos2I = colCumulativeValue & 0xFF;  //lower 8bits
+                        CtbColumnMsbValue                                 = CtbColumnMsbValue | (((colCumulativeValue >> 8) & 0x3) << ((i * 8) + 4)); // MSB 2bits
+                    }
+                }
+            }
+        }
+
+        // Row Postion
+        uint32_t row = params.numTileRowsMinus1 + 1;
+        lastDwEleNum = row % 4;
+        count        = row / 4;
+
+        for (uint32_t i = 0; i < count; i++)
+        {
+            uint32_t &CtbRowMsbValue = ((i << 3) >> 5) == 0 ? cmd.CtbRowPositionMsb.DW0.Value : cmd.CtbRowPositionMsb.DW1.Value;
+
+            cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos0I = rowCumulativeValue & 0xFF; // lower 8bits
+            CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 0)); // MSB 2bits
+            rowCumulativeValue                         += params.pTileRowHeight[4 * i];
+
+            cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos1I = rowCumulativeValue & 0xFF; // lower 8bits
+            CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 2)); // MSB 2bits
+            rowCumulativeValue                         += params.pTileRowHeight[4 * i + 1];
+
+            cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos2I = rowCumulativeValue & 0xFF; // lower 8bits
+            CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 4)); // MSB 2bits
+            rowCumulativeValue                         += params.pTileRowHeight[4 * i + 2];
+
+            cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos3I = rowCumulativeValue & 0xFF; // lower 8bits
+            CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 6)); // MSB 2bits
+            rowCumulativeValue                         += params.pTileRowHeight[4 * i + 3];
+        }
+
+        if (lastDwEleNum)
+        {
+            uint32_t i = count;
+            uint32_t &CtbRowMsbValue = ((i << 3) >> 5) == 0 ? cmd.CtbRowPositionMsb.DW0.Value : cmd.CtbRowPositionMsb.DW1.Value;
+
+            if (i < 6)
+            {
+                cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos0I = rowCumulativeValue & 0xFF; // lower 8bits
+                CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 0)); // MSB 2bits
+
+                if (lastDwEleNum > 1)
+                {
+                    rowCumulativeValue                         += params.pTileRowHeight[4 * i];
+                    cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos1I = rowCumulativeValue & 0xFF; // lower 8bits
+                    CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 2)); // MSB 2bits
+
+                    if (lastDwEleNum > 2)
+                    {
+                        rowCumulativeValue                         += params.pTileRowHeight[4 * i + 1];
+                        cmd.CtbRowPositionOfTileRow[i].DW0.Ctbpos2I = rowCumulativeValue & 0xFF; // lower 8bits
+                        CtbRowMsbValue                              = CtbRowMsbValue | (((rowCumulativeValue >> 8) & 0x3) << ((i * 8) + 4)); // MSB 2bits
+                    }
+                }
+            }
+        }
 
         return MOS_STATUS_SUCCESS;
     }
@@ -991,6 +1360,14 @@ protected:
             cmd.Entries[i].DW0.BottomFieldFlag                             = params.bottomFieldFlag[i];
         }
 
+        if (params.bDecodeInUse && (!params.bDummyReference))
+        {
+            for (uint8_t i = (uint8_t)params.ucNumRefForList; i < 16; i++)
+            {
+                cmd.Entries[i].DW0.Value = 0x00;
+            }
+        }
+
         return MOS_STATUS_SUCCESS;
     }
 
@@ -1007,23 +1384,23 @@ protected:
         for (refIdx = 0; refIdx < MAX_REF_FRAME_NUM; refIdx++)
         {
             cmd.Lumaoffsets[refIdx].DW0.DeltaLumaWeightLxI  = params.LumaWeights[i][refIdx];
-            cmd.Lumaoffsets[refIdx].DW0.LumaOffsetLxI       = (char)(params.LumaOffsets[i][refIdx] & 0xFF);         //lower 8bits
-            cmd.Lumaoffsets[refIdx].DW0.LumaOffsetLxIMsbyte = (char)((params.LumaOffsets[i][refIdx] >> 8) & 0xFF);  //MSB 8bits
+            cmd.Lumaoffsets[refIdx].DW0.LumaOffsetLxI       = (char)(params.LumaOffsets[i][refIdx] & 0xFF); // lower 8bits
+            cmd.Lumaoffsets[refIdx].DW0.LumaOffsetLxIMsbyte = (char)((params.LumaOffsets[i][refIdx] >> 8) & 0xFF); // MSB 8bits
         }
 
         // Chroma
         for (refIdx = 0; refIdx < MAX_REF_FRAME_NUM; refIdx++)
         {
-            //Cb
+            // Cb
             cmd.Chromaoffsets[refIdx].DW0.DeltaChromaWeightLxI0 = params.ChromaWeights[i][refIdx][0];
-            cmd.Chromaoffsets[refIdx].DW0.ChromaoffsetlxI0      = params.ChromaOffsets[i][refIdx][0] & 0xFF;  //lower 8bits
+            cmd.Chromaoffsets[refIdx].DW0.ChromaoffsetlxI0      = params.ChromaOffsets[i][refIdx][0] & 0xFF; // lower 8bits
 
-            //Cr
+            // Cr
             cmd.Chromaoffsets[refIdx].DW0.DeltaChromaWeightLxI1 = params.ChromaWeights[i][refIdx][1];
-            cmd.Chromaoffsets[refIdx].DW0.ChromaoffsetlxI1      = params.ChromaOffsets[i][refIdx][1] & 0xFF;  //lower 8bits
+            cmd.Chromaoffsets[refIdx].DW0.ChromaoffsetlxI1      = params.ChromaOffsets[i][refIdx][1] & 0xFF; // lower 8bits
         }
 
-        for (refIdx = 0; refIdx < MAX_REF_FRAME_NUM - 1; refIdx += 2)  //MSB 8bits
+        for (refIdx = 0; refIdx < MAX_REF_FRAME_NUM - 1; refIdx += 2) // MSB 8bits
         {
             cmd.Chromaoffsetsext[refIdx >> 1].DW0.ChromaoffsetlxI0Msbyte  = (params.ChromaOffsets[i][refIdx][0] >> 8) & 0xFF;
             cmd.Chromaoffsetsext[refIdx >> 1].DW0.ChromaoffsetlxI10Msbyte = (params.ChromaOffsets[i][refIdx + 1][0] >> 8) & 0xFF;
@@ -1031,7 +1408,7 @@ protected:
             cmd.Chromaoffsetsext[refIdx >> 1].DW0.ChromaoffsetlxI11Msbyte = (params.ChromaOffsets[i][refIdx + 1][1] >> 8) & 0xFF;
         }
 
-        //last one
+        // last one
         cmd.Chromaoffsetsext[refIdx >> 1].DW0.ChromaoffsetlxI0Msbyte = (params.ChromaOffsets[i][refIdx][0] >> 8) & 0xFF;
         cmd.Chromaoffsetsext[refIdx >> 1].DW0.ChromaoffsetlxI1Msbyte = (params.ChromaOffsets[i][refIdx][1] >> 8) & 0xFF;
 
@@ -1061,6 +1438,7 @@ protected:
     DO_FIELD(DW1, Vp9DynamicScalingEnable, params.bDynamicScalingEnabled);                                                      \
     DO_FIELD(DW1, CodecSelect, params.codecSelect);                                                                             \
     DO_FIELD(DW1, PrefetchDisable, params.prefetchDisable);                                                                     \
+    DO_FIELD(DW2, MediaSoftResetCounterPer1000Clocks, params.mediaSoftResetCounterPer1000Clocks);                               \
     DO_FIELD(DW6, PhaseIndicator, params.ucPhaseIndicator);                                                                     \
     DO_FIELD(DW6, HevcSeparateTileProgramming, params.bHEVCSeparateTileProgramming);
 
@@ -1081,9 +1459,10 @@ protected:
         resourceParams.dwLsbNum      = MHW_VDBOX_HCP_GENERAL_STATE_SHIFT;
         resourceParams.HwCommandType = MOS_MFX_PIPE_BUF_ADDR;
 
-        //Decoded Picture
+        // Decoded Picture
         cmd.DecodedPictureMemoryAddressAttributes.DW0.BaseAddressMemoryCompressionEnable = MmcEnabled(params.PreDeblockSurfMmcState) ? 1 : 0;
         cmd.DecodedPictureMemoryAddressAttributes.DW0.CompressionType                    = MmcRcEnabled(params.PreDeblockSurfMmcState) ? 1 : 0;
+        //cmd.DecodedPictureMemoryAddressAttributes.DW0.BaseAddressTiledResourceMode       = Mhw_ConvertToTRMode(params->psPreDeblockSurface->TileType);
 
         cmd.DecodedPictureMemoryAddressAttributes.DW0.TileMode = GetHwTileType(params.psPreDeblockSurface->TileType, params.psPreDeblockSurface->TileModeGMM, params.psPreDeblockSurface->bGMMTileEnabled);
 
@@ -1099,9 +1478,6 @@ protected:
             this->m_osItf,
             this->m_currentCmdBuf,
             &resourceParams));
-
-        cmd.DecodedPictureMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-        cmd.DecodedPictureMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_PRE_DEBLOCKING_CODEC].Value;
 
         // Deblocking Filter Line Buffer
         if (m_hevcDfRowStoreCache.enabled)
@@ -1127,8 +1503,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-            cmd.DeblockingFilterLineBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.DeblockingFilterLineBufferMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_DEBLOCKINGFILTER_ROWSTORE_SCRATCH_BUFFER_CODEC].Value;
         }
 
         // Deblocking Filter Tile Line Buffer
@@ -1146,9 +1520,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.DeblockingFilterTileLineBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.DeblockingFilterTileLineBufferMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_DEBLOCKINGFILTER_ROWSTORE_SCRATCH_BUFFER_CODEC].Value;
         }
 
         // Deblocking Filter Tile Column Buffer
@@ -1166,9 +1537,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.DeblockingFilterTileColumnBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.DeblockingFilterTileColumnBufferMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_DEBLOCKINGFILTER_ROWSTORE_SCRATCH_BUFFER_CODEC].Value;
         }
 
         // Metadata Line Buffer
@@ -1196,9 +1564,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.MetadataLineBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.MetadataLineBufferMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_MD_CODEC].Value;
         }
 
         // Metadata Tile Line Buffer
@@ -1216,9 +1581,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.MetadataTileLineBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.MetadataTileLineBufferMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_MD_CODEC].Value;
         }
 
         // Metadata Tile Column Buffer
@@ -1236,9 +1598,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.MetadataTileColumnBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.MetadataTileColumnBufferMemoryAddressAttributes.DW0.Value |= m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_MD_CODEC].Value;
         }
 
         // SAO Line Buffer
@@ -1261,10 +1620,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.SaoLineBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.SaoLineBufferMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_SAO_CODEC].Value;
         }
 
         // SAO Tile Line Buffer
@@ -1282,10 +1637,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.SaoTileLineBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.SaoTileLineBufferMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_SAO_CODEC].Value;
         }
 
         // SAO Tile Column Buffer
@@ -1303,10 +1654,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.SaoTileColumnBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.SaoTileColumnBufferMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_SAO_CODEC].Value;
         }
 
         // Current Motion Vector Temporal Buffer
@@ -1324,10 +1671,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.CurrentMotionVectorTemporalBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.CurrentMotionVectorTemporalBufferMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_MV_CODEC].Value;
         }
 
         bool              firstRefPic = true;
@@ -1365,13 +1708,6 @@ protected:
 
                 resourceParams.dwSharedMocsOffset = 53 - resourceParams.dwLocationInCmd;  // Common Prodected Data bit is in DW53
 
-                MOS_GPU_CONTEXT gpuContext = this->m_osItf->pfnGetGpuContext(this->m_osItf);
-                this->m_osItf->pfnSyncOnResource(
-                    this->m_osItf,
-                    params.presReferences[i],
-                    gpuContext,
-                    false);
-
                 InitMocsParams(resourceParams, &cmd.ReferencePictureBaseAddressMemoryAddressAttributes.DW0.Value, 1, 6);
 
                 MHW_MI_CHK_STATUS(AddResourceToCmd(
@@ -1380,10 +1716,6 @@ protected:
                     &resourceParams));
             }
         }
-        // Only one control DW53 for all references
-        cmd.ReferencePictureBaseAddressMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-        cmd.ReferencePictureBaseAddressMemoryAddressAttributes.DW0.Value |=
-            m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_REFERENCE_PICTURE_CODEC].Value;
 
         // Same MMC status for deblock and ref surfaces
         cmd.ReferencePictureBaseAddressMemoryAddressAttributes.DW0.BaseAddressMemoryCompressionEnable = cmd.DecodedPictureMemoryAddressAttributes.DW0.BaseAddressMemoryCompressionEnable;
@@ -1412,10 +1744,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.OriginalUncompressedPictureSourceMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.OriginalUncompressedPictureSourceMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_ORIGINAL_UNCOMPRESSED_PICTURE_ENCODE].Value;
         }
 
         // StreamOut Data Destination, Decoder only
@@ -1433,10 +1761,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.StreamoutDataDestinationMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.StreamoutDataDestinationMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_STREAMOUT_DATA_CODEC].Value;
         }
 
         // Pak Cu Level Streamout Data
@@ -1454,10 +1778,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.StreamoutDataDestinationMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.StreamoutDataDestinationMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_STREAMOUT_DATA_CODEC].Value;
         }
 
         // Decoded Picture Status / Error Buffer Base Address
@@ -1475,10 +1795,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.DecodedPictureStatusErrorBufferBaseAddressMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.DecodedPictureStatusErrorBufferBaseAddressMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_STATUS_ERROR_CODEC].Value;
         }
 
         // LCU ILDB StreamOut Buffer
@@ -1496,10 +1812,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.LcuIldbStreamoutBufferMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.LcuIldbStreamoutBufferMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_LCU_ILDB_STREAMOUT_CODEC].Value;
         }
 
         for (uint32_t i = 0; i < CODECHAL_MAX_CUR_NUM_REF_FRAME_HEVC; i++)
@@ -1524,10 +1836,6 @@ protected:
             }
         }
 
-        cmd.CollocatedMotionVectorTemporalBuffer07MemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-        cmd.CollocatedMotionVectorTemporalBuffer07MemoryAddressAttributes.DW0.Value |=
-            m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_HCP_MV_CODEC].Value;
-
         // Reset dwSharedMocsOffset
         resourceParams.dwSharedMocsOffset = 0;
 
@@ -1548,10 +1856,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.Vp9ProbabilityBufferReadWriteMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.Vp9ProbabilityBufferReadWriteMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_VP9_PROBABILITY_BUFFER_CODEC].Value;
         }
 
         // Reset dwSharedMocsOffset
@@ -1574,10 +1878,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.Vp9SegmentIdBufferReadWriteMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.Vp9SegmentIdBufferReadWriteMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_VP9_SEGMENT_ID_BUFFER_CODEC].Value;
         }
 
         // Reset dwSharedMocsOffset
@@ -1603,10 +1903,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.Vp9HvdLineRowstoreBufferReadWriteMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.Vp9HvdLineRowstoreBufferReadWriteMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_VP9_HVD_ROWSTORE_BUFFER_CODEC].Value;
         }
 
         // HVC Tile Row Store Buffer
@@ -1624,10 +1920,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.Vp9HvdTileRowstoreBufferReadWriteMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.Vp9HvdTileRowstoreBufferReadWriteMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_VP9_HVD_ROWSTORE_BUFFER_CODEC].Value;
         }
 
         // HEVC SAO row store buffer, HSAO
@@ -1650,10 +1942,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.SaoRowstoreBufferReadWriteMemoryAddressAttributes.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.SaoRowstoreBufferReadWriteMemoryAddressAttributes.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_STREAMOUT_DATA_CODEC].Value;
         }
 
         // Frame Statistics Streamout Data Destination Buffer
@@ -1671,10 +1959,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.FrameStatisticsStreamoutDataDestinationBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.FrameStatisticsStreamoutDataDestinationBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_STREAMOUT_DATA_CODEC].Value;
         }
 
         // SSE Source Pixel Row Store Buffer
@@ -1692,10 +1976,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.SseSourcePixelRowstoreBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.SseSourcePixelRowstoreBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_SSE_SRC_PIXEL_ROW_STORE_BUFFER_CODEC].Value;
         }
 
         // Slice state stream out buffer
@@ -1713,10 +1993,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.HcpScalabilitySliceStateBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpScalabilitySliceStateBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_SLICE_STATE_STREAM_OUT_BUFFER_CODEC].Value;
         }
 
         // CABAC Syntax stream out buffer
@@ -1734,10 +2010,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.HcpScalabilityCabacDecodedSyntaxElementsBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.HcpScalabilityCabacDecodedSyntaxElementsBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_CABAC_SYNTAX_STREAM_OUT_BUFFER_CODEC].Value;
         }
 
         // MV Upper Right Col Store
@@ -1755,10 +2027,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.MotionVectorUpperRightColumnStoreBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.MotionVectorUpperRightColumnStoreBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_PRED_COL_STORE_BUFFER_CODEC].Value;
         }
 
         // IntraPred Upper Right Col Store
@@ -1776,10 +2044,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.IntraPredictionUpperRightColumnStoreBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.IntraPredictionUpperRightColumnStoreBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_PRED_COL_STORE_BUFFER_CODEC].Value;
         }
 
         // IntraPred Left Recon Col Store
@@ -1797,10 +2061,6 @@ protected:
                 this->m_osItf,
                 this->m_currentCmdBuf,
                 &resourceParams));
-
-            cmd.IntraPredictionLeftReconColumnStoreBufferAttributesReadWrite.DW0.Value &= MEMORY_ADDRESS_ATTRIBUTES_MOCS_CLEAN_MASK;
-            cmd.IntraPredictionLeftReconColumnStoreBufferAttributesReadWrite.DW0.Value |=
-                m_cacheabilitySettings[MOS_CODEC_RESOURCE_USAGE_PRED_COL_STORE_BUFFER_CODEC].Value;
         }
 
         // CABAC Syntax Stream Out Buffer Max Address
@@ -1823,8 +2083,6 @@ protected:
         MEDIA_WA_TABLE *m_waTable = this->m_osItf->pfnGetWaTable(this->m_osItf);
         MHW_MI_CHK_STATUS(this->m_osItf->pfnGetResourceInfo(this->m_osItf, &params.psPreDeblockSurface->OsResource, &details));
         cmd.DecodedPictureMemoryAddressAttributes.DW0.TileMode = GetHwTileType(details.TileType, details.TileModeGMM, details.bGMMTileEnabled);
-        if ((params.Mode == CODECHAL_ENCODE_MODE_HEVC || params.Mode == CODECHAL_ENCODE_MODE_VP9) && MEDIA_IS_WA(m_waTable, WaForceTile64ReconSurfaceToTile4) && details.Format != Format_NV12 && details.TileModeGMM == MOS_TILE_64_GMM)
-            cmd.DecodedPictureMemoryAddressAttributes.DW0.TileMode = MOS_TILE_4_GMM;
 
         for (uint32_t i = 0; i < CODECHAL_MAX_CUR_NUM_REF_FRAME_HEVC; i++)
         {
@@ -1893,6 +2151,10 @@ protected:
         _MHW_SETCMD_CALLBASE(HCP_VP9_PIC_STATE);
 
 #define DO_FIELDS()                                                                              \
+    if (params.bDecodeInUse)                                                                     \
+    {                                                                                            \
+        DO_FIELD(DW0, DwordLength, params.dWordLength);                                          \
+    }                                                                                            \
     DO_FIELD(DW1, FrameWidthInPixelsMinus1, params.frameWidthInPixelsMinus1);                    \
     DO_FIELD(DW1, FrameHeightInPixelsMinus1, params.frameHeightInPixelsMinus1);                  \
     DO_FIELD(DW2, FrameType, params.frameType);                                                  \
@@ -1961,7 +2223,27 @@ protected:
     {
         _MHW_SETCMD_CALLBASE(HCP_VP9_SEGMENT_STATE);
 
-        return MOS_STATUS_SUCCESS;
+#define DO_FIELDS()                                                                           \
+    DO_FIELD(DW1, SegmentId, params.segmentId);                                               \
+    DO_FIELD(DW2, SegmentSkipped, params.segmentSkipped);                                     \
+    DO_FIELD(DW2, SegmentReference, params.segmentReference);                                 \
+    DO_FIELD(DW2, SegmentReferenceEnabled, params.segmentReferenceEnabled);                   \
+    DO_FIELD(DW3, Filterlevelref0Mode0, params.filterLevelRef0Mode0);                         \
+    DO_FIELD(DW3, Filterlevelref0Mode1, params.filterLevelRef0Mode1);                         \
+    DO_FIELD(DW3, Filterlevelref1Mode0, params.filterLevelRef1Mode0);                         \
+    DO_FIELD(DW3, Filterlevelref1Mode1, params.filterLevelRef1Mode1);                         \
+    DO_FIELD(DW4, Filterlevelref2Mode0, params.filterLevelRef2Mode0);                         \
+    DO_FIELD(DW4, Filterlevelref2Mode1, params.filterLevelRef2Mode1);                         \
+    DO_FIELD(DW4, Filterlevelref3Mode0, params.filterLevelRef3Mode0);                         \
+    DO_FIELD(DW4, Filterlevelref3Mode1, params.filterLevelRef3Mode1);                         \
+    DO_FIELD(DW5, LumaDcQuantScaleDecodeModeOnly, params.lumaDcQuantScaleDecodeModeOnly);     \
+    DO_FIELD(DW5, LumaAcQuantScaleDecodeModeOnly, params.lumaAcQuantScaleDecodeModeOnly);     \
+    DO_FIELD(DW6, ChromaDcQuantScaleDecodeModeOnly, params.chromaDcQuantScaleDecodeModeOnly); \
+    DO_FIELD(DW6, ChromaAcQuantScaleDecodeModeOnly, params.chromaAcQuantScaleDecodeModeOnly); \
+    DO_FIELD(DW7, SegmentQindexDeltaEncodeModeOnly, params.segmentQindexDeltaEncodeModeOnly); \
+    DO_FIELD(DW7, SegmentLfLevelDeltaEncodeModeOnly, params.segmentLfLevelDeltaEncodeModeOnly);
+
+#include "mhw_hwcmd_process_cmdfields.h"
     }
 
     _MHW_SETCMD_OVERRIDE_DECL(HEVC_VP9_RDOQ_STATE)
@@ -2038,8 +2320,37 @@ protected:
     {
         _MHW_SETCMD_CALLBASE(HCP_PALETTE_INITIALIZER_STATE);
 
+        cmd.DW1.ActivePaletteInitializerTableEntries = params.predictorPaletteSize;
+
+        uint32_t yentryIdx = 0;
+        for (uint32_t i = 0; i < params.hevcSccPaletteSize; i += 3)
+        {
+            // First 64 color entries
+            yentryIdx = i * 2 / 3;
+            cmd.First64ColorEntries[i] = params.predictorPaletteEntries[0][yentryIdx]; // Y
+            cmd.First64ColorEntries[i] |= ((uint32_t)params.predictorPaletteEntries[1][yentryIdx] << 16); // Cb
+
+            cmd.First64ColorEntries[i + 1] = params.predictorPaletteEntries[2][yentryIdx]; // Cr
+            cmd.First64ColorEntries[i + 1] |= ((uint32_t)params.predictorPaletteEntries[0][yentryIdx + 1] << 16); // Y
+
+            cmd.First64ColorEntries[i + 2] = params.predictorPaletteEntries[1][yentryIdx + 1]; // Cb
+            cmd.First64ColorEntries[i + 2] |= ((uint32_t)params.predictorPaletteEntries[2][yentryIdx + 1] << 16); // Cr
+
+            // Second 64 color entries
+            yentryIdx += 64;
+            cmd.Second64ColorEntries[i] = params.predictorPaletteEntries[0][yentryIdx]; // Y
+            cmd.Second64ColorEntries[i] |= ((uint32_t)params.predictorPaletteEntries[1][yentryIdx] << 16); // Cb
+
+            cmd.Second64ColorEntries[i + 1] = params.predictorPaletteEntries[2][yentryIdx]; // Cr
+            cmd.Second64ColorEntries[i + 1] |= ((uint32_t)params.predictorPaletteEntries[0][yentryIdx + 1] << 16); // Y
+
+            cmd.Second64ColorEntries[i + 2] = params.predictorPaletteEntries[1][yentryIdx + 1]; // Cb
+            cmd.Second64ColorEntries[i + 2] |= ((uint32_t)params.predictorPaletteEntries[2][yentryIdx + 1] << 16); // Cr
+        }
+
         return MOS_STATUS_SUCCESS;
     }
+MEDIA_CLASS_DEFINE_END(mhw__vdbox__hcp__Impl)
 };
 }  // namespace hcp
 }  // namespace vdbox

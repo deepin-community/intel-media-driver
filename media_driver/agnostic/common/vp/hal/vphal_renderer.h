@@ -161,11 +161,14 @@ public:
     VPHAL_SURFACE               IntermediateSurface = {};
     PVPHAL_HDR_STATE            pHdrState;
 
+    // Perf Optimize for ClearVideoView DDI
+    bool m_clearVideoViewMode = false;
+
 protected:
     // Renderer private data
-    PRENDERHAL_INTERFACE        m_pRenderHal;
+    PRENDERHAL_INTERFACE_LEGACY m_pRenderHal;
     PMOS_INTERFACE              m_pOsInterface;
-
+    MediaUserSettingSharedPtr   m_userSettingPtr = nullptr;   //!< usersettingInstance
     // Auxiliary
     MEDIA_FEATURE_TABLE           *m_pSkuTable;
     MEDIA_WA_TABLE              *m_pWaTable;

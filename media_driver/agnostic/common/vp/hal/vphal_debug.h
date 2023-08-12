@@ -33,13 +33,11 @@
 #ifndef __VPHAL_DEBUG_H__
 #define __VPHAL_DEBUG_H__
 
-#include "vphal_common.h"       // Common interfaces and structures
-
 #if (_DEBUG || _RELEASE_INTERNAL)
 
-#include "renderhal.h"
+#include "renderhal_legacy.h"
 #include "mhw_vebox.h"
-
+#include "vphal_common.h"
 #if !defined(LINUX) && !defined(ANDROID)
 #include "UmdStateSeparation.h"
 #endif
@@ -401,6 +399,7 @@ struct VPHAL_DBG_DUMP_SPEC
     VPHAL_DBG_CB_DUMP_SPEC                 *pCBDumpSpec;
     VPHAL_DBG_VEBOXSTATE_DUMP_SPEC         *pVeboxStateDumpSpec;
     VPHAL_DBG_STATISTICS_DUMP_SPEC         *pStatisticsDumpSpec;
+    uint32_t                               enableStateDump;  // Enable state dump
 };
 //-------------------------------------------------------------------------------
 // All information about parameters output dump
@@ -459,11 +458,7 @@ public:
     //!
     //! \brief    VphalSurfaceDumper constuctor
     //!
-    VphalSurfaceDumper(PMOS_INTERFACE pOsInterface)
-    :   m_dumpSpec(),
-        m_osInterface(pOsInterface)
-    {
-    };
+    VphalSurfaceDumper(PMOS_INTERFACE pOsInterface);
 
     //!
     //! \brief    VphalSurfaceDumper destuctor
@@ -563,6 +558,7 @@ protected:
     char                        m_dumpLoc[MAX_PATH];        // to avoid recursive call from diff owner but sharing the same buffer
     static uint32_t             m_frameNumInVp;             // For use when vp dump its compressed surface, override the frame number given from MediaVeboxDecompState
     static char                 m_dumpLocInVp[MAX_PATH];    // For use when vp dump its compressed surface, to distinguish each vp loc's pre/post decomp
+    MediaUserSettingSharedPtr   m_userSettingPtr = nullptr; // userSettingInstance
 
 private:
 
@@ -654,17 +650,7 @@ public:
     //!
     //! \brief    VphalHwStateDumper constuctor
     //!
-    VphalHwStateDumper(PRENDERHAL_INTERFACE             pRenderHal)
-        :   m_dumpSpec(),
-            iDebugStage(0),
-            iPhase(0),
-            m_renderHal(pRenderHal),
-            m_osInterface(pRenderHal->pOsInterface),
-            m_hwSizes(pRenderHal->pHwSizes),
-            m_stateHeap(pRenderHal->pStateHeap),
-            m_stateHeapSettings(&pRenderHal->StateHeapSettings)
-    {
-    };
+    VphalHwStateDumper(PRENDERHAL_INTERFACE pRenderHal);
 
     //!
     //! \brief    VphalHwStateDumper destuctor
@@ -765,7 +751,7 @@ private:
     PMHW_RENDER_STATE_SIZES         m_hwSizes;
     PRENDERHAL_STATE_HEAP           m_stateHeap;
     PRENDERHAL_STATE_HEAP_SETTINGS  m_stateHeapSettings;
-
+    MediaUserSettingSharedPtr       m_userSettingPtr = nullptr;  // userSettingInstance
     //!
     //! \brief    Take dump location strings and break down into individual 
     //!           post-processing pipeline locations and state types.
@@ -1088,11 +1074,7 @@ public:
     //!
     //! \brief    VphalParameterDumper constuctor
     //!
-    VphalParameterDumper(PMOS_INTERFACE pOsInterface)
-    :   m_dumpSpec(),
-        m_osInterface(pOsInterface)
-    {
-    };
+    VphalParameterDumper(PMOS_INTERFACE pOsInterface);
 
     //!
     //! \brief    Get VPHAL Parameters Dump Spec
@@ -1208,7 +1190,7 @@ protected:
 
 private:
     PMOS_INTERFACE  m_osInterface;
-
+    MediaUserSettingSharedPtr m_userSettingPtr = nullptr;  // userSettingInstance
     //!
     //! \brief    Gets Debug Whole Format String
     //! \param    [in] format
@@ -1307,6 +1289,15 @@ private:
     //!           String of vphal denoise level
     //!
     const char * GetDenoiseModeStr(VPHAL_NOISELEVEL noise_level);
+
+    //!
+    //! \brief    Gets Debug HVS Denoise Mode String
+    //! \param    [in] hvs denoise mode
+    //!           vphal hvsdn mode
+    //! \return   const char *
+    //!           String of vphal hvs denoise mode
+    //!
+    const char *GetHVSDenoiseModeStr(VPHAL_HVSDN_MODE hvs_dn_mode);
 };
 
 //!
@@ -1413,9 +1404,7 @@ public:
 
 };
 
-#endif // (_DEBUG || _RELEASE_INTERNAL)
-
-#if (!(_DEBUG || _RELEASE_INTERNAL))
+#else
 
 #define VPHAL_DBG_SURFACE_DUMP(dumper, surf, frameCntr, layerCntr, loc)
 #define VPHAL_DBG_SURFACE_PTRS_DUMP(                                            \
@@ -1439,163 +1428,5 @@ public:
 #define SkuWaTable_DUMPPER_DUMP_XML(skuTable, waTable)
 
 #endif // (!(_DEBUG || _RELEASE_INTERNAL) || EMUL)
-
-#define VPHAL_DBG_OCA_DUMPER_CREATE(pRenderHal)                                       \
-    if (pRenderHal)                                                                   \
-        pRenderHal->pVphalOcaDumper = MOS_New(VphalOcaDumper);
-
-#define VPHAL_DBG_OCA_DUMPER_DESTORY(pRenderHal)                                      \
-    if (pRenderHal && pRenderHal->pVphalOcaDumper)                                    \
-        VphalOcaDumper::Delete(pRenderHal->pVphalOcaDumper);
-
-#define VPHAL_DBG_OCA_DUMPER_SET_RENDER_PARAM(pRenderHal, pRenderParams)              \
-    if (pRenderHal && pRenderHal->pVphalOcaDumper)                                    \
-        ((VphalOcaDumper*)pRenderHal->pVphalOcaDumper)->SetRenderParam(pRenderParams);
-
-
-struct VPHAL_OCA_LOG_HEADER
-{
-    uint32_t size;                          //!< Size of valid data occupied, which is used when filling OCA buffer.
-    uint32_t allocSize;                     //!< Size of allocation. Only used for buffer reusing. This value in OCA
-                                            //!< buffer is invalid.
-};
-
-struct VPHAL_OCA_SURFACE_INFO
-{
-    MOS_FORMAT              Format;         //!< Surface format
-    VPHAL_SURFACE_TYPE      SurfType;       //!< Surface type (context)
-    VPHAL_SAMPLE_TYPE       SampleType;     //!< Interlaced/Progressive sample type
-    VPHAL_CSPACE            ColorSpace;     //!< Color Space
-    VPHAL_SCALING_MODE      ScalingMode;    //!< Scaling Mode
-    MOS_TILE_TYPE           TileType;       //!< Tile Type
-    uint32_t                dwWidth;        //!< Surface width
-    uint32_t                dwHeight;       //!< Surface height
-    uint32_t                dwPitch;        //!< Surface pitch
-    RECT                    rcSrc;          //!< Source rectangle
-    RECT                    rcDst;          //!< Destination rectangle
-};
-
-struct VPHAL_OCA_TARGET_INFO
-{
-    VPHAL_OCA_SURFACE_INFO  surfInfo;
-
-    struct
-    {
-        bool                bValid;
-        VPHAL_HDR_PARAMS    params;
-    } HDRParams;
-};
-
-struct VPHAL_OCA_SOURCE_INFO
-{
-    VPHAL_OCA_SURFACE_INFO  surfInfo;
-    VPHAL_ROTATION          Rotation;       //!< 0: 0 degree, 1: 90 degree, 2: 180 degree, 3: 270 degree
-    int32_t                 iPalette;       //!< Palette Allocation
-    VPHAL_PALETTE           PaletteParams;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_BLENDING_PARAMS   params;
-    } BlendingParams;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_LUMAKEY_PARAMS    params;
-    } LumaKeyParams;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_PROCAMP_PARAMS    params;
-    } ProcampParams;
-
-    struct
-    {
-        bool                    bValid;
-        float                   fIEFFactor;
-        VPHAL_IEF_PARAMS        params;
-    } IEFParams;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_DI_PARAMS         params;
-    } DIParams;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_DENOISE_PARAMS    params;
-    } DNParams;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_COLORPIPE_PARAMS  params;
-    } ColorPipeParams;
-
-    struct
-    {
-        bool                    bValid;
-        uint32_t                uBwdRefCount;
-    } BwdRefInfo;
-
-    struct
-    {
-        bool                    bValid;
-        uint32_t                uFwdRefCount;
-    } FwdRefInfo;
-
-    struct
-    {
-        bool                    bValid;
-        VPHAL_HDR_PARAMS        params;
-    } HDRParams;
-};
-
-struct VPHAL_OCA_RENDER_PARAM
-{
-    VPHAL_OCA_LOG_HEADER  Header;
-    MOS_COMPONENT               Component;  //!< DDI component
-    int32_t                     FrameID;
-    int32_t                     Pid;
-    struct
-    {
-        bool                    bValid;
-        VPHAL_COLORFILL_PARAMS  params;
-    } ColorFillParams;
-
-    uint32_t uSrcCount;             //!< Number of sources
-    uint32_t uSrcCountDumped;       //!< Number of source info to be dumped into OCA buffer.
-                                    //!< This value is used to avoid OCA buffer log section overflow.
-    uint32_t uDstCount;             //!< Number of targets
-    uint32_t uDstCountDumped;       //!< Number of target info to be dumped into OCA buffer.
-                                    //!< This value is used to avoid OCA buffer log section overflow.
-    // Followed by VPHAL_OCA_SOURCE_INFO list and VPHAL_OCA_TARGET_INFO list.
-};
-
-class VphalOcaDumper
-{
-public:
-    VphalOcaDumper();
-    virtual ~VphalOcaDumper();
-    void SetRenderParam(VPHAL_RENDER_PARAMS *pRenderParams);
-
-    VPHAL_OCA_RENDER_PARAM *GetRenderParam()
-    {
-        return m_pOcaRenderParam;
-    }
-
-    static void Delete(void *&p);
-
-public:
-    void InitSurfInfo(VPHAL_OCA_SURFACE_INFO &surfInfo, VPHAL_SURFACE &surf);
-    void InitSourceInfo(VPHAL_OCA_SOURCE_INFO &sourceInfo, VPHAL_SURFACE &source);
-    void InitTargetInfo(VPHAL_OCA_TARGET_INFO &targetInfo, VPHAL_SURFACE &target);
-
-    VPHAL_OCA_RENDER_PARAM *m_pOcaRenderParam = nullptr;
-};
 
 #endif  // __VPHAL_DEBUG_H__

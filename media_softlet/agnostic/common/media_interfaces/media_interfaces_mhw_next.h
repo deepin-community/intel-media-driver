@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -32,11 +32,18 @@
 #include "mos_utilities.h"
 #include "mos_os.h"
 #include "mhw_vdbox_avp_itf.h"
+#include "mhw_vdbox_vdenc_itf.h"
+#include "mhw_vdbox_huc_itf.h"
+#include "mhw_mi_itf.h"
+#include "mhw_blt_itf.h"
+#include "mhw_vdbox_hcp_itf.h"
+#include "mhw_vdbox_mfx_itf.h"
+#include "mhw_vebox_itf.h"
+#include "mhw_sfc_itf.h"
+#include "mhw_render_itf.h"
 
 // forward declarations
 class MhwCpInterface;
-class MhwMiInterface;
-class MhwRenderInterface;
 class MhwSfcInterface;
 class XMHW_STATE_HEAP_INTERFACE;
 class MhwVeboxInterface;
@@ -93,21 +100,23 @@ public:
 
     //! \brief These interfaces are responsible for constructing instructions,
      //!           structures, and registers for hardware.
-    MhwCpInterface *m_cpInterface = nullptr;
-    MhwMiInterface *m_miInterface = nullptr;
-    MhwRenderInterface *m_renderInterface = nullptr;
-    MhwSfcInterface *m_sfcInterface = nullptr;
+    MhwCpInterface            *m_cpInterface        = nullptr;
+    MhwSfcInterface           *m_sfcInterface       = nullptr;
     XMHW_STATE_HEAP_INTERFACE *m_stateHeapInterface = nullptr;
-    MhwVeboxInterface *m_veboxInterface = nullptr;
-    MhwVdboxMfxInterface *m_mfxInterface = nullptr;
-    MhwVdboxHcpInterface *m_hcpInterface = nullptr;
-    MhwVdboxHucInterface *m_hucInterface = nullptr;
-    MhwVdboxVdencInterface *m_vdencInterface = nullptr;
-    MhwBltInterface *m_bltInterface = nullptr;
-    MhwVdboxAvpInterface *m_avpInterface = nullptr;
-
+    MhwVeboxInterface         *m_veboxInterface     = nullptr;
+    MhwBltInterface           *m_bltInterface       = nullptr;
+    PMOS_INTERFACE            m_osInterface         = nullptr;
     /* New mhw sub interfaces*/
-    std::shared_ptr<mhw::vdbox::avp::Itf> m_avpItf = nullptr;
+    std::shared_ptr<mhw::vdbox::avp::Itf>   m_avpItf    = nullptr;
+    std::shared_ptr<mhw::vdbox::vdenc::Itf> m_vdencItf  = nullptr;
+    std::shared_ptr<mhw::vdbox::huc::Itf>   m_hucItf    = nullptr;
+    std::shared_ptr<mhw::mi::Itf>           m_miItf     = nullptr;
+    std::shared_ptr<mhw::vdbox::hcp::Itf>   m_hcpItf    = nullptr;
+    std::shared_ptr<mhw::vdbox::mfx::Itf>   m_mfxItf    = nullptr;
+    std::shared_ptr<mhw::vebox::Itf>        m_veboxItf  = nullptr;
+    std::shared_ptr<mhw::sfc::Itf>          m_sfcItf    = nullptr;
+    std::shared_ptr<mhw::blt::Itf>          m_bltItf    = nullptr;
+    std::shared_ptr<mhw::render::Itf>       m_renderItf = nullptr;
 
     //!
     //! \brief    Calls the factory function to initialize all requested interfaces.
@@ -149,6 +158,7 @@ public:
 
 private:
     bool m_isDestroyed = false;
+MEDIA_CLASS_DEFINE_END(MhwInterfacesNext)
 };
 
 extern template class MediaFactory<uint32_t, MhwInterfacesNext>;

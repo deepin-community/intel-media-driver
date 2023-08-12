@@ -35,6 +35,7 @@
 #include <fstream>
 #include "codechal_debug.h"
 #endif
+#include "mos_os_cp_interface_specific.h"
 
 #define CODECHAL_DECODE_MPEG2_IDCTBLOCK_SIZE   64
 
@@ -517,7 +518,7 @@ MOS_STATUS CodechalDecodeMpeg2::SetFrameStates ()
     m_destSurface                         = *m_decodeParams.m_destSurface;
     m_resDataBuffer                       = *m_decodeParams.m_dataBuffer;
     m_numMacroblocks                      = m_decodeParams.m_numMacroblocks;
-    m_mbParams                            = (CodecDecodeMpeg2MbParmas *)m_decodeParams.m_macroblockParams;
+    m_mbParams                            = (CodecDecodeMpeg2MbParams *)m_decodeParams.m_macroblockParams;
     m_mpeg2ISliceConcealmentMode          = m_decodeParams.m_mpeg2ISliceConcealmentMode;
     m_mpeg2PbSliceConcealmentMode         = m_decodeParams.m_mpeg2PBSliceConcealmentMode;
     m_mpeg2PbSlicePredBiDirMvTypeOverride = m_decodeParams.m_mpeg2PBSlicePredBiDirMVTypeOverride;
@@ -844,7 +845,7 @@ MOS_STATUS CodechalDecodeMpeg2::DecodeStateLevel()
                 std::string refSurfName      = "RefSurf" + std::to_string(static_cast<uint32_t>(m_debugInterface->m_refIndex));
                 CODECHAL_DECODE_CHK_STATUS_RETURN(m_debugInterface->DumpYUVSurface(
                     &dstSurface,
-                    CodechalDbgAttr::attrReferenceSurfaces,
+                    CodechalDbgAttr::attrDecodeReferenceSurfaces,
                     refSurfName.data()));
             }
         }
@@ -1218,7 +1219,7 @@ void CodechalDecodeMpeg2::PackMotionVectors(
     CODEC_PICTURE_FLAG          pic_flag,
     PMHW_VDBOX_MPEG2_MB_STATE   mpeg2MbState)
 {
-    CodecDecodeMpeg2MbParmas *mbParams = mpeg2MbState->pMBParams;
+    CodecDecodeMpeg2MbParams *mbParams = mpeg2MbState->pMBParams;
 
     uint16_t motionType     = mbParams->MBType.m_motionType;
     uint16_t intelMotionType = CODECHAL_MPEG2_IMT_NONE;
@@ -1327,7 +1328,7 @@ MOS_STATUS CodechalDecodeMpeg2::InsertSkippedMacroblocks(
     CODECHAL_DECODE_CHK_NULL_RETURN(params->pMBParams);
 
     //save the original MB params, and restore the orignal MB params when function exit.
-    CodechalDecodeRestoreData<CodecDecodeMpeg2MbParmas> MBParamsRestore(params->pMBParams);
+    CodechalDecodeRestoreData<CodecDecodeMpeg2MbParams> MBParamsRestore(params->pMBParams);
 
     params->dwDCTLength                    = 0;
     params->dwITCoffDataAddrOffset         = 0;
@@ -1718,6 +1719,7 @@ CodechalDecodeMpeg2::CodechalDecodeMpeg2 (
 #if (_DEBUG || _RELEASE_INTERNAL)
     m_reportFrameCrc = true;
 #endif
+    m_hwInterface = hwInterface;
 }
 
 #if USE_CODECHAL_DEBUG_TOOL
@@ -1906,7 +1908,7 @@ MOS_STATUS CodechalDecodeMpeg2::DumpIQParams(
 }
 
 MOS_STATUS CodechalDecodeMpeg2::DumpMbParams(
-    CodecDecodeMpeg2MbParmas *mbParams)
+    CodecDecodeMpeg2MbParams *mbParams)
 {
     CODECHAL_DEBUG_FUNCTION_ENTER;
 

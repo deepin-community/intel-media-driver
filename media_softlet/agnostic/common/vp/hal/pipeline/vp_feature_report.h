@@ -29,8 +29,11 @@
 #ifndef __VP_FEATURE_REPORT_H__
 #define __VP_FEATURE_REPORT_H__
 
-#include "vphal_common.h"
-#include "vphal_common_tools.h"
+#include <stdint.h>
+#include "vp_common.h"
+#include "vp_common_tools.h"
+#include "media_class_trace.h"
+#include "vp_common_hdr.h"
 
 //!
 //! Class VphalFeatureReport
@@ -65,6 +68,11 @@ public:
         bool                          veFeatureInUse      = false;                        //!< If any VEBOX feature is in use, excluding pure bypass for SFC
         bool                          diScdMode           = false;                        //!< Scene change detection
         VPHAL_HDR_MODE                hdrMode             = VPHAL_HDR_MODE_NONE;          //!< HDR mode
+        bool                          packetReused        = false;                        //!< true if packet reused.
+        uint8_t                       rtCacheSetting      = 0;                            //!< Render Target cache usage
+#if (_DEBUG || _RELEASE_INTERNAL)
+        uint8_t                       rtOldCacheSetting   = 0;                            //!< Render Target old cache usage
+#endif
     };
 
     virtual ~VpFeatureReport(){};
@@ -90,7 +98,7 @@ public:
     //!
     virtual void SetConfigValues(
         PVP_CONFIG configValues,
-        uint32_t   &laceInUse);
+        bool       traceEvent = true);
 
     VP_FEATURES &GetFeatures()
     {
@@ -101,5 +109,7 @@ public:
 
 protected:
     VP_FEATURES m_features;
+
+MEDIA_CLASS_DEFINE_END(VpFeatureReport)
 };
 #endif // __VP_FEATURE_REPORT_H__

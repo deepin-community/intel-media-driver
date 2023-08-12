@@ -26,7 +26,7 @@
 
 #ifndef __MEDIA_INTERFACES_G9_GLK_H__
 #define __MEDIA_INTERFACES_G9_GLK_H__
-#include "media_interfaces.h"
+#include "media_factory.h"
 #include "media_interfaces_cmhal.h"
 #include "media_interfaces_vphal.h"
 #include "media_interfaces_decode_histogram.h"
@@ -40,6 +40,9 @@
 #endif
 #ifdef _AVC_ENCODE_VDENC_SUPPORTED
 #include "codechal_vdenc_avc_g9_kbl.h"
+#endif
+#ifdef _VP8_ENCODE_SUPPORTED
+#include "codechal_encode_vp8_g9.h"
 #endif
 #include "codechal_decode_nv12top010_g9_glk.h"
 #include "cm_hal_g9.h"
@@ -62,9 +65,9 @@ public:
 
     MOS_STATUS Initialize(
         PMOS_INTERFACE  osInterface,
-        PMOS_CONTEXT    osDriverContext,
         bool            bInitVphalState,
-        MOS_STATUS      *eStatus);
+        MOS_STATUS      *eStatus,
+        bool            clearViewMode = false);
 };
 
 class CodechalEncodeInterfacesG9Glk
@@ -85,6 +88,9 @@ public:
 #endif
 #ifdef _AVC_ENCODE_VDENC_SUPPORTED
     using AvcVdenc = CodechalVdencAvcStateG9Kbl;
+#endif
+#ifdef _VP8_ENCODE_SUPPORTED
+    using Vp8 = CodechalEncodeVp8G9;
 #endif
 };
 

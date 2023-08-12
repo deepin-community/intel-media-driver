@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2021, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -385,7 +385,9 @@ public:
         MOS_HW_RESOURCE_DEF     resUsageType   = MOS_HW_RESOURCE_DEF_MAX,
         MOS_TILE_MODE_GMM       tileModeByForce = MOS_TILE_UNSET_GMM,
         Mos_MemPool             memType = MOS_MEMPOOL_VIDEOMEMORY,
-        bool                    isNotLockable = false);
+        bool                    isNotLockable = false,
+        void                    *systemMemory = nullptr,
+        uint32_t                depth = 0);
 
     //!
     //! \brief    Allocates the Surface
@@ -566,6 +568,39 @@ public:
     bool IsSyncFreeNeededForMMCSurface(PMOS_SURFACE pOsSurface);
     void CleanRecycler();
 
+    //!
+    //! \brief    Allocate resource from cpu buffer
+    //! \details  Allocate resource from cpu buffer
+    //! \param    PMOS_RESOURCE pOsResource
+    //!           [in/out] Pointer to OS resource
+    //! \param    size_t linearAddress
+    //!           [in]    CPU address
+    //! \param    uint32_t dataSize
+    //!           [in]    data size of CPU buffer
+    //! \param    uint32_t height
+    //!           [in]    height of resource
+    //! \param    uint64_t width
+    //!           [in]    width of resource
+    //! \param    uint64_t planePitch
+    //!           [in]    pitch of resource
+    //! \param    uint32_t CpTag
+    //!           [in]    Cp surface tag value
+    //! \param    GMM_RESOURCE_FORMAT Format
+    //!           [in]    resouce format
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //!
+    MOS_STATUS AllocateCPUResource(
+        PMOS_RESOURCE osResource,           // [in/out]Pointer to OS resource
+        size_t linearAddress,               // [in]    CPU address
+        uint32_t dataSize,                  // [in]    data size of CPU buffer
+        uint32_t height,                    // [in]    height of resource
+        uint64_t width,                     // [in]    width of resource
+        uint64_t planePitch,                // [in]    pitch of resource
+        uint32_t CpTag,                     // [in]    Cp surface tag value
+        GMM_RESOURCE_FORMAT Format          // [in]    resouce format
+    );
+
 protected:
     //!
     //! \brief    Set mmc flags to surface
@@ -589,6 +624,8 @@ protected:
     Allocator       *m_allocator    = nullptr;
     MediaMemComp    *m_mmc          = nullptr;
     std::vector<VP_SURFACE *> m_recycler;   // Container for delayed destroyed surface.
+
+MEDIA_CLASS_DEFINE_END(vp__VpAllocator)
 };
 
 typedef VpAllocator* PVpAllocator;

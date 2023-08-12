@@ -1,8 +1,167 @@
-intel-media-driver (21.4.1+dfsg1-1) UNRELEASED; urgency=medium
+intel-media-driver (23.2.3+dfsg1-1) unstable; urgency=medium
 
-  * update
+  * New upstream version 23.2.3+dfsg1
 
- -- Debian Multimedia Maintainers <debian-multimedia@lists.debian.org>  Thu, 28 Apr 2022 20:53:46 -0400
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 01 Jul 2023 18:16:57 +0200
+
+intel-media-driver (23.1.2+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 23.1.2+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Fri, 03 Mar 2023 21:35:09 +0100
+
+intel-media-driver (23.1.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 23.1.1+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 18 Feb 2023 13:42:19 +0100
+
+intel-media-driver (23.1.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 23.1.0+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 22 Jan 2023 10:20:56 +0100
+
+intel-media-driver (22.6.6+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.6.6+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 15 Jan 2023 15:43:28 +0100
+
+intel-media-driver (22.6.5+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.6.5+dfsg1
+  * debian/control: Bump Standards-Version
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Thu, 05 Jan 2023 14:05:30 +0100
+
+intel-media-driver (22.6.4+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.6.4+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 10 Dec 2022 23:22:33 +0100
+
+intel-media-driver (22.6.3+dfsg1-1) unstable; urgency=medium
+
+  * debian/copyright: Update paths of removed files
+  * New upstream version 22.6.3+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Mon, 21 Nov 2022 23:11:19 +0100
+
+intel-media-driver (22.6.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.6.1+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 06 Nov 2022 20:45:34 +0100
+
+intel-media-driver (22.6.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.6.0+dfsg1
+    - Fix build with libva 2.16 (Closes: 1022327)
+  * debian/patches:
+    - Remove patches integrated upstream
+    - Apply upstream patches to handle non-free kernels
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Mon, 24 Oct 2022 20:49:26 +0200
+
+intel-media-driver (22.5.3+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.5.3+dfsg1
+  * debian/rules: Set ARCH
+  * debian/patches:
+    - Remove upstream patch
+    - Apply upstream patch to fix build on i386
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Fri, 23 Sep 2022 23:49:33 +0200
+
+intel-media-driver (22.5.1+dfsg1+really22.4.3-2) unstable; urgency=medium
+
+  * debian/: Build without -Werror
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 17 Sep 2022 11:42:26 +0200
+
+intel-media-driver (22.5.1+dfsg1+really22.4.3-1) unstable; urgency=medium
+
+  * Revert to upstream version 22.4.3 (Closes: #1016953)
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 17 Sep 2022 10:17:13 +0200
+
+intel-media-driver (22.5.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.5.1+dfsg1
+  * debian/patches: Remove upstream patch
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Tue, 02 Aug 2022 22:04:32 +0200
+
+intel-media-driver (22.4.3+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.4.3+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Thu, 16 Jun 2022 22:55:24 +0200
+
+intel-media-driver (22.4.2+dfsg1-2) unstable; urgency=medium
+
+  * debian/patches: Fix driver crash with no kernel binary (Closes: #1008776)
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sat, 04 Jun 2022 12:41:45 +0200
+
+intel-media-driver (22.4.2+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.4.2+dfsg1
+  * debian/copyright: Update after renaming of files
+  * debian/control: Bump Standards-Version
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Thu, 26 May 2022 10:25:44 +0200
+
+intel-media-driver (22.4.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.4.0+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 24 Apr 2022 23:08:55 +0200
+
+intel-media-driver (22.3.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.3.1+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Mon, 04 Apr 2022 23:23:14 +0200
+
+intel-media-driver (22.3.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.3.0+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Wed, 30 Mar 2022 21:25:56 +0200
+
+intel-media-driver (22.2.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.2.1+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Wed, 23 Feb 2022 09:17:52 +0100
+
+intel-media-driver (22.2.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.2.0+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 13 Feb 2022 18:29:57 +0100
+
+intel-media-driver (22.1.1+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.1.1+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Mon, 07 Feb 2022 22:30:17 +0100
+
+intel-media-driver (22.1.0+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 22.1.0+dfsg1
+  * debian/control: Add B-D on libdrm-dev
+  * debian/copyright: Remove new non-free kernels
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Thu, 30 Dec 2021 23:54:55 +0100
+
+intel-media-driver (21.4.2+dfsg1-1) unstable; urgency=medium
+
+  * New upstream version 21.4.2+dfsg1
+
+ -- Sebastian Ramacher <sramacher@debian.org>  Sun, 28 Nov 2021 15:41:11 +0100
 
 intel-media-driver (21.4.1+dfsg1-1) unstable; urgency=medium
 

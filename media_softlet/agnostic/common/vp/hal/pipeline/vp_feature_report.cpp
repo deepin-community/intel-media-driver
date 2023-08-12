@@ -43,6 +43,10 @@ void VpFeatureReport::InitReportValue()
     m_features.vpMMCInUse          = false;
     m_features.rtCompressible      = false;
     m_features.rtCompressMode      = 0;
+    m_features.rtCacheSetting      = 0;
+#if (_DEBUG || _RELEASE_INTERNAL)
+    m_features.rtOldCacheSetting   = 0;
+#endif
     m_features.ffdiCompressible    = false;
     m_features.ffdiCompressMode    = 0;
     m_features.ffdnCompressible    = false;
@@ -63,7 +67,7 @@ void VpFeatureReport::InitReportValue()
 
 void VpFeatureReport::SetConfigValues(
     PVP_CONFIG configValues,
-    uint32_t   &laceInUse)
+    bool       traceEvent)
 {
     VP_FUNC_CALL();
 
@@ -87,11 +91,20 @@ void VpFeatureReport::SetConfigValues(
     // Report Scaling mode
     configValues->dwCurrentScalingMode = (m_features.scalingMode == VPHAL_SCALING_AVS) ? VPDDI_ADVANCEDSCALING : (m_features.scalingMode > VPHAL_SCALING_AVS) ? VPDDI_SUPERRESOLUTIONSCALING : VPDDI_SCALING;
 
+    // Report HDR Mode
+    configValues->dwCurrentHdrMode = m_features.hdrMode;
+
     // Report Output Pipe
     configValues->dwCurrentOutputPipeMode = m_features.outputPipeMode;
 
     // Report VE Feature In Use
     configValues->dwCurrentVEFeatureInUse = m_features.veFeatureInUse;
+
+    // Report vp packet reused flag.
+    configValues->isPacketReused = m_features.packetReused;
+
+    // Report vp Dn enabled flag.
+    configValues->isDnEnabled = m_features.denoise;
 
     // Report MMC status
     configValues->dwVPMMCInUse          = m_features.vpMMCInUse;
@@ -108,6 +121,12 @@ void VpFeatureReport::SetConfigValues(
     configValues->dwPrimaryCompressible = m_features.primaryCompressible;
     configValues->dwPrimaryCompressMode = m_features.primaryCompressMode;
 
+    // Report Render Target cache usage
+    configValues->dwRTCacheSetting     = m_features.rtCacheSetting;
+#if (_DEBUG || _RELEASE_INTERNAL)
+    configValues->dwRTOldCacheSetting = m_features.rtOldCacheSetting;
+#endif
+
     // Report In Place Compositon status
     configValues->dwCurrentCompositionMode = m_features.compositionMode;
     configValues->dwCurrentScdMode         = m_features.diScdMode;
@@ -115,6 +134,7 @@ void VpFeatureReport::SetConfigValues(
     VP_PUBLIC_NORMALMESSAGE(
         "VP Feature Report: \
         OutputPipeMode %d, \
+        HDRMode %d, \
         VEFeatureInUse %d, \
         ScalingMode %d, \
         DeinterlaceMode %d, \
@@ -125,6 +145,7 @@ void VpFeatureReport::SetConfigValues(
         PrimaryCompressMode %d, \
         CompositionMode %d",
         m_features.outputPipeMode,
+        m_features.hdrMode,
         m_features.veFeatureInUse,
         m_features.scalingMode,
         m_features.deinterlaceMode,
@@ -135,5 +156,10 @@ void VpFeatureReport::SetConfigValues(
         m_features.primaryCompressMode,
         m_features.compositionMode);
 
+    if (traceEvent)
+    {
+        MT_LOG5(MT_VP_FTR_REPORT, MT_NORMAL, MT_VP_RENDERDATA_OUTPUT_PIPE, m_features.outputPipeMode, MT_VP_RENDER_VE_HDRMODE, m_features.hdrMode, 
+        MT_VP_RENDER_VE_FTRINUSE, m_features.veFeatureInUse, MT_VP_HAL_SCALING_MODE, m_features.scalingMode, MT_VP_HAL_MMCINUSE, m_features.vpMMCInUse);
+    }
     return;
 }

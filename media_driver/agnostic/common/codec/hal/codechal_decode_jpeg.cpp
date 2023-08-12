@@ -28,6 +28,7 @@
 #include "codechal_decode_jpeg.h"
 #include "codechal_mmc_decode_jpeg.h"
 #include "hal_oca_interface.h"
+#include "mos_interface.h"
 #if USE_CODECHAL_DEBUG_TOOL
 #include <sstream>
 #include "codechal_debug.h"
@@ -88,6 +89,7 @@ CodechalDecodeJpeg::CodechalDecodeJpeg(
 #if (_DEBUG || _RELEASE_INTERNAL)
     m_reportFrameCrc = true;
 #endif
+    m_hwInterface = hwInterface;
 }
 
 MOS_STATUS CodechalDecodeJpeg::InitializeBeginFrame()
@@ -379,7 +381,8 @@ MOS_STATUS CodechalDecodeJpeg::CheckSupportedFormat(
     // real output format (ARGB8888) should also be from JPEG PPS; MSDK would handle the details of treating AYUV as ARGB.
     if (*format == Format_420O || *format == Format_AYUV)
     {
-        *format = m_osInterface->pfnFmt_OsToMos((MOS_OS_FORMAT)m_jpegPicParams->m_renderTargetFormat);
+        CODECHAL_DECODE_CHK_NULL_RETURN(m_osInterface);
+        *format = m_osInterface->pfnOsFmtToMosFmt(m_jpegPicParams->m_renderTargetFormat);
     }
 
     //No support for RGBP/BGRP channel swap or YUV/RGB conversion!
@@ -547,7 +550,7 @@ MOS_STATUS CodechalDecodeJpeg::SetFrameStates()
         if (&(m_resDataBuffer)) {
             CODECHAL_DECODE_CHK_STATUS_RETURN(m_debugInterface->DumpBuffer(
                 &m_resDataBuffer,
-                CodechalDbgAttr::attrBitstream,
+                CodechalDbgAttr::attrDecodeBitstream,
                 "_DEC",
                 (m_copiedDataBufferInUse ? m_nextCopiedDataOffset : m_dataSize),
                 0,

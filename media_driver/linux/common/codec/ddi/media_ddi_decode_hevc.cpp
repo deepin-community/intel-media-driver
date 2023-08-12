@@ -138,6 +138,7 @@ VAStatus DdiDecodeHEVC::ParseSliceParams(
         }
         codecSlcParams++;
     }
+
     return VA_STATUS_SUCCESS;
 }
 
@@ -313,6 +314,20 @@ VAStatus DdiDecodeHEVC::ParsePicParams(
     codecPicParams->RefBottomFieldFlag         = 0;
     codecPicParams->StatusReportFeedbackNumber = 0;
 
+#if MOS_EVENT_TRACE_DUMP_SUPPORTED
+    // Picture Info
+    DECODE_EVENTDATA_INFO_PICTUREVA eventData = {0};
+    uint32_t minCtbSize        = 1 << (codecPicParams->log2_min_luma_coding_block_size_minus3 + 3);
+    eventData.CodecFormat                   = m_ddiDecodeCtx->wMode;
+    eventData.FrameType                     = codecPicParams->IntraPicFlag == 1 ? I_TYPE : MIXED_TYPE;
+    eventData.PicStruct                     = FRAME_PICTURE;
+    eventData.Width                         = codecPicParams->PicWidthInMinCbsY * minCtbSize;
+    eventData.Height                        = codecPicParams->PicHeightInMinCbsY * minCtbSize;
+    eventData.Bitdepth                      = codecPicParams->bit_depth_luma_minus8 + 8;
+    eventData.ChromaFormat                  = codecPicParams->chroma_format_idc;  // 0-4:0:0; 1-4:2:0; 2-4:2:2; 3-4:4:4
+    MOS_TraceEvent(EVENT_DECODE_INFO_PICTUREVA, EVENT_TYPE_INFO, &eventData, sizeof(eventData), NULL, 0);
+#endif
+
     return VA_STATUS_SUCCESS;
 }
 
@@ -402,6 +417,7 @@ VAStatus DdiDecodeHEVC::RenderPicture(
 
             DdiMedia_MediaBufferToMosResource(m_ddiDecodeCtx->BufMgr.pBitStreamBuffObject[index], &m_ddiDecodeCtx->BufMgr.resBitstreamBuffer);
             m_ddiDecodeCtx->DecodeParams.m_dataSize += dataSize;
+
             break;
         }
         case VASliceParameterBufferType:
@@ -423,6 +439,7 @@ VAStatus DdiDecodeHEVC::RenderPicture(
         {
             VAIQMatrixBufferHEVC *imxBuf = (VAIQMatrixBufferHEVC *)data;
             DDI_CHK_RET(ParseIQMatrix(mediaCtx, imxBuf),"ParseIQMatrix failed!");
+
             break;
         }
         case VAPictureParameterBufferType:
@@ -442,6 +459,7 @@ VAStatus DdiDecodeHEVC::RenderPicture(
             }
 
             MOS_SecureMemcpy(m_ddiDecodeCtx->DecodeParams.m_subsetParams, dataSize, data, dataSize);
+
             break;
         }
         case VAProcPipelineParameterBufferType:
@@ -545,6 +563,14 @@ VAStatus DdiDecodeHEVC::SetDecodeParams()
         procParams->m_inputSurface->dwHeight = procParams->m_inputSurface->OsResource.iHeight;
         procParams->m_inputSurface->dwPitch  = procParams->m_inputSurface->OsResource.iPitch;
         procParams->m_inputSurface->Format   = procParams->m_inputSurface->OsResource.Format;
+
+        if(m_requireInputRegion)
+        {
+            procParams->m_inputSurfaceRegion.m_x = 0;
+            procParams->m_inputSurfaceRegion.m_y = 0;
+            procParams->m_inputSurfaceRegion.m_width = procParams->m_inputSurface->dwWidth;
+            procParams->m_inputSurfaceRegion.m_height = procParams->m_inputSurface->dwHeight;
+        }
     }
 #endif
      return VA_STATUS_SUCCESS;

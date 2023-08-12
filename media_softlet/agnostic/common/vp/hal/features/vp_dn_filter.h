@@ -53,14 +53,28 @@ public:
         VP_EXECUTE_CAPS         vpExecuteCaps);
 
     MOS_STATUS CalculateEngineParams();
+    MOS_STATUS CalculateRenderDnHVSParams();
     PVEBOX_DN_PARAMS GetVeboxParams()
     {
         return m_veboxDnParams;
     }
+    PRENDER_DN_HVS_CAL_PARAMS GetRenderDnHVSParams()
+    {
+        return  &m_renderDnHVSParams;
+    }
 
 protected:
-    FeatureParamDenoise     m_dnParams = {};
-    PVEBOX_DN_PARAMS        m_veboxDnParams = nullptr;
+    FeatureParamDenoise      m_dnParams = {};
+    PVEBOX_DN_PARAMS         m_veboxDnParams = nullptr;
+    RENDER_DN_HVS_CAL_PARAMS m_renderDnHVSParams = {};
+    VPHAL_HVSDENOISE_PARAMS  m_hvsdenoise        = {};
+
+    SurfaceType m_surfTypeHVSTable = SurfaceTypeHVSTable;
+    uint32_t m_HVSQp       = 0;
+    uint32_t m_HVSStrength = 0;
+    uint32_t m_HVSFormat   = 0;
+
+MEDIA_CLASS_DEFINE_END(vp__VpDnFilter)
 };
 
 struct HW_FILTER_DN_PARAM : public HW_FILTER_PARAM
@@ -80,6 +94,8 @@ public:
 
 private:
     HW_FILTER_DN_PARAM m_Params = {};
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilterDnParameter)
 };
 
 class VpVeboxDnParameter : public VpPacketParameter
@@ -95,6 +111,8 @@ private:
     MOS_STATUS Initialize(HW_FILTER_DN_PARAM&params);
 
     VpDnFilter m_dnFilter;
+
+MEDIA_CLASS_DEFINE_END(vp__VpVeboxDnParameter)
 };
 
 class PolicyVeboxDnHandler : public PolicyFeatureHandler
@@ -119,6 +137,52 @@ public:
 
 private:
     PacketParamFactory<VpVeboxDnParameter> m_PacketParamFactory;
+
+MEDIA_CLASS_DEFINE_END(vp__PolicyVeboxDnHandler)
+};
+
+/*****************DN HVS Calculate Kernel********************/
+class VpRenderDnHVSCalParameter : public VpPacketParameter
+{
+public:
+    static VpPacketParameter *Create(HW_FILTER_DN_PARAM &param);
+    VpRenderDnHVSCalParameter(PVP_MHWINTERFACE pHwInterface, PacketParamFactoryBase *packetParamFactory);
+    virtual ~VpRenderDnHVSCalParameter();
+
+    virtual bool SetPacketParam(VpCmdPacket *pPacket);
+
+private:
+    MOS_STATUS Initialize(HW_FILTER_DN_PARAM &params);
+
+    VpDnFilter m_DnFilter;
+
+    MEDIA_CLASS_DEFINE_END(vp__VpRenderDnHVSCalParameter)
+};
+
+class PolicyRenderDnHVSCalHandler : public PolicyFeatureHandler
+{
+public:
+    PolicyRenderDnHVSCalHandler(VP_HW_CAPS &hwCaps);
+    virtual ~PolicyRenderDnHVSCalHandler();
+    virtual bool               IsFeatureEnabled(VP_EXECUTE_CAPS vpExecuteCaps);
+    virtual HwFilterParameter *CreateHwFilterParam(VP_EXECUTE_CAPS vpExecuteCaps, SwFilterPipe &swFilterPipe, PVP_MHWINTERFACE pHwInterface);
+    virtual MOS_STATUS         UpdateFeaturePipe(VP_EXECUTE_CAPS caps, SwFilter &feature, SwFilterPipe &featurePipe, SwFilterPipe &executePipe, bool isInputPipe, int index);
+    static VpPacketParameter * CreatePacketParam(HW_FILTER_PARAM &param)
+    {
+        if (param.type != FeatureTypeDnHVSCalOnRender)
+        {
+            VP_PUBLIC_ASSERTMESSAGE("Invalid Parameter for Render Dn HVS Calculation!");
+            return nullptr;
+        }
+
+        HW_FILTER_DN_PARAM * dnParam  = (HW_FILTER_DN_PARAM *)(&param);
+        return VpRenderDnHVSCalParameter::Create(*dnParam);
+    }
+
+private:
+    PacketParamFactory<VpRenderDnHVSCalParameter> m_PacketParamFactory;
+
+    MEDIA_CLASS_DEFINE_END(vp__PolicyRenderDnHVSCalHandler)
 };
 }
 #endif

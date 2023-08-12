@@ -29,7 +29,7 @@
 
 #include "mos_os_specific.h"
 #include "mhw_vebox.h"
-#include "vphal_common.h"
+#include "vp_common.h"
 #include "vp_platform_interface.h"
 #include "vp_pipeline.h"
 
@@ -113,6 +113,7 @@ protected:
     vp::VpScalingFilter     *m_scalingFilter        = nullptr;
     vp::VpRotMirFilter      *m_rotMirFilter         = nullptr;
     bool                    m_isMmcAllocated        = false;
+MEDIA_CLASS_DEFINE_END(MediaVdboxSfcRender)
 };
 
 #endif // __MEDIA_VDBOX_SFC_RENDER_H__

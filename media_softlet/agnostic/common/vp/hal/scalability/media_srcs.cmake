@@ -1,4 +1,4 @@
-# Copyright (c) 2019, Intel Corporation
+# Copyright (c) 2019-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -20,17 +20,12 @@
 
 set(TMP_SOURCES_
     ${CMAKE_CURRENT_LIST_DIR}/vp_scalability_option.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/vp_scalability_singlepipe.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/vp_scalability_singlepipe_next.cpp
 )
 
 set(TMP_HEADERS_
     ${CMAKE_CURRENT_LIST_DIR}/vp_scalability_option.h
-    ${CMAKE_CURRENT_LIST_DIR}/vp_scalability_singlepipe.h
-)
-
-set(SOURCES_
-    ${SOURCES_}
-    ${TMP_SOURCES_}
+    ${CMAKE_CURRENT_LIST_DIR}/vp_scalability_singlepipe_next.h
 )
 
 set(HEADERS_NEW
@@ -38,16 +33,20 @@ set(HEADERS_NEW
     ${TMP_HEADERS_}
 )
 
-set(COMMON_SOURCES_
-    ${COMMON_SOURCES_}
+set(SOFTLET_VP_SOURCES_
+    ${SOFTLET_VP_SOURCES_}
     ${TMP_SOURCES_}
 )
 
-set(COMMON_HEADERS_
-    ${COMMON_HEADERS_}
+set(SOFTLET_VP_HEADERS_
+    ${SOFTLET_VP_HEADERS_}
     ${TMP_HEADERS_}
 )
 
 source_group( VpHalNext\\Shared\\Scalability FILES ${TMP_SOURCES_} ${TMP_HEADERS_})
-
-media_add_curr_to_include_path()
+set(TMP_SOURCES_ "")
+set(TMP_HEADERS_ "")
+set (SOFTLET_VP_PRIVATE_INCLUDE_DIRS_
+    ${SOFTLET_VP_PRIVATE_INCLUDE_DIRS_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)

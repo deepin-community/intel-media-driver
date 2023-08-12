@@ -25,7 +25,7 @@
 //!           this file is for the base interface which is shared by all Procamp in driver.
 //!
 #include "vp_procamp_filter.h"
-#include "vp_vebox_cmd_packet.h"
+#include "vp_vebox_cmd_packet_base.h"
 #include "hw_filter.h"
 #include "sw_filter_pipe.h"
 
@@ -191,18 +191,21 @@ bool VpVeboxProcampParameter::SetPacketParam(VpCmdPacket *pPacket)
 {
     VP_FUNC_CALL();
 
-    VpVeboxCmdPacket *pVeboxPacket = dynamic_cast<VpVeboxCmdPacket *>(pPacket);
-    if (nullptr == pVeboxPacket)
-    {
-        return false;
-    }
-
     VEBOX_PROCAMP_PARAMS *pParams = m_procampFilter.GetVeboxParams();
     if (nullptr == pParams)
     {
+        VP_PUBLIC_ASSERTMESSAGE("Failed to get Vebox procamp params");
         return false;
     }
-    return MOS_SUCCEEDED(pVeboxPacket->SetProcampParams(pParams));
+
+    VpVeboxCmdPacketBase *packet = dynamic_cast<VpVeboxCmdPacketBase *>(pPacket);
+    if (packet)
+    {
+        return MOS_SUCCEEDED(packet->SetProcampParams(pParams));
+    }
+
+    VP_PUBLIC_ASSERTMESSAGE("Invalid packet for Vebox procamp");
+    return false;
 }
 
 MOS_STATUS VpVeboxProcampParameter::Initialize(HW_FILTER_PROCAMP_PARAM &params)

@@ -495,7 +495,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiDndiStateSize);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiDndiStateSize);
 
         MOS_ZeroMemory(&ResourceParams, sizeof(ResourceParams));
         if (bUseCmBuffer)
@@ -518,7 +518,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiIecpStateSize);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiIecpStateSize);
 
         MOS_ZeroMemory(&ResourceParams, sizeof(ResourceParams));
 
@@ -542,7 +542,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiGamutStateSize);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiGamutStateSize);
 
         MOS_ZeroMemory(&ResourceParams, sizeof(ResourceParams));
         if (bUseCmBuffer)
@@ -565,7 +565,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiVertexTableSize);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiVertexTableSize);
 
         MOS_ZeroMemory(&ResourceParams, sizeof(ResourceParams));
         if (bUseCmBuffer)
@@ -588,7 +588,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiCapturePipeStateSize);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiCapturePipeStateSize);
 
         if (pVeboxStateCmdParams->pLaceLookUpTables)
         {
@@ -627,7 +627,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiGammaCorrectionStateSize);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, ResourceParams.dwOffset, false, m_veboxSettings.uiGammaCorrectionStateSize);
     }
     else
     {
@@ -661,7 +661,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
             pCmdBuffer,
             &ResourceParams));
 
-        HalOcaInterface::OnIndirectState(*pCmdBuffer, *pOsContext, ResourceParams.presResource, 0, true, 0);
+        HalOcaInterface::OnIndirectState(*pCmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ResourceParams.presResource, 0, true, 0);
     }
 
     cmd.DW1.ColorGamutExpansionEnable    = pVeboxMode->ColorGamutExpansionEnable;
@@ -682,7 +682,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxState(
     cmd.DW1.SinglePipeEnable             = pVeboxMode->SinglePipeIECPEnable;
     cmd.DW1.ForwardGammaCorrectionEnable = pVeboxMode->ForwardGammaCorrectionEnable;
 
-    Mos_AddCommand(pCmdBuffer, &cmd, cmd.byteSize);
+    pOsInterface->pfnAddCommand(pCmdBuffer, &cmd, cmd.byteSize);
 
 finish:
     return eStatus;
@@ -1620,7 +1620,7 @@ MOS_STATUS MhwVeboxInterfaceG9::AddVeboxDiIecp(
     cmd.DW1.EndingX   = pVeboxDiIecpCmdParams->dwEndingX;
     cmd.DW1.StartingX = pVeboxDiIecpCmdParams->dwStartingX;
 
-    Mos_AddCommand(pCmdBuffer, &cmd, cmd.byteSize);
+    pOsInterface->pfnAddCommand(pCmdBuffer, &cmd, cmd.byteSize);
 
 finish:
     return eStatus;
@@ -1963,6 +1963,8 @@ MOS_STATUS MhwVeboxInterfaceG9::VeboxAdjustBoundary(
             (uint32_t)pSurfaceParam->rcSrc.right,
             *pdwSurfaceHeight,
             *pdwSurfaceWidth);
+        MT_LOG5(MT_VP_MHW_VE_ADJUST_SURFPARAM, MT_NORMAL, MT_VP_RENDER_VE_CROPPING, 1, MT_RECT_BOTTOM, pSurfaceParam->rcSrc.bottom, 
+            MT_RECT_RIGHT, pSurfaceParam->rcSrc.right, MT_SURF_HEIGHT, *pdwSurfaceHeight, MT_SURF_WIDTH, *pdwSurfaceWidth);
     }
     else
     {

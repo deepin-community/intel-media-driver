@@ -45,7 +45,7 @@ RenderState::RenderState(
     PVPHAL_RNDR_PERF_DATA       pPerfData,
     MOS_STATUS                  *peStatus) :
     m_pOsInterface(pOsInterface),
-    m_pRenderHal(pRenderHal),
+    m_pRenderHal((PRENDERHAL_INTERFACE_LEGACY)pRenderHal),
     m_pSkuTable(nullptr),
     m_pWaTable(nullptr),
     m_bDisableRender(false),
@@ -56,6 +56,11 @@ RenderState::RenderState(
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
     VPHAL_RENDER_CHK_NULL(pRenderHal);
+
+    if (m_pOsInterface)
+    {
+        m_userSettingPtr = pOsInterface->pfnGetUserSettingInstance(m_pOsInterface);
+    }
 
     // Connect renderer to other VPHAL components (HW/OS interfaces)
     m_pWaTable  = pRenderHal->pWaTable;

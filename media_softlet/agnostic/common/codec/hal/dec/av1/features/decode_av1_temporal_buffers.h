@@ -28,35 +28,21 @@
 
 #include "codec_def_decode_av1.h"
 #include "decode_allocator.h"
-#include "mhw_vdbox_avp_interface.h"
+#include "mhw_vdbox_avp_itf.h"
 #include "decode_reference_associated_buffer.h"
+
+using AvpBufferSizePar = mhw::vdbox::avp::AvpBufferSizePar;
+using AvpBufferType = mhw::vdbox::avp::AvpBufferType;
 
 namespace decode
 {
     class Av1BasicFeature;
 
-    struct Av1SharedBuf
-    {
-        PMOS_BUFFER buffer = nullptr;
-        int refCnt = 0;
-    };
-
-    struct Av1RefAssociatedBufs
-    {
-        PMOS_BUFFER mvBuf = nullptr;
-        Av1SharedBuf *segIdBuf = nullptr;
-        Av1SharedBuf segIdWriteBuf;
-        Av1SharedBuf *initCdfBuf = nullptr;
-        Av1SharedBuf bwdAdaptCdfBuf;
-        Av1SharedBuf defaultCdfBuf;
-        bool disableFrmEndUpdateCdf = false;
-    };
-
     class Av1TempBufferOpInf : public BufferOpInf<Av1RefAssociatedBufs, Av1BasicFeature>
     {
     public:
         ~Av1TempBufferOpInf() {};
-        virtual MOS_STATUS Init(CodechalHwInterface& hwInterface, DecodeAllocator& allocator,
+        virtual MOS_STATUS Init(void* hwInterface, DecodeAllocator& allocator,
                         Av1BasicFeature& basicFeature);
         virtual Av1RefAssociatedBufs *Allocate();
         virtual MOS_STATUS Resize(Av1RefAssociatedBufs* &buffer);
@@ -64,14 +50,16 @@ namespace decode
         virtual bool IsAvailable(Av1RefAssociatedBufs* &buffer);
         virtual void Destroy(Av1RefAssociatedBufs* &buffer);
     protected:
-        void                  SetAvpBufSizeParam(MhwVdboxAvpBufferSizeParams& params, int32_t mibSizeLog2);
+        void                  SetAvpBufSizeParam(AvpBufferSizePar &params, int32_t mibSizeLog2);
         void                  RecordSegIdBufInfo(Av1RefAssociatedBufs *buffer);
         void                  RecordCdfTableBufInfo(Av1RefAssociatedBufs *buffer);
         inline Av1SharedBuf  *RefSharedBuffer(Av1SharedBuf *sharedBuf);
         inline Av1SharedBuf  *DeRefSharedBuffer(Av1SharedBuf *sharedBuf);
-        MhwVdboxAvpInterface *m_avpInterface = nullptr;  //!< Avp interface;
+        std::shared_ptr<mhw::vdbox::avp::Itf> m_avpItf = nullptr;
         int32_t               widthInSb;
         int32_t               heightInSb;
+
+    MEDIA_CLASS_DEFINE_END(decode__Av1TempBufferOpInf)
     };
 
 }  // namespace decode

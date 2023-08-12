@@ -28,6 +28,9 @@
 #define __MEDIA_LIBVA_CAPS_H__
 
 #include "va/va.h"
+#include "codec_def_common.h"
+#include "codec_def_common_encode.h"
+#include "codec_def_encode_jpeg.h"
 
 #include <vector>
 #include <map>
@@ -744,6 +747,22 @@ public:
     //!
     virtual VAStatus GetSurfaceModifier(DDI_MEDIA_SURFACE* mediaSurface, uint64_t &modifier);
 
+    //! \brief Set tile format according to external surface's modifier
+    //!
+    //! \param    [in] mediaSurface
+    //!           Pointer to the media surface
+    //! \param    [out] tileformat
+    //!           Reference to the tileformat
+    //! \param    [out] bMemCompEnable
+    //!           Reference to the memory compress flag
+    //! \param    [out] bMemCompRC
+    //!           Reference to the memory compress rate control
+    //!
+    //! \return   VAStatus
+    //!           VA_STATUS_SUCCESS if success
+    //!
+    virtual VAStatus SetExternalSurfaceTileFormat(DDI_MEDIA_SURFACE* mediaSurface, uint32_t &tileformat, bool &bMemCompEnable, bool &bMemCompRC);
+
 protected:
     //!
     //! \class    ProfileEntrypoint
@@ -804,6 +823,7 @@ protected:
         AVC = 0,
         HEVC,
         VP9,
+        AV1,
         Others = 0xff,
     };
 
@@ -827,9 +847,13 @@ protected:
 #endif
     static const uint16_t m_maxProfiles = 17; //!< Maximum number of supported profiles
     static const uint16_t m_maxProfileEntries = 64; //!< Maximum number of supported profile & entrypoint combinations
-    static const uint32_t m_numVpSurfaceAttr = 20; //!< Number of VP surface attributes
-    static const uint32_t m_numJpegSurfaceAttr = 7; //!< Number of JPEG surface attributes
-    static const uint32_t m_numJpegEncSurfaceAttr = 4; //!< Number of JPEG encode surface attributes
+#if VA_CHECK_VERSION(1, 9, 0)
+    static const uint32_t m_numVpSurfaceAttr = 24; //!< Number of VP surface attributes
+#else
+    static const uint32_t m_numVpSurfaceAttr = 22; //!< Number of VP surface attributes
+#endif
+    static const uint32_t m_numJpegSurfaceAttr = 8; //!< Number of JPEG surface attributes
+    static const uint32_t m_numJpegEncSurfaceAttr = 5; //!< Number of JPEG encode surface attributes
     static const uint16_t m_maxEntrypoints = 7; //!<  Maximum number of supported entrypoints
     static const uint32_t m_decSliceMode[2]; //!< Store 2 decode slices modes
     static const uint32_t m_decProcessMode[2]; //!< Store 2 decode process modes

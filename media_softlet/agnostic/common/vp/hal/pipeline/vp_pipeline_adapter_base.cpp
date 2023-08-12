@@ -28,44 +28,61 @@
 #include "vp_pipeline_adapter_base.h"
 #include "media_interfaces_vphal.h"
 #include "vp_platform_interface.h"
+#include "vp_debug.h"
+#include "vp_user_setting.h"
+#include "renderhal_platform_interface.h"
 
 VpPipelineAdapterBase::VpPipelineAdapterBase(
     vp::VpPlatformInterface &vpPlatformInterface,
-    MOS_STATUS &eStatus):
+    MOS_STATUS              &eStatus,
+    bool                    clearViewMode) :
     m_vpPlatformInterface(vpPlatformInterface)
 {
+    m_osInterface = m_vpPlatformInterface.GetOsInterface();
+    if (m_osInterface)
+    {
+        m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    }
+    VpUserSetting::InitVpUserSetting(m_userSettingPtr, clearViewMode);
 
+    eStatus = MOS_STATUS_SUCCESS;
 }
 
 MOS_STATUS VpPipelineAdapterBase::GetVpMhwInterface(
     VP_MHWINTERFACE &vpMhwinterface)
 {
     VP_FUNC_CALL();
-    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    m_pOsInterface = m_vpPlatformInterface.GetOsInterface();
-    if (m_pOsInterface == nullptr)
+    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
+    bool       sfcNeeded                          = false;
+    bool       veboxNeeded                        = false;
+    std::shared_ptr<mhw::vebox::Itf> veboxItf     = nullptr;
+    std::shared_ptr<mhw::sfc::Itf>   sfcItf       = nullptr;
+    std::shared_ptr<mhw::mi::Itf>    miItf        = nullptr;
+    m_osInterface = m_vpPlatformInterface.GetOsInterface();
+    if (m_osInterface == nullptr)
     {
         eStatus = MOS_STATUS_NULL_POINTER;
         return eStatus;
     }
 
     // Initialize platform, sku, wa tables
-    m_pOsInterface->pfnGetPlatform(m_pOsInterface, &m_platform);
-    m_skuTable = m_pOsInterface->pfnGetSkuTable(m_pOsInterface);
-    m_waTable  = m_pOsInterface->pfnGetWaTable(m_pOsInterface);
+    m_osInterface->pfnGetPlatform(m_osInterface, &m_platform);
+    m_skuTable = m_osInterface->pfnGetSkuTable(m_osInterface);
+    m_waTable  = m_osInterface->pfnGetWaTable(m_osInterface);
 
     m_vprenderHal = (PRENDERHAL_INTERFACE)MOS_AllocAndZeroMemory(sizeof(*m_vprenderHal));
     if (m_vprenderHal == nullptr)
     {
-        eStatus = MOS_STATUS_NULL_POINTER;
-        return eStatus;
+        VP_PUBLIC_CHK_STATUS_RETURN(MOS_STATUS_NULL_POINTER);
     }
 
     eStatus = RenderHal_InitInterface(
         m_vprenderHal,
         &m_cpInterface,
-        m_pOsInterface);
+        m_osInterface);
+
+    VPHAL_DBG_OCA_DUMPER_CREATE(m_vprenderHal);
 
     if (MOS_FAILED(eStatus))
     {
@@ -73,63 +90,53 @@ MOS_STATUS VpPipelineAdapterBase::GetVpMhwInterface(
         return eStatus;
     }
 
-    if (MEDIA_IS_SKU(m_skuTable, FtrVERing) ||
-        MEDIA_IS_SKU(m_skuTable, FtrSFCPipe))
+    veboxNeeded = MEDIA_IS_SKU(m_skuTable, FtrVERing);
+    sfcNeeded   = MEDIA_IS_SKU(m_skuTable, FtrSFCPipe);
+    SetMhwMiItf(m_vprenderHal->pRenderHalPltInterface->GetMhwMiItf());
+    if ((veboxNeeded || sfcNeeded) && !m_clearVideoViewMode)
     {
-        MhwInterfaces *             mhwInterfaces = nullptr;
-        MhwInterfaces::CreateParams params;
-        MOS_ZeroMemory(&params, sizeof(params));
-        params.Flags.m_sfc   = MEDIA_IS_SKU(m_skuTable, FtrSFCPipe);
-        params.Flags.m_vebox = MEDIA_IS_SKU(m_skuTable, FtrVERing);
-
-        mhwInterfaces = MhwInterfaces::CreateFactory(params, m_pOsInterface);
-        if (mhwInterfaces)
+        eStatus = VphalDevice::CreateVPMhwInterfaces(sfcNeeded, veboxNeeded, veboxItf, sfcItf, miItf, m_osInterface);
+        if (eStatus == MOS_STATUS_SUCCESS)
         {
-            SetMhwVeboxInterface(mhwInterfaces->m_veboxInterface);
-            SetMhwSfcInterface(mhwInterfaces->m_sfcInterface);
-
-            // MhwInterfaces always create CP and MI interfaces, so we have to delete those we don't need.
-            MOS_Delete(mhwInterfaces->m_miInterface);
-            Delete_MhwCpInterface(mhwInterfaces->m_cpInterface);
-            mhwInterfaces->m_cpInterface = nullptr;
-            MOS_Delete(mhwInterfaces);
+            SetMhwVeboxItf(veboxItf);
+            SetMhwSfcItf(sfcItf);
         }
         else
         {
             VP_PUBLIC_ASSERTMESSAGE("Allocate MhwInterfaces failed");
-            eStatus = MOS_STATUS_NO_SPACE;
-            return eStatus;
+            VP_PUBLIC_CHK_STATUS_RETURN(MOS_STATUS_NO_SPACE);
         }
     }
 
     vpMhwinterface.m_platform       = m_platform;
     vpMhwinterface.m_waTable        = m_waTable;
     vpMhwinterface.m_skuTable       = m_skuTable;
-    vpMhwinterface.m_osInterface    = m_pOsInterface;
+    vpMhwinterface.m_osInterface    = m_osInterface;
     vpMhwinterface.m_renderHal      = m_vprenderHal;
-    vpMhwinterface.m_veboxInterface = m_veboxInterface;
-    vpMhwinterface.m_sfcInterface   = m_sfcInterface;
     vpMhwinterface.m_cpInterface    = m_cpInterface;
-    vpMhwinterface.m_mhwMiInterface = m_vprenderHal->pMhwMiInterface;
     vpMhwinterface.m_statusTable    = &m_statusTable;
+    m_vpPlatformInterface.SetMhwSfcItf(m_sfcItf);
+    m_vpPlatformInterface.SetMhwVeboxItf(m_veboxItf);
+    m_vpPlatformInterface.SetMhwMiItf(m_miItf);
+    vpMhwinterface.m_vpPlatformInterface = &m_vpPlatformInterface;
 
     return eStatus;
-}
-
-VpPipelineAdapterBase *VpPipelineAdapterBase::VphalStateFactory(
-    PMOS_INTERFACE pOsInterface,
-    PMOS_CONTEXT   pOsDriverContext,
-    MOS_STATUS *   peStatus)
-{
-    VP_FUNC_CALL();
-    return VphalDevice::CreateFactoryNext(pOsInterface, pOsDriverContext, peStatus);
 }
 
 VpPipelineAdapterBase::~VpPipelineAdapterBase()
 {
     MOS_STATUS eStatus;
+
+    // Wait for all cmd before destroy gpu resource
+    if (m_osInterface && m_osInterface->pfnWaitAllCmdCompletion && m_osInterface->bDeallocateOnExit)
+    {
+        VP_PUBLIC_NORMALMESSAGE("WaitAllCmdCompletion in VpPipelineAdapterBase::~VpPipelineAdapterBase");
+        m_osInterface->pfnWaitAllCmdCompletion(m_osInterface);
+    }
+
     if (m_vprenderHal)
     {
+        VPHAL_DBG_OCA_DUMPER_DESTORY(m_vprenderHal);
         if (m_vprenderHal->pfnDestroy)
         {
             eStatus = m_vprenderHal->pfnDestroy(m_vprenderHal);
@@ -143,36 +150,37 @@ VpPipelineAdapterBase::~VpPipelineAdapterBase()
 
     if (m_cpInterface)
     {
-        Delete_MhwCpInterface(m_cpInterface);
-        m_cpInterface = nullptr;
-    }
-
-    if (m_sfcInterface)
-    {
-        MOS_Delete(m_sfcInterface);
-        m_sfcInterface = nullptr;
-    }
-
-    if (m_veboxInterface)
-    {
-        eStatus = m_veboxInterface->DestroyHeap();
-        MOS_Delete(m_veboxInterface);
-        m_veboxInterface = nullptr;
-        if (eStatus != MOS_STATUS_SUCCESS)
+        if (m_osInterface)
         {
-            VPHAL_PUBLIC_ASSERTMESSAGE("Failed to destroy Vebox Interface, eStatus:%d.\n", eStatus);
+            m_osInterface->pfnDeleteMhwCpInterface(m_cpInterface);
+            m_cpInterface = nullptr;
+        }
+        else
+        {
+            VP_PUBLIC_ASSERTMESSAGE("Failed to destroy cpInterface.");
         }
     }
 
-    // Destroy OS interface objects (CBs, etc)
-    if (m_pOsInterface)
+    if (m_sfcItf)
     {
-        if (m_pOsInterface->bDeallocateOnExit)
+        m_sfcItf = nullptr;
+    }
+
+    if (m_veboxItf)
+    {
+        eStatus    = m_veboxItf->DestroyHeap();
+        m_veboxItf = nullptr;
+    }
+
+    // Destroy OS interface objects (CBs, etc)
+    if (m_osInterface)
+    {
+        if (m_osInterface->bDeallocateOnExit)
         {
-            m_pOsInterface->pfnDestroy(m_pOsInterface, true);
+            m_osInterface->pfnDestroy(m_osInterface, true);
 
             // Deallocate OS interface structure (except if externally provided)
-            MOS_FreeMemory(m_pOsInterface);
+            MOS_FreeMemory(m_osInterface);
         }
     }
 
@@ -207,13 +215,13 @@ MOS_STATUS VpPipelineAdapterBase::GetStatusReport(
     bool                bMarkNotReadyForRemains = false;
 
     VP_PUBLIC_CHK_NULL(pQueryReport);
-    VP_PUBLIC_CHK_NULL(m_pOsInterface);
-    VP_PUBLIC_CHK_NULL(m_pOsInterface->pOsContext);
+    VP_PUBLIC_CHK_NULL(m_osInterface);
+    VP_PUBLIC_CHK_NULL(m_osInterface->pOsContext);
 
     // it should be ok if we don't consider the null render
     // eNullRender = m_pOsInterface->pfnGetNullHWRenderFlags(m_pOsInterface);
 
-    pOsContext   = m_pOsInterface->pOsContext;
+    pOsContext   = m_osInterface->pOsContext;
     pStatusTable = &m_statusTable;
     uiNewHead    = pStatusTable->uiHead;  // uiNewHead start from previous head value
     // entry length from head to tail
@@ -230,10 +238,10 @@ MOS_STATUS VpPipelineAdapterBase::GetStatusReport(
         pStatusEntry = &pStatusTable->aTableEntries[uiIndex];
 
         // for tasks using CM, different streamIndexes may be used
-        uint32_t oldStreamIndex = m_pOsInterface->streamIndex;
+        uint32_t oldStreamIndex = m_osInterface->streamIndex;
         if (pStatusEntry->isStreamIndexSet)
         {
-            m_pOsInterface->streamIndex = pStatusEntry->streamIndex;
+            m_osInterface->streamIndex = pStatusEntry->streamIndex;
         }
 
         if (bMarkNotReadyForRemains)
@@ -244,16 +252,12 @@ MOS_STATUS VpPipelineAdapterBase::GetStatusReport(
             continue;
         }
 
-#if (LINUX || ANDROID)
-        dwGpuTag = pOsContext->GetGPUTag(m_pOsInterface, pStatusEntry->GpuContextOrdinal);
-#else
-        dwGpuTag = m_pOsInterface->pfnGetGpuStatusSyncTag(m_pOsInterface, pStatusEntry->GpuContextOrdinal);
-#endif
-        bDoneByGpu         = (dwGpuTag >= pStatusEntry->dwTag);
-        bFailedOnSubmitCmd = (pStatusEntry->dwStatus == VPREP_ERROR);
+        dwGpuTag            = m_osInterface->pfnGetGpuStatusSyncTag(m_osInterface, pStatusEntry->GpuContextOrdinal);
+        bDoneByGpu          = (dwGpuTag >= pStatusEntry->dwTag);
+        bFailedOnSubmitCmd  = (pStatusEntry->dwStatus == VPREP_ERROR);
 
 #if (_DEBUG || _RELEASE_INTERNAL)
-        MOS_NULL_RENDERING_FLAGS NullRender = m_pOsInterface->pfnGetNullHWRenderFlags(m_pOsInterface);
+        MOS_NULL_RENDERING_FLAGS NullRender = m_osInterface->pfnGetNullHWRenderFlags(m_osInterface);
         if (NullRender.Value != 0)
         {
             bDoneByGpu = true;
@@ -280,7 +284,7 @@ MOS_STATUS VpPipelineAdapterBase::GetStatusReport(
             bMarkNotReadyForRemains = true;
         }
 
-        if (m_pOsInterface->pfnIsGPUHung(m_pOsInterface))
+        if (m_osInterface->pfnIsGPUHung(m_osInterface))
         {
             pStatusEntry->dwStatus = VPREP_NOTREADY;
         }
@@ -290,7 +294,7 @@ MOS_STATUS VpPipelineAdapterBase::GetStatusReport(
 
         if (pStatusEntry->isStreamIndexSet)
         {
-            m_pOsInterface->streamIndex = oldStreamIndex;
+            m_osInterface->streamIndex = oldStreamIndex;
         }
     }
     pStatusTable->uiHead = uiNewHead;
@@ -310,3 +314,22 @@ finish:
     return eStatus;
 }
 
+MOS_STATUS VpPipelineAdapterBase::GetStatusReportEntryLength(
+    uint32_t*                      puiLength)
+{
+    MOS_STATUS                     eStatus = MOS_STATUS_SUCCESS;
+#if(!EMUL)        // this function is dummy for emul
+    PVPHAL_STATUS_TABLE            pStatusTable;
+
+    VP_PUBLIC_CHK_NULL(puiLength);
+
+    pStatusTable = &m_statusTable;
+
+    // entry length from head to tail
+    *puiLength = (pStatusTable->uiCurrent - pStatusTable->uiHead) & (VPHAL_STATUS_TABLE_MAX_SIZE - 1);
+finish:
+#else
+    MOS_UNUSED(puiLength);
+#endif
+    return eStatus;
+}

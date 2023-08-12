@@ -29,38 +29,36 @@
 #include "igcodeckrn_g9.h"
 #endif
 
-extern template class MediaInterfacesFactory<MhwInterfaces>;
-extern template class MediaInterfacesFactory<MmdDevice>;
-extern template class MediaInterfacesFactory<CodechalDevice>;
-extern template class MediaInterfacesFactory<CMHalDevice>;
-extern template class MediaInterfacesFactory<MosUtilDevice>;
-extern template class MediaInterfacesFactory<VphalDevice>;
-extern template class MediaInterfacesFactory<RenderHalDevice>;
-extern template class MediaInterfacesFactory<Nv12ToP010Device>;
-extern template class MediaInterfacesFactory<DecodeHistogramDevice>;
+extern template class MediaFactory<uint32_t, MhwInterfaces>;
+extern template class MediaFactory<uint32_t, MmdDevice>;
+extern template class MediaFactory<uint32_t, CodechalDevice>;
+extern template class MediaFactory<uint32_t, CMHalDevice>;
+extern template class MediaFactory<uint32_t, VphalDevice>;
+extern template class MediaFactory<uint32_t, RenderHalDevice>;
+extern template class MediaFactory<uint32_t, Nv12ToP010Device>;
+extern template class MediaFactory<uint32_t, DecodeHistogramDevice>;
 
 static bool bxtRegisteredVphal =
-    MediaInterfacesFactory<VphalDevice>::
-    RegisterHal<VphalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, VphalDevice>::
+    Register<VphalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS VphalInterfacesG9Bxt::Initialize(
     PMOS_INTERFACE  osInterface,
-    PMOS_CONTEXT    osDriverContext,
     bool            bInitVphalState,
-    MOS_STATUS      *eStatus)
+    MOS_STATUS      *eStatus,
+    bool            clearViewMode)
 {
-    m_vphalState = MOS_New(
+    m_vpBase = MOS_New(
         VphalState,
         osInterface,
-        osDriverContext,
         eStatus);
 
     return *eStatus;
 }
 
 static bool bxtRegisteredMhw =
-    MediaInterfacesFactory<MhwInterfaces>::
-    RegisterHal<MhwInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, MhwInterfaces>::
+    Register<MhwInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
 
 #define PLATFORM_INTEL_BXT 8
 #define PLATFORM_INTEL_GTA 8
@@ -94,7 +92,7 @@ MOS_STATUS MhwInterfacesG9Bxt::Initialize(
 
     // MHW_CP and MHW_MI must always be created
     MOS_STATUS status;
-    m_cpInterface = Create_MhwCpInterface(osInterface);
+    m_cpInterface = osInterface->pfnCreateMhwCpInterface(osInterface);
     m_miInterface = MOS_New(Mi, m_cpInterface, osInterface);
 
     if (params.Flags.m_render)
@@ -137,10 +135,10 @@ MOS_STATUS MhwInterfacesG9Bxt::Initialize(
 
     return MOS_STATUS_SUCCESS;
 }
-#ifdef _MMC_SUPPORTED
+#if defined(_MMC_SUPPORTED) && defined(ENABLE_KERNELS) && !defined(_FULL_OPEN_SOURCE)
 static bool bxtRegisteredMmd =
-    MediaInterfacesFactory<MmdDevice>::
-    RegisterHal<MmdDeviceG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, MmdDevice>::
+    Register<MmdDeviceG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS MmdDeviceG9Bxt::Initialize(
     PMOS_INTERFACE osInterface,
@@ -194,8 +192,8 @@ MOS_STATUS MmdDeviceG9Bxt::Initialize(
 }
 #endif
 static bool bxtRegisteredNv12ToP010 =
-    MediaInterfacesFactory<Nv12ToP010Device>::
-    RegisterHal<Nv12ToP010DeviceG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, Nv12ToP010Device>::
+    Register<Nv12ToP010DeviceG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS Nv12ToP010DeviceG9Bxt::Initialize(
     PMOS_INTERFACE            osInterface)
@@ -212,8 +210,8 @@ MOS_STATUS Nv12ToP010DeviceG9Bxt::Initialize(
 }
 
 static bool bxtRegisteredCodecHal =
-    MediaInterfacesFactory<CodechalDevice>::
-    RegisterHal<CodechalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, CodechalDevice>::
+    Register<CodechalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS CodechalInterfacesG9Bxt::Initialize(
     void *standardInfo,
@@ -437,6 +435,23 @@ MOS_STATUS CodechalInterfacesG9Bxt::Initialize(
         }
         else
 #endif
+#ifdef _VP8_ENCODE_SUPPORTED
+        if (info->Mode == CODECHAL_ENCODE_MODE_VP8)
+        {
+            // Setup encode interface functions
+            encoder = MOS_New(Encode::Vp8, hwInterface, debugInterface, info);
+            if (encoder == nullptr)
+            {
+                CODECHAL_PUBLIC_ASSERTMESSAGE("VP8 Encode allocation failed!");
+                return MOS_STATUS_INVALID_PARAMETER;
+            }
+            else
+            {
+                m_codechalDevice = encoder;
+            }
+        }
+        else
+#endif
         {
             CODECHAL_PUBLIC_ASSERTMESSAGE("Unsupported encode function requested.");
             return MOS_STATUS_INVALID_PARAMETER;
@@ -462,8 +477,8 @@ MOS_STATUS CodechalInterfacesG9Bxt::Initialize(
 }
 
 static bool bxtRegisteredCMHal =
-    MediaInterfacesFactory<CMHalDevice>::
-    RegisterHal<CMHalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, CMHalDevice>::
+    Register<CMHalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS CMHalInterfacesG9Bxt::Initialize(CM_HAL_STATE *pCmState)
 {
@@ -492,43 +507,10 @@ MOS_STATUS CMHalInterfacesG9Bxt::Initialize(CM_HAL_STATE *pCmState)
     pGen9Device->OverwriteSteppingTable(CmSteppingInfo_BXT, sizeof(CmSteppingInfo_BXT)/sizeof(const char *));
     return MOS_STATUS_SUCCESS;
 }
-static bool bxtRegisteredMosUtil =
-    MediaInterfacesFactory<MosUtilDevice>::
-    RegisterHal<MosUtilDeviceG9Bxt>((uint32_t)IGFX_BROXTON);
-
-MOS_STATUS MosUtilDeviceG9Bxt::Initialize()
-{
-#define MOSUTIL_FAILURE()                                   \
-{                                                           \
-    if (device != nullptr)                                  \
-    {                                                       \
-        delete device;                                      \
-    }                                                       \
-    return MOS_STATUS_NO_SPACE;                             \
-}
-
-    MosUtil *device = nullptr;
-
-    device = MOS_New(MosUtil);
-    
-    if (device == nullptr)
-    {
-        MOSUTIL_FAILURE();
-    }
-
-    if (device->Initialize() != MOS_STATUS_SUCCESS)
-    {
-        MOSUTIL_FAILURE();
-    }
-
-    m_mosUtilDevice = device;
-
-    return MOS_STATUS_SUCCESS;
-}
 
 static bool bxtRegisteredRenderHal =
-    MediaInterfacesFactory<RenderHalDevice>::
-    RegisterHal<RenderHalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
+    MediaFactory<uint32_t, RenderHalDevice>::
+    Register<RenderHalInterfacesG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS RenderHalInterfacesG9Bxt::Initialize()
 {
@@ -542,8 +524,8 @@ MOS_STATUS RenderHalInterfacesG9Bxt::Initialize()
 }
 
 static bool bxtRegisteredDecodeHistogram =
-MediaInterfacesFactory<DecodeHistogramDevice>::
-RegisterHal<DecodeHistogramDeviceG9Bxt>((uint32_t)IGFX_BROXTON);
+MediaFactory<uint32_t, DecodeHistogramDevice>::
+Register<DecodeHistogramDeviceG9Bxt>((uint32_t)IGFX_BROXTON);
 
 MOS_STATUS DecodeHistogramDeviceG9Bxt::Initialize(
     CodechalHwInterface       *hwInterface,

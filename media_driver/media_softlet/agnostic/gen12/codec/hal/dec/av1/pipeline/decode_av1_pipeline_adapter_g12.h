@@ -38,7 +38,14 @@ public:
         CodechalHwInterface *   hwInterface,
         CodechalDebugInterface *debugInterface);
 
-    virtual ~DecodeAv1PipelineAdapterG12() {}
+    virtual ~DecodeAv1PipelineAdapterG12()
+    {
+        if (m_hwInterface)
+        {
+            MOS_Delete(m_hwInterface);
+            Codechal::m_hwInterface = nullptr;
+        }
+    }
 
     virtual MOS_STATUS BeginFrame() override;
 
@@ -68,6 +75,7 @@ public:
     virtual void Destroy() override;
 
     virtual MOS_GPU_CONTEXT GetDecodeContext() override;
+    virtual GPU_CONTEXT_HANDLE GetDecodeContextHandle() override;
 
 #ifdef _DECODE_PROCESSING_SUPPORTED
     virtual bool IsDownSamplingSupported() override;
@@ -75,5 +83,11 @@ public:
 
 protected:
     std::shared_ptr<decode::Av1PipelineG12> m_decoder;
+
+    //! \brief    HW Inteface
+    //! \details  Responsible for constructing all defined states and commands. 
+    //!           Each HAL has a separate OS interface.
+    CodechalHwInterface *m_hwInterface = nullptr;
+MEDIA_CLASS_DEFINE_END(DecodeAv1PipelineAdapterG12)
 };
 #endif // !__DECODE_AV1_PIPELINE_ADAPTER_G12_H__

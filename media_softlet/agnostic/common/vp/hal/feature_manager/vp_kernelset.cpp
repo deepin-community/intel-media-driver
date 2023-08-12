@@ -1,4 +1,4 @@
-/* Copyright (c) 2020-2021, Intel Corporation
+/* Copyright (c) 2020-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -26,6 +26,10 @@
 //!           commands.
 //!
 #include "vp_kernelset.h"
+#include "vp_render_fc_kernel.h"
+#include "vp_render_vebox_hdr_3dlut_kernel.h"
+#include "vp_render_vebox_hvs_kernel.h"
+#include "vp_render_hdr_kernel.h"
 
 using namespace vp;
 
@@ -36,11 +40,11 @@ VpKernelSet::VpKernelSet(PVP_MHWINTERFACE hwInterface, PVpAllocator allocator) :
     m_pKernelPool = &hwInterface->m_vpPlatformInterface->GetKernelPool();
 }
 
-MOS_STATUS VpKernelSet::GetKernelInfo(uint32_t kuid, uint32_t& size, void*& kernel)
+MOS_STATUS VpKernelSet::GetKernelInfo(std::string kernelName, uint32_t kuid, uint32_t& size, void*& kernel)
 {
     VP_FUNC_CALL();
 
-    auto it = m_pKernelPool->find(VpRenderKernel::s_kernelNameNonAdvKernels);
+    auto it = m_pKernelPool->find(kernelName);
 
     if (m_pKernelPool->end() == it)
     {
@@ -64,10 +68,16 @@ MOS_STATUS VpKernelSet::GetKernelInfo(uint32_t kuid, uint32_t& size, void*& kern
         }
         return MOS_STATUS_SUCCESS;
     }
-    else
+    else if (kernelName == VpRenderKernel::s_kernelNameNonAdvKernels)
     {
         VP_PUBLIC_ASSERTMESSAGE("Kernel State not inplenmented, return error");
         return MOS_STATUS_UNINITIALIZED;
+    }
+    else
+    {
+        size = it->second.GetKernelSize();
+        kernel = (void*)it->second.GetKernelBinPointer();
+        return MOS_STATUS_SUCCESS;
     }
 }
 
@@ -80,6 +90,7 @@ MOS_STATUS VpKernelSet::FindAndInitKernelObj(VpRenderKernelObj* kernelObj)
     VP_RENDER_CHK_NULL_RETURN(m_pKernelPool);
 
     bool bFind = false;
+    VP_RENDER_CHK_STATUS_RETURN(m_hwInterface->m_vpPlatformInterface->InitializeDelayedKernels(kernelObj->GetKernelType()));
 
     if (m_pKernelPool)
     {
@@ -108,9 +119,33 @@ MOS_STATUS VpKernelSet::CreateSingleKernelObject(
 {
     VP_FUNC_CALL();
     kernel = nullptr;
-    switch (kernelId)
+    switch ((uint32_t)kernelId)
     {
     case kernelCombinedFc:
+        kernel = (VpRenderKernelObj*)MOS_New(VpRenderFcKernel, m_hwInterface, m_allocator);
+        VP_RENDER_CHK_NULL_RETURN(kernel);
+        break;
+    case kernelHdr3DLutCalc:
+        if (m_pKernelPool->find(VP_HDR_KERNEL_NAME_L0) != m_pKernelPool->end())
+        {
+            VP_RENDER_NORMALMESSAGE("HDR 3dlut kernel use l0 hdr_3dlut_l0 kernel");
+            kernel = (VpRenderKernelObj *)MOS_New(VpRenderHdr3DLutKernel, m_hwInterface, m_allocator);
+        }
+        else
+        {
+            VP_RENDER_NORMALMESSAGE("HDR 3dlut kernel use isa hdr_3dlut kernel");
+            kernel = (VpRenderKernelObj *)MOS_New(VpRenderHdr3DLutKernelCM, m_hwInterface, kernelId, kernelIndex, m_allocator);
+        }
+        VP_RENDER_CHK_NULL_RETURN(kernel);
+        break;
+    case kernelHVSCalc:
+        kernel = (VpRenderKernelObj *)MOS_New(VpRenderHVSKernel, m_hwInterface, kernelId, kernelIndex, m_allocator);
+        VP_RENDER_CHK_NULL_RETURN(kernel);
+        break;
+    case kernelHdrMandatory:
+        kernel = (VpRenderKernelObj *)MOS_New(VpRenderHdrKernel, m_hwInterface, m_allocator);
+        VP_RENDER_CHK_NULL_RETURN(kernel);
+        break;
     default:
         VP_RENDER_ASSERTMESSAGE("No supported kernel, return");
         return MOS_STATUS_UNIMPLEMENTED;
@@ -124,7 +159,9 @@ MOS_STATUS VpKernelSet::CreateKernelObjects(
     VP_SURFACE_GROUP& surfacesGroup,
     KERNEL_SAMPLER_STATE_GROUP& samplerStateGroup,
     KERNEL_CONFIGS& kernelConfigs,
-    KERNEL_OBJECTS& kernelObjs)
+    KERNEL_OBJECTS& kernelObjs,
+    VP_RENDER_CACHE_CNTL& surfMemCacheCtl,
+    VP_PACKET_SHARED_CONTEXT *sharedContext)
 {
     VP_FUNC_CALL();
 
@@ -136,19 +173,37 @@ MOS_STATUS VpKernelSet::CreateKernelObjects(
         {
             if (kernel)
             {
+                auto it = m_cachedKernels.find(kernel->GetKernelId());
+                if (it != m_cachedKernels.end() && it->second == kernel)
+                {
+                    m_cachedKernels.erase(it);
+                }
                 MOS_Delete(kernel);
             }
         }
         return status;
     };
 
+    kernelObjs.clear();
+
     for (uint32_t kernelIndex = 0; kernelIndex < kernelParams.size(); ++kernelIndex)
     {
-
-        VP_RENDER_CHK_STATUS_RETURN(CreateSingleKernelObject(
-            kernel,
-            kernelParams[kernelIndex].kernelId,
-            kernelIndex));
+        auto it = m_cachedKernels.find(kernelParams[kernelIndex].kernelId);
+        if (m_cachedKernels.end() == it)
+        {
+            VP_RENDER_CHK_STATUS_RETURN(CreateSingleKernelObject(
+                kernel,
+                kernelParams[kernelIndex].kernelId,
+                kernelIndex));
+            if (kernel->IsKernelCached())
+            {
+                m_cachedKernels.insert(std::make_pair(kernelParams[kernelIndex].kernelId, kernel));
+            }
+        }
+        else
+        {
+            kernel = it->second;
+        }
 
         VP_RENDER_CHK_NULL_RETURN(kernel);
 
@@ -159,9 +214,9 @@ MOS_STATUS VpKernelSet::CreateKernelObjects(
 
             VP_RENDER_CHK_NULL_RETURN(kernel);
 
-            VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(GetKernelInfo(kernel->GetKernelBinaryID(), kernelSize, binary)));
+            VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(GetKernelInfo(kernel->GetKernelName(), kernel->GetKernelBinaryID(), kernelSize, binary)));
 
-            VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(kernel->InitKernel(binary, kernelSize, kernelConfigs, surfacesGroup)));
+            VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(kernel->InitKernel(binary, kernelSize, kernelConfigs, surfacesGroup, surfMemCacheCtl)));
 
             kernelObjs.insert(std::make_pair(kernelIndex, kernel));
         }
@@ -169,7 +224,7 @@ MOS_STATUS VpKernelSet::CreateKernelObjects(
         {
             VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(FindAndInitKernelObj(kernel)));
 
-            VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(kernel->SetKernelConfigs(kernelParams[kernelIndex], surfacesGroup, samplerStateGroup)));
+            VP_RENDER_CHK_STATUS_RETURN(VpStatusHandler(kernel->SetKernelConfigs(kernelParams[kernelIndex], surfacesGroup, samplerStateGroup, kernelConfigs, sharedContext)));
 
             kernelObjs.insert(std::make_pair(kernelIndex, kernel));
         }

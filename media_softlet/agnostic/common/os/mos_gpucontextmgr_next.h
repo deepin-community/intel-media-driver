@@ -27,7 +27,7 @@
 #ifndef __MOS_GPU_CONTEXT_MGR_NEXT_H__
 #define __MOS_GPU_CONTEXT_MGR_NEXT_H__
 
-#include "mos_os_next.h"
+#include "mos_defs.h"
 #include "mos_gpucontext_next.h"
 
 class OsContextNext;
@@ -158,6 +158,11 @@ public:
         return m_initialized;
     }
 
+    PMOS_MUTEX GetGpuContextArrayMutex()
+    {
+        return m_gpuContextArrayMutex;
+    }
+
     //! \brief   Indicate whether new gpu context is inserted into the first slot w/ null ctx handle 
     //!          or always at the end of the gpucontext array
     bool m_noCycledGpuCxtMgmt = false;
@@ -179,6 +184,7 @@ protected:
 
     //! \brief   Flag to indicate gpu context mgr initialized or not
     bool m_initialized = false;
+MEDIA_CLASS_DEFINE_END(GpuContextMgrNext)
 };
 
 #endif  // #ifndef __MOS_GPU_CONTEXT_MGR_NEXT_H__

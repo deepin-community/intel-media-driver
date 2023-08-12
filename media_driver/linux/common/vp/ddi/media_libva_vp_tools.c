@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2009-2017, Intel Corporation
+* Copyright (c) 2009-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -477,7 +477,7 @@ VAStatus VpDumpProcPipelineParams(
             int32_t tmp = strnlen(env_value, sizeof(env_value));
             int32_t left = sizeof(env_value) - tmp;
             snprintf(env_value+tmp, left, "%ld", suffix);
-            MOS_SecureFileOpen(&pVpCtx->fpDumpFile, env_value, "w");
+            MosUtilities::MosSecureFileOpen(&pVpCtx->fpDumpFile, env_value, "w");
         }
     }
     fpLog = pVpCtx->fpDumpFile;
@@ -629,6 +629,7 @@ void VpConfigValuesInit(
     pConfigValues->dwRTCompressModeReported   = LIBVA_VP_CONFIG_NOT_REPORTED;
     pConfigValues->dwCapturePipeInUseReported = LIBVA_VP_CONFIG_NOT_REPORTED;
     pConfigValues->dwReportedCompositionMode  = LIBVA_VP_CONFIG_NOT_REPORTED;
+    pConfigValues->dwReportedHdrMode          = LIBVA_VP_CONFIG_NOT_REPORTED;
 
     pConfigValues->dwFFDICompressibleReported    = LIBVA_VP_CONFIG_NOT_REPORTED;
     pConfigValues->dwFFDICompressModeReported    = LIBVA_VP_CONFIG_NOT_REPORTED;
@@ -640,26 +641,78 @@ void VpConfigValuesInit(
     pConfigValues->dwScalerCompressModeReported  = LIBVA_VP_CONFIG_NOT_REPORTED;
     pConfigValues->dwPrimaryCompressibleReported = LIBVA_VP_CONFIG_NOT_REPORTED;
     pConfigValues->dwPrimaryCompressModeReported = LIBVA_VP_CONFIG_NOT_REPORTED;
+    pConfigValues->dwRTCacheSettingReported      = LIBVA_VP_CONFIG_NOT_REPORTED;
+#if (_DEBUG || _RELEASE_INTERNAL)
+    pConfigValues->dwRTOldCacheSettingReported   = LIBVA_VP_CONFIG_NOT_REPORTED;
+#endif
 }
 
 void VpFeatureReport(
-    PVP_CONFIG         pConfig)
+    PVP_CONFIG         pConfig,
+    PDDI_VP_CONTEXT    pVpCtx)
 {
-    WriteUserFeature(__VPHAL_VEBOX_OUTPUTPIPE_MODE_ID,         pConfig->dwCurrentOutputPipeMode, nullptr);
-    WriteUserFeature(__VPHAL_VEBOX_FEATURE_INUSE_ID,           pConfig->dwCurrentVEFeatureInUse, nullptr);
+    MediaUserSettingSharedPtr userSettingPtr = pVpCtx ? pVpCtx->MosDrvCtx.m_userSettingPtr : nullptr;
+    ReportUserSetting(
+        userSettingPtr,
+        __VPHAL_VEBOX_OUTPUTPIPE_MODE,
+        pConfig->dwCurrentOutputPipeMode,
+        MediaUserSetting::Group::Sequence);
+
+    ReportUserSetting(
+        userSettingPtr,
+        __VPHAL_VEBOX_FEATURE_INUSE,
+        pConfig->dwCurrentVEFeatureInUse,
+        MediaUserSetting::Group::Sequence);
 
 #if (_DEBUG || _RELEASE_INTERNAL)
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_VEBOX_HDR_MODE,
+        pConfig->dwCurrentHdrMode,
+        MediaUserSetting::Group::Sequence);
+
 #ifdef _MMC_SUPPORTED
-    //VP MMC In Use
-    WriteUserFeature(__VPHAL_ENABLE_MMC_IN_USE_ID,             pConfig->dwVPMMCInUse, nullptr);
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_MMC_ENABLE,
+        pConfig->dwVPMMCInUse,
+        MediaUserSetting::Group::Sequence);
     //VP Primary Surface Compress Mode Report
-    WriteUserFeature(__VPHAL_PRIMARY_SURFACE_COMPRESS_MODE_ID, pConfig->dwPrimaryCompressMode, nullptr);
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_PRIMARY_MMC_COMPRESSMODE,
+        pConfig->dwPrimaryCompressMode,
+        MediaUserSetting::Group::Sequence);
     //VP Primary Surface Compressible
-    WriteUserFeature(__VPHAL_PRIMARY_SURFACE_COMPRESSIBLE_ID,  pConfig->dwPrimaryCompressible, nullptr);
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_PRIMARY_MMC_COMPRESSIBLE,
+        pConfig->dwPrimaryCompressible,
+        MediaUserSetting::Group::Sequence);
     //VP RT Compress Mode
-    WriteUserFeature(__VPHAL_RT_COMPRESS_MODE_ID,              pConfig->dwRTCompressMode, nullptr);
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_RT_MMC_COMPRESSMODE,
+        pConfig->dwRTCompressMode,
+        MediaUserSetting::Group::Sequence);
     //VP RT Compressible
-    WriteUserFeature(__VPHAL_RT_COMPRESSIBLE_ID,               pConfig->dwRTCompressible, nullptr);
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_RT_MMC_COMPRESSIBLE,
+        pConfig->dwRTCompressible,
+        MediaUserSetting::Group::Sequence);
+    //VP RT Cache Usage
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_RT_Cache_Setting,
+        pConfig->dwRTCacheSetting,
+        MediaUserSetting::Group::Sequence);
+    //VP RT Old Cache Usage
+    ReportUserSettingForDebug(
+        userSettingPtr,
+        __VPHAL_RT_Old_Cache_Setting,
+        pConfig->dwRTOldCacheSetting,
+        MediaUserSetting::Group::Sequence);
 #endif
 #endif //(_DEBUG || _RELEASE_INTERNAL)
 }
@@ -675,7 +728,7 @@ VAStatus    VpReportFeatureMode(PDDI_VP_CONTEXT pVpCtx)
 
     VpHal_DdiReportFeatureMode(pVpCtx->pVpHal, &ConfigValues);
 
-    VpFeatureReport(&ConfigValues);
+    VpFeatureReport(&ConfigValues, pVpCtx);
 
     return VA_STATUS_SUCCESS;
 }

@@ -26,8 +26,52 @@ namespace vp
 {
 struct VP_PACKET_SHARED_CONTEXT
 {
-    bool bFirstFrame = true;
+    bool isVeboxFirstFrame = true;
 
+    struct
+    {
+        bool     bTgneFirstFrame            = true;
+        bool     bTgneEnable                = false;
+        uint32_t lumaStadTh                 = 3200;
+        uint32_t chromaStadTh               = 1600;
+        uint32_t dw4X4TGNEThCnt             = 576;
+        uint32_t dwBSDThreshold             = 480;
+        uint32_t dwHistoryInit              = 32;
+        uint32_t globalNoiseLevel_Temporal  = 0;  //!< Global Temporal Noise Level for Y
+        uint32_t globalNoiseLevelU_Temporal = 0;  //!< Global Temporal Noise Level for U
+        uint32_t globalNoiseLevelV_Temporal = 0;  //!< Global Temporal Noise Level for V
+    } tgneParams;
+
+    struct
+    {
+        uint16_t         QP                  = 0;
+        uint16_t         Strength            = 0;
+        VPHAL_HVSDN_MODE Mode                = HVSDENOISE_AUTO_BDRATE;
+        uint16_t         Format              = 0;
+        uint16_t         TgneEnable          = 0;
+        uint16_t         FirstFrame          = 0;
+        uint16_t         TgneFirstFrame      = 0;
+        uint16_t         Fallback            = 0;
+        uint16_t         EnableChroma        = 0;
+        uint16_t         EnableTemporalGNE   = 0;
+        uint16_t         Width               = 0;
+        uint16_t         Height              = 0;
+        uint32_t         Sgne_Level          = 0;
+        uint32_t         Sgne_LevelU         = 0;
+        uint32_t         Sgne_LevelV         = 0;
+        uint32_t         Sgne_Count          = 0;
+        uint32_t         Sgne_CountU         = 0;
+        uint32_t         Sgne_CountV         = 0;
+        int32_t          PrevNslvTemporal    = 0;
+        int32_t          PrevNslvTemporalU   = 0;
+        int32_t          PrevNslvTemporalV   = 0;
+        uint32_t         dwGlobalNoiseLevel  = 0;  //!< Global Noise Level for Y
+        uint32_t         dwGlobalNoiseLevelU = 0;  //!< Global Noise Level for U
+        uint32_t         dwGlobalNoiseLevelV = 0;  //!< Global Noise Level for V
+        bool             hVSAutoBdrateEnable     = false;
+        bool             hVSAutoSubjectiveEnable = false;
+        bool             hVSfallback             = false;
+    } hvsParams;
     virtual ~VP_PACKET_SHARED_CONTEXT(){};
 };
 };

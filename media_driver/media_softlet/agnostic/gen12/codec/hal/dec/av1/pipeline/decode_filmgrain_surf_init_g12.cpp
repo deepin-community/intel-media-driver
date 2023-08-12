@@ -32,9 +32,10 @@
 
 namespace decode {
 
-FilmGrainSurfaceInit::FilmGrainSurfaceInit(DecodePipeline *pipeline, MediaTask *task, uint8_t numVdbox)
+FilmGrainSurfaceInit::FilmGrainSurfaceInit(DecodePipeline *pipeline, MediaTask *task, uint8_t numVdbox, CodechalHwInterface *hwInterface)
     : DecodeSubPipeline(pipeline, task, numVdbox)
 {
+    m_hwInterface = hwInterface;
 }
 
 FilmGrainSurfaceInit::~FilmGrainSurfaceInit()
@@ -46,7 +47,7 @@ MOS_STATUS FilmGrainSurfaceInit::Init(CodechalSetting &settings)
 {
     DECODE_CHK_NULL(m_pipeline);
 
-    CodechalHwInterface* hwInterface = m_pipeline->GetHwInterface();
+    CodechalHwInterface* hwInterface = m_hwInterface;
     DECODE_CHK_NULL(hwInterface);
     PMOS_INTERFACE osInterface = hwInterface->GetOsInterface();
     DECODE_CHK_NULL(osInterface);
@@ -77,7 +78,8 @@ MOS_STATUS FilmGrainSurfaceInit::Prepare(DecodePipelineParams &params)
     }
     else if (params.m_pipeMode == decodePipeModeProcess)
     {
-        if (m_filmGrainFeature->m_filmGrainEnabled)
+        /*DON't use m_filmGrainFeature->m_filmGrainEnabled*/
+        if (m_filmGrainFeature->m_picParams->m_filmGrainParams.m_filmGrainInfoFlags.m_fields.m_applyGrain)
         {
             InitCoordinateSurface();
         }

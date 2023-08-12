@@ -32,16 +32,14 @@
 #include "cm_mem.h"
 #include "cm_kernel_ex.h"
 #include "cm_group_space.h"
-
 #include "mhw_render_g12_X.h"
+#if IGFX_GEN11_SUPPORTED
 #include "mhw_render_g11_X.h"
+#endif
 #include "mhw_mi_g12_X.h"
-#include "mhw_state_heap_hwcmd_g9_X.h" 
-
 #include "mos_solo_generic.h"
-#include "mhw_mmio_g9.h"
-
 #include "cm_hal_g12.h"
+#include "mos_os_cp_interface_specific.h"
 
 CmCommandBuffer::CmCommandBuffer(CM_HAL_STATE *cmhal):
     m_cmhal(cmhal),
@@ -136,6 +134,7 @@ MOS_STATUS CmCommandBuffer::AddL3CacheConfig(L3ConfigRegisterValues *l3Values)
         CM_CHK_MOSSTATUS_RETURN(m_hwRender->EnableL3Caching(&l3CacheSettting));
         return m_hwRender->SetL3Cache(&m_cmdBuf);
     }
+#if IGFX_GEN11_SUPPORTED
     else if (m_cmhal->platform.eRenderCoreFamily == IGFX_GEN11_CORE)
     {
         MHW_RENDER_ENGINE_L3_CACHE_SETTINGS_G11 l3CacheSettting = {};
@@ -144,6 +143,7 @@ MOS_STATUS CmCommandBuffer::AddL3CacheConfig(L3ConfigRegisterValues *l3Values)
         CM_CHK_MOSSTATUS_RETURN(m_hwRender->EnableL3Caching(&l3CacheSettting));
         return m_hwRender->SetL3Cache(&m_cmdBuf);
     }
+#endif
     else //gen12
     {
         MHW_RENDER_ENGINE_L3_CACHE_SETTINGS_G12 l3CacheSettting = {};
@@ -906,8 +906,8 @@ struct PACKET_SURFACE_STATE
     SURFACE_STATE_TOKEN_COMMON token;
     union
     {
-        mhw_state_heap_g9_X::RENDER_SURFACE_STATE_CMD cmdSurfaceState;
-        mhw_state_heap_g9_X::MEDIA_SURFACE_STATE_CMD cmdSurfaceStateAdv;
+        mhw_state_heap_g12_X::RENDER_SURFACE_STATE_CMD cmdSurfaceState;
+        mhw_state_heap_g12_X::MEDIA_SURFACE_STATE_CMD  cmdSurfaceStateAdv;
     };
 };
 
@@ -920,7 +920,7 @@ void CmCommandBuffer::Dump()
             m_cmhal,
             &m_cmdBuf,
             offsetof(PACKET_SURFACE_STATE, cmdSurfaceState),
-            mhw_state_heap_g9_X::RENDER_SURFACE_STATE_CMD::byteSize);
+            mhw_state_heap_g12_X::RENDER_SURFACE_STATE_CMD::byteSize);
     }
 #endif
 }

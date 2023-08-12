@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -32,7 +32,7 @@
 
 #include "mos_defs.h"
 #include "mos_util_debug_specific.h"
-#include "mos_utilities.h"
+#include "media_user_setting.h"
 
 class MosUtilDebug
 {
@@ -49,7 +49,7 @@ public:
     //!           os device ctx handle
     //! \return   void
     //!
-    static void MosMessageInit(MOS_CONTEXT_HANDLE mosCtx);
+    static void MosMessageInit(MediaUserSettingSharedPtr userSettingPtr);
 
     //!
     //! \brief    Frees the MOS message buffer and MOS message parameters structure
@@ -67,13 +67,13 @@ public:
     //!           depending on OS version
     //! \param    PCHAR fileNamePrefix
     //!           [out] Pointer to the string where the prefix is returned
-    //! \param    [in] mosCtx
-    //!           os device ctx handle
+    //! \param    [in] userSettingPtr
+    //!           MediaUserSettingSharedPtr
     //! \return   MOS_STATUS
     //!           Returns one of the MOS_STATUS error codes if failed,
     //!           else MOS_STATUS_SUCCESS
     //!
-    static MOS_STATUS MosLogFileNamePrefix(char *fileNamePrefix, MOS_CONTEXT_HANDLE mosCtx);
+    static MOS_STATUS MosLogFileNamePrefix(char *fileNamePrefix, MediaUserSettingSharedPtr userSettingPtr);
 
     //!
     //! \brief    Enable or disable asserts of a particular component, it is used by ULT also
@@ -209,7 +209,7 @@ private:
     //!           os device ctx handle
     //! \return   void
     //!
-    static void MosMessageInitComponent(MOS_COMPONENT_ID compID, MOS_CONTEXT_HANDLE mosCtx);
+    static void MosMessageInitComponent(MOS_COMPONENT_ID compID, MediaUserSettingSharedPtr userSettingPtr);
 
     //!
     //! \brief    Initialize or refresh the Hybrid Log and Trace facility
@@ -221,19 +221,7 @@ private:
     //!           Returns one of the MOS_STATUS error codes if failed,
     //!           else MOS_STATUS_SUCCESS
     //!
-    static MOS_STATUS MosHLTInit(MOS_CONTEXT_HANDLE mosCtx);
-
-    //!
-    //! \brief    Initialize or refresh the DDI Dump facility
-    //! \details  Initialize or refresh the DDI Dump facility
-    //!           Called during MOS init
-    //! \param    [in] mosCtx
-    //!           os device ctx handle
-    //! \return   MOS_STATUS
-    //!           Returns one of the MOS_STATUS error codes if failed,
-    //!           else MOS_STATUS_SUCCESS
-    //!
-    static MOS_STATUS MosDDIDumpInit(MOS_CONTEXT_HANDLE mosCtx);
+    static MOS_STATUS MosHLTInit( MediaUserSettingSharedPtr userSettingPtr);
 
     //!
     //! \brief    Close file handles and frees resources
@@ -243,13 +231,6 @@ private:
     //!
     static void MosHLTClose();
 
-    // !
-    //! \brief    Close file handles and frees resources
-    //! \details  Close file handles and frees resources
-    //!           Called during MOS close
-    //! \return   void
-    //!
-    static void MosDDIDumpClose();
 #endif // MOS_MESSAGES_ENABLED
 
 #if MOS_ASSERT_ENABLED
@@ -268,23 +249,23 @@ private:
 public:
 #if MOS_MESSAGES_ENABLED
 
-    static const char * const *m_mosLogLevelName;
-    static const char * const *m_mosComponentName;
+    static const char * const m_mosLogLevelName[MOS_MESSAGE_LVL_COUNT];
+    static const char * const m_mosComponentName[MOS_COMPONENT_COUNT];
 
     //Temporarily defined as the reference to compatible with the cases using uf key to enable/disable APG.
     static MOS_MESSAGE_PARAMS m_mosMsgParams;
-    static MOS_MESSAGE_PARAMS m_mosMsgParamsDdiDump;
 #endif
 
 #if MOS_MESSAGES_ENABLED
 
     static const char* const m_mosLogPathTemplate;
     static const char* const m_DdiLogPathTemplate;
-    static const MOS_USER_FEATURE_VALUE_ID (* const m_pcComponentUserFeatureKeys)[3];
-    static const uint8_t* const m_subComponentCount;
+    static const char* m_pcComponentUserFeatureKeys[MOS_COMPONENT_COUNT][3];
+    static const uint8_t m_subComponentCount[MOS_COMPONENT_COUNT];
     static const PCCHAR m_mosUltLogPathPrefix;
     static const PCCHAR m_mosLogPathPrefix;
 #endif
+MEDIA_CLASS_DEFINE_END(MosUtilDebug)
 };
 
 #if MOS_MESSAGES_ENABLED

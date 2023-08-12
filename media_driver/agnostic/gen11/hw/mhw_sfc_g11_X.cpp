@@ -282,7 +282,7 @@ MOS_STATUS MhwSfcInterfaceG11::AddSfcState(
           &ResourceParams));
     }
 
-    MHW_CHK_STATUS_RETURN(Mos_AddCommand(pCmdBuffer, &cmd, cmd.byteSize));
+    MHW_CHK_STATUS_RETURN(pOsInterface->pfnAddCommand(pCmdBuffer, &cmd, cmd.byteSize));
 
     return MOS_STATUS_SUCCESS;
 }
@@ -292,6 +292,7 @@ MOS_STATUS MhwSfcInterfaceG11::AddSfcAvsState(
     PMHW_SFC_AVS_STATE              pSfcAvsState)
 {
     MHW_CHK_NULL_RETURN(pCmdBuffer);
+    MHW_CHK_NULL_RETURN(pSfcAvsState);
 
     mhw_sfc_g11_X::SFC_AVS_STATE_CMD *cmdPtr;
     cmdPtr = (mhw_sfc_g11_X::SFC_AVS_STATE_CMD *)pCmdBuffer->pCmdPtr;

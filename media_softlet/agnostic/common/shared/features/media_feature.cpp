@@ -25,13 +25,36 @@
 //!
 
 #include "media_feature.h"
+#include "media_utils.h"
+#include "mos_os.h"
+#include "mos_util_debug.h"
+
+MediaFeature::MediaFeature(void *constSettings, PMOS_INTERFACE mosInterface) : MediaFeature(mosInterface)
+{
+    MEDIA_FUNC_CALL();
+    m_constSettings = constSettings;
+};
+
+MediaFeature::MediaFeature(PMOS_INTERFACE mosInterface)
+{
+    MEDIA_FUNC_CALL();
+
+    if (mosInterface)
+    {
+        m_userSettingPtr = mosInterface->pfnGetUserSettingInstance(mosInterface);
+    }
+    if (!m_userSettingPtr)
+    {
+        MOS_OS_NORMALMESSAGE("Initialize m_userSettingPtr instance failed!");
+    }
+};
 
 MOS_STATUS MediaFeature::Init(void *settings)
-{ 
+{
     MEDIA_FUNC_CALL();
     MEDIA_CHK_NULL_RETURN(settings);
 
-    return MOS_STATUS_SUCCESS; 
+    return MOS_STATUS_SUCCESS;
 }
 
 MOS_STATUS MediaFeature::Update(void *params)

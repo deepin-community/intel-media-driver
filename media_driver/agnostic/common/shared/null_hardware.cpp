@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020, Intel Corporation
+* Copyright (c) 2020-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -22,53 +22,13 @@
 //!
 //! \file     null_hardware.cpp
 //! \brief    Defines interfaces for null hardware
-#include "mos_os_mock_adaptor.h"
 #include "null_hardware.h"
 #include "mhw_mi.h"
 
-bool  NullHW::m_initilized = false;
-bool  NullHW::m_enabled = false;
-
-MOS_STATUS NullHW::Init(
-    PMOS_CONTEXT osContext)
+MOS_STATUS NullHW::StartPredicate(PMOS_INTERFACE pOsInterface, MhwMiInterface* miInterface, PMOS_COMMAND_BUFFER cmdBuffer)
 {
-    MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
-    MOS_OS_CHK_NULL_RETURN(osContext);
-
-    if (!m_initilized) {
-        m_initilized = true;
-
-        MOS_USER_FEATURE_VALUE_DATA UserFeatureData = {};
-        MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-        MOS_UserFeature_ReadValue_ID(
-            nullptr,
-            __MEDIA_USER_FEATURE_VALUE_NULLHW_ENABLE_ID,
-            &UserFeatureData,
-            osContext);
-
-        m_enabled = (UserFeatureData.i32Data) ? true : false;
-
-        if (m_enabled)
-        {
-            eStatus = MosMockAdaptor::Init(osContext);
-        }
-        else
-        {
-            eStatus = MOS_STATUS_INVALID_HANDLE;
-        }
-
-    }
-    return eStatus;
-}
-
-MOS_STATUS NullHW::Destroy()
-{
-    return MosMockAdaptor::Destroy();
-}
-
-MOS_STATUS NullHW::StartPredicate(MhwMiInterface* miInterface, PMOS_COMMAND_BUFFER cmdBuffer)
-{
-    if (!m_enabled)
+    MOS_OS_CHK_NULL_RETURN(pOsInterface);
+    if (!pOsInterface->bNullHwIsEnabled)
     {
         return MOS_STATUS_SUCCESS;
     }
@@ -78,9 +38,10 @@ MOS_STATUS NullHW::StartPredicate(MhwMiInterface* miInterface, PMOS_COMMAND_BUFF
     return miInterface->AddMiSetPredicateCmd(cmdBuffer, MHW_MI_SET_PREDICATE_ENABLE_ALWAYS);
 }
 
-MOS_STATUS NullHW::StopPredicate(MhwMiInterface* miInterface, PMOS_COMMAND_BUFFER cmdBuffer)
+MOS_STATUS NullHW::StopPredicate(PMOS_INTERFACE pOsInterface, MhwMiInterface* miInterface, PMOS_COMMAND_BUFFER cmdBuffer)
 {
-    if (!m_enabled)
+    MOS_OS_CHK_NULL_RETURN(pOsInterface);
+    if (!pOsInterface->bNullHwIsEnabled)
     {
         return MOS_STATUS_SUCCESS;
     }
@@ -88,15 +49,4 @@ MOS_STATUS NullHW::StopPredicate(MhwMiInterface* miInterface, PMOS_COMMAND_BUFFE
     MOS_OS_CHK_NULL_RETURN(cmdBuffer);
 
     return miInterface->AddMiSetPredicateCmd(cmdBuffer, MHW_MI_SET_PREDICATE_DISABLE);
-}
-
-void NullHW::StatusReport(uint32_t &status, uint32_t &streamSize)
-{
-    if (!m_enabled)
-    {
-        return;
-    }
-
-    status = 0;
-    streamSize = 1024;
 }

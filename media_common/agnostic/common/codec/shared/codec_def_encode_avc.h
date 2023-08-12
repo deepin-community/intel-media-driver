@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017, Intel Corporation
+* Copyright (c) 2017-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,9 +30,13 @@
 #include "codec_def_common_avc.h"
 #include "codec_def_common_encode.h"
 #include "codec_def_common.h"
+#include "codec_def_encode.h"
 
 #define CODEC_AVC_NUM_MAX_DIRTY_RECT        4
 #define CODEC_AVC_NUM_QP                    52
+
+#define CODEC_AVC_MAX_QP 51
+#define CODEC_AVC_MIN_QP_LP 10
 
 #define CODEC_AVC_NUM_WP_FRAME              8
 #define CODEC_AVC_MAX_FORWARD_WP_FRAME      6
@@ -57,6 +61,14 @@
 #define CODECHAL_ENCODE_AVC_ROI_FRAME_HEIGHT_SCALE_FACTOR   16
 #define CODECHAL_ENCODE_AVC_ROI_FIELD_HEIGHT_SCALE_FACTOR   32
 #define CODECHAL_ENCODE_AVC_MAX_ROI_NUMBER                  4
+#define CODECHAL_ENCODE_AVC_MAX_SLICE_QP                    (CODEC_AVC_NUM_QP - 1) // 0 - 51 inclusive
+#define CODECHAL_ENCODE_AVC_MAX_ICQ_QUALITYFACTOR           51
+#define CODECHAL_ENCODE_AVC_MIN_ICQ_QUALITYFACTOR           1
+#define CODECHAL_ENCODE_AVC_MAX_SLICES_SUPPORTED            256
+#define CODECHAL_ENCODE_AVC_MIN_STREAM_BUFFER_ALIGNMENT     4096
+#define CODECHAL_DEBUG_ENCODE_AVC_NAL_START_CODE_SEI        0x00000106
+#define CODECHAL_DEBUG_ENCODE_AVC_NAL_START_CODE_PPS        0x00000128
+#define CODECHAL_ENCODE_AVC_MI_COPY_MEM_MEM_CMD_ALIGNMENT   4
 
 typedef struct _CODECHAL_ENCODE_AVC_ROUNDING_PARAMS
 {
@@ -197,6 +209,7 @@ typedef enum
     CODECHAL_ENCODE_AVC_MAX_NAL_TYPE = 0x1f,
 } CODECHAL_ENCODE_AVC_NAL_UNIT_TYPE;
 
+// Range 0...4: all slices of the current picture can have differing slice type
 enum
 {
     SLICE_P = 0,
@@ -204,6 +217,15 @@ enum
     SLICE_I = 2,
     SLICE_SP = 3,
     SLICE_SI = 4
+};
+// Range 5...9: all slices of the current picture have the same slice type
+enum
+{
+    FRAME_P = SLICE_P + 5,
+    FRAME_B = SLICE_B + 5,
+    FRAME_I = SLICE_I + 5,
+    FRAME_SP = SLICE_SP + 5,
+    FRAME_SI = SLICE_SI + 5
 };
 typedef enum
 {
@@ -222,27 +244,24 @@ typedef struct _CODEC_ROI_MAP
     CODEC_ROI           Rect[16];   // disconnected areas which have same PriorityLevelOrDQp
 } CODEC_ROI_MAP, *PCODEC_ROI_MAP;
 
-typedef struct _CODEC_ENCODE_MB_CONTROL
-{
-    union
-    {
-        struct
-        {
-            uint32_t        bForceIntra : 1;
-            uint32_t        Reserved : 31;
-        };
-        uint32_t            value;
-    } MBParams;
-} CODEC_ENCODE_MB_CONTROL, *PCODEC_ENCODE_MB_CONTROL;
-
 typedef struct _CODEC_PIC_REORDER
 {
     uint32_t           PicNum;
     uint32_t           POC;
     uint8_t            ReorderPicNumIDC;
     uint8_t            DiffPicNumMinus1;
+    uint32_t           LongTermPicNum;
     CODEC_PICTURE      Picture;
 } CODEC_PIC_REORDER, *PCODEC_PIC_REORDER;
+
+typedef struct _CODEC_SLICE_MMCO
+{
+    uint8_t  MmcoIDC;
+    uint32_t DiffPicNumMinus1;
+    uint32_t LongTermPicNum;
+    uint32_t LongTermFrameIdx;
+    uint32_t MaxLongTermFrameIdxPlus1;
+} CODEC_SLICE_MMCO, *PCODEC_SLICE_MMCO;
 
 /*! \brief Provides the sequence-level parameters of a compressed picture for AVC encoding.
 *
@@ -286,9 +305,9 @@ typedef struct _CODEC_AVC_ENCODE_SEQUENCE_PARAMS
     *    \n Programming note: Define the minimum value as indicated above for AVBR accuracy & convergence, clamp any value that is less than the minimum value to the minimum value.  Define the maximum value for AVBR accuracy as 100 (10%) and for AVBR convergence as 500, clamp any value that is greater than the maximum value to the maximum value. The maximum & minimum value may be adjusted when necessary. If bResetBRC is set to 1 for a non-I picture, driver shall not insert SPS into bitstream.  Driver needs to calculate the maximum allowed frame size per profile/level for all RateControlMethod except CQP, and use the calculated value to program kernel for non AVBR modes; for AVBR mode, driver needs to clamp the upper bound of UserMaxFrameSize to the calculated value and use the clamped UserMaxFrameSize to program kernel.  If IWD_VBR is set, driver programs it the same as VBR except not to enable panic mode.
     */
     uint8_t           RateControlMethod;
-    uint32_t          TargetBitRate;      //!< Target bit rate Kbit per second
-    uint32_t          MaxBitRate;         //!< Maximum bit rate Kbit per second
-    /*! \brief Minimun bit rate Kbit per second.
+    uint32_t          TargetBitRate;      //!< Target bit rate in bit per second
+    uint32_t          MaxBitRate;         //!< Maximum bit rate in bit per second
+    /*! \brief Minimun bit rate in bit per second.
     *
     *   This is used in VBR control. For CBR control, this field is ignored.
     */
@@ -583,7 +602,14 @@ typedef struct _CODEC_AVC_ENCODE_USER_FLAGS
             *        \n - 1: Accelerator will just pack coded slice (slice header + data), like in PAK only mode, and the application will pack the rest of the headers.
             */
             uint32_t    bDisableAcceleratorHeaderPacking        : 1;
-            uint32_t                                            : 5;
+            /*! \brief Indicates whether or not the driver will try to introduce reordering.
+            *
+            *   Applies to ENC + PAK mode only. This flag is only valid only when AcceleratorHeaderPacking = 1, and driver does the header packing.
+            *        \n - 0: Accelerator will try to optimize the order of reference frames in the lists and generate ref_pic_list_modification part of slice header if necessary.
+            *        \n - 1: Accelerator will use reference picture list as is (e.g. it can be prepared by the app) to generate ref_pic_list_modification part of slice header if necessary.
+            */
+            uint32_t    bDisableAcceleratorRefPicListReordering : 1;
+            uint32_t                                            : 4;
             uint32_t    bDisableSubMBPartition                  : 1;    //!< Indicates that sub MB partitioning should be disabled.
             /*! \brief Inidicates whether or not emulation byte are inserted.
             *
@@ -1024,6 +1050,23 @@ typedef struct _CODEC_AVC_ENCODE_PIC_PARAMS
     */
     uint8_t         QpModulationStrength;
 
+    /*! \brief StatusReportEnable
+    *
+    *  Request features to be enabled at status report.
+    *  FrameStats: FRAME_STATS_INFO enabled in ENCODE_QUERY_STATUS_PARAMS.
+    *  BlockStats: BLOCK_STATS_INFO enabled in ENCODE_QUERY_STATUS_PARAMS.
+    */
+    union
+    {
+        struct
+        {
+            uint16_t FrameStats : 1;
+            uint16_t BlockStats : 1;
+            uint16_t reserved : 14;
+        } fields;
+        uint16_t value;
+    } StatusReportEnable;
+
 } CODEC_AVC_ENCODE_PIC_PARAMS, *PCODEC_AVC_ENCODE_PIC_PARAMS;
 
 /*! \brief Slice-level parameters of a compressed picture for AVC encoding.
@@ -1039,7 +1082,7 @@ typedef struct _CODEC_AVC_ENCODE_SLICE_PARAMS
     *
     *    Contains field/frame information concerning the reference in PicFlags. RefPicList[i][j]:
     *        \n - i: the reference picture list (0 or 1)
-    *        \n - j: if the PicFlags are not PICTURE_INVALID, the index variable j is a reference to entry j in teh reference picture list.
+    *        \n - j: if the PicFlags are not PICTURE_INVALID, the index variable j is a reference to entry j in the reference picture list.
     */
     CODEC_PICTURE   RefPicList[CODEC_AVC_NUM_REF_LISTS][CODEC_MAX_NUM_REF_FIELD];
     /*! \brief Specifies the weights and offsets used for explicit mode weighted prediction.
@@ -1102,6 +1145,14 @@ typedef struct _CODEC_AVC_ENCODE_SLICE_PARAMS
     uint8_t                                             : 3;
     uint32_t        MaxFrameNum; //!< Set by the driver: 1 << (pSeqParams[pPicParams->seq_parameter_set_id].log2_max_frame_num_minus4 + 4);
     uint8_t         NumReorder;  //!< Set by the driver
+
+    /*! \brief MMCO can be used when AcceleratorHeaderPacking = 1 i.e. driver does slice header packing.
+    *
+    *    Driver does not generate memory_management_control_operation commands itself but they can be provided by the app.
+    *    If adaptive_ref_pic_marking_mode_flag = 1 these commands will be packed into slice header
+    */
+    CODEC_SLICE_MMCO MMCO[32];
+
 } CODEC_AVC_ENCODE_SLICE_PARAMS, *PCODEC_AVC_ENCODE_SLICE_PARAMS;
 
 // H.264 Inverse Quantization Weight Scale
@@ -1165,4 +1216,78 @@ struct CodecEncodeAvcFeiPicParams
     uint32_t                    dwNumPasses;     //number of QPs
     uint8_t                    *pDeltaQp;        //list of detla QPs
 };
+
+typedef struct _CODECHAL_ENCODE_AVC_PACK_PIC_HEADER_PARAMS
+{
+    PBSBuffer                               pBsBuffer;
+    PCODEC_AVC_ENCODE_PIC_PARAMS            pPicParams;     // pAvcPicParams[ucPPSIdx]
+    PCODEC_AVC_ENCODE_SEQUENCE_PARAMS       pSeqParams;     // pAvcSeqParams[ucSPSIdx]
+    PCODECHAL_ENCODE_AVC_VUI_PARAMS         pAvcVuiParams;
+    PCODEC_AVC_IQ_MATRIX_PARAMS             pAvcIQMatrixParams;
+    PCODECHAL_NAL_UNIT_PARAMS               *ppNALUnitParams;
+    CodechalEncodeSeiData*                  pSeiData;
+    uint32_t                                dwFrameHeight;
+    uint32_t                                dwOriFrameHeight;
+    uint16_t                                wPictureCodingType;
+    bool                                    bNewSeq;
+    bool                                   *pbNewPPSHeader;
+    bool                                   *pbNewSeqHeader;
+} CODECHAL_ENCODE_AVC_PACK_PIC_HEADER_PARAMS, *PCODECHAL_ENCODE_AVC_PACK_PIC_HEADER_PARAMS;
+
+typedef struct _CODECHAL_ENCODE_AVC_VALIDATE_NUM_REFS_PARAMS
+{
+    PCODEC_AVC_ENCODE_SEQUENCE_PARAMS       pSeqParams;     // pAvcSeqParams[ucSPSIdx]
+    PCODEC_AVC_ENCODE_PIC_PARAMS            pPicParams;
+    PCODEC_AVC_ENCODE_SLICE_PARAMS          pAvcSliceParams;
+    uint16_t                                wPictureCodingType;
+    uint16_t                                wPicHeightInMB;
+    uint16_t                                wFrameFieldHeightInMB;
+    bool                                    bFirstFieldIPic;
+    bool                                    bVDEncEnabled;
+    bool                                    bPAKonly;
+} CODECHAL_ENCODE_AVC_VALIDATE_NUM_REFS_PARAMS, *PCODECHAL_ENCODE_AVC_VALIDATE_NUM_REFS_PARAMS;
+
+typedef struct _CODECHAL_ENCODE_AVC_TQ_INPUT_PARAMS
+{
+    uint16_t  wPictureCodingType;
+    uint8_t   ucTargetUsage;
+    uint8_t   ucQP;
+    bool      bBrcEnabled;
+    bool      bVdEncEnabled;
+} CODECHAL_ENCODE_AVC_TQ_INPUT_PARAMS, *PCODECHAL_ENCODE_AVC_TQ_INPUT_PARAMS;
+
+typedef struct _CODECHAL_ENCODE_AVC_TQ_PARAMS
+{
+    uint32_t    dwTqEnabled;
+    uint32_t    dwTqRounding;
+} CODECHAL_ENCODE_AVC_TQ_PARAMS, *PCODECHAL_ENCODE_AVC_TQ_PARAMS;
+
+//!
+//! \enum   TrellisSetting
+//! \brief  Indicate the different Trellis Settings
+//!
+enum TrellisSetting
+{
+    trellisInternal = 0,
+    trellisDisabled = 1,
+    trellisEnabledI = 2,
+    trellisEnabledP = 4,
+    trellisEnabledB = 8
+};
+
+typedef struct _CODECHAL_ENCODE_AVC_PACK_SLC_HEADER_PARAMS
+{
+    PBSBuffer                               pBsBuffer;
+    PCODEC_AVC_ENCODE_PIC_PARAMS            pPicParams;     // pAvcPicParams[ucPPSIdx]
+    PCODEC_AVC_ENCODE_SEQUENCE_PARAMS       pSeqParams;     // pAvcSeqParams[ucSPSIdx]
+    PCODEC_AVC_ENCODE_SLICE_PARAMS          pAvcSliceParams;
+    PCODEC_REF_LIST                         *ppRefList;
+    CODEC_PICTURE                           CurrPic;
+    CODEC_PICTURE                           CurrReconPic;
+    CODEC_AVC_ENCODE_USER_FLAGS             UserFlags;
+    CODECHAL_ENCODE_AVC_NAL_UNIT_TYPE       NalUnitType;
+    uint16_t                                wPictureCodingType;
+    bool                                    bVdencEnabled;
+} CODECHAL_ENCODE_AVC_PACK_SLC_HEADER_PARAMS, *PCODECHAL_ENCODE_AVC_PACK_SLC_HEADER_PARAMS;
+
 #endif  // __CODEC_DEF_ENCODE_AVC_H__

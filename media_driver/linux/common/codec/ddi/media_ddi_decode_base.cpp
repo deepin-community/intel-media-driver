@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2020, Intel Corporation
+* Copyright (c) 2017-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -33,6 +33,7 @@
 #include "media_interfaces_codechal.h"
 #include "media_interfaces_mmd.h"
 #include "mos_solo_generic.h"
+#include "media_interfaces_codechal_next.h"
 
 DdiMediaDecode::DdiMediaDecode(DDI_DECODE_CONFIG_ATTR *ddiDecodeAttr)
     : DdiMediaBase()
@@ -126,16 +127,34 @@ VAStatus DdiMediaDecode::ParseProcessingBuffer(
         decProcessingSurface->TileType = decProcessingSurface->OsResource.TileType;
         decProcessingSurface->Format   = decProcessingSurface->OsResource.Format;
 
-        decProcessingParams->m_inputSurfaceRegion.m_x      = procBuf->surface_region->x;
-        decProcessingParams->m_inputSurfaceRegion.m_y      = procBuf->surface_region->y;
-        decProcessingParams->m_inputSurfaceRegion.m_width  = procBuf->surface_region->width;
-        decProcessingParams->m_inputSurfaceRegion.m_height = procBuf->surface_region->height;
+        if(procBuf->surface_region != nullptr)
+        {
+            m_requireInputRegion                               = false;
+            decProcessingParams->m_inputSurfaceRegion.m_x      = procBuf->surface_region->x;
+            decProcessingParams->m_inputSurfaceRegion.m_y      = procBuf->surface_region->y;
+            decProcessingParams->m_inputSurfaceRegion.m_width  = procBuf->surface_region->width;
+            decProcessingParams->m_inputSurfaceRegion.m_height = procBuf->surface_region->height;
+        }
+        else
+        {
+            m_requireInputRegion = true;
+        }
 
         decProcessingParams->m_outputSurface                = decProcessingSurface;
-        decProcessingParams->m_outputSurfaceRegion.m_x      = procBuf->output_region->x;
-        decProcessingParams->m_outputSurfaceRegion.m_y      = procBuf->output_region->y;
-        decProcessingParams->m_outputSurfaceRegion.m_width  = procBuf->output_region->width;
-        decProcessingParams->m_outputSurfaceRegion.m_height = procBuf->output_region->height;
+        if(procBuf->output_region != nullptr)
+        {
+            decProcessingParams->m_outputSurfaceRegion.m_x      = procBuf->output_region->x;
+            decProcessingParams->m_outputSurfaceRegion.m_y      = procBuf->output_region->y;
+            decProcessingParams->m_outputSurfaceRegion.m_width  = procBuf->output_region->width;
+            decProcessingParams->m_outputSurfaceRegion.m_height = procBuf->output_region->height;
+        }
+        else
+        {
+            decProcessingParams->m_outputSurfaceRegion.m_x      = 0;
+            decProcessingParams->m_outputSurfaceRegion.m_y      = 0;
+            decProcessingParams->m_outputSurfaceRegion.m_width  = decProcessingSurface->dwWidth;
+            decProcessingParams->m_outputSurfaceRegion.m_height = decProcessingSurface->dwHeight;
+        }
 
         // Interpolation flags
         // Set the vdbox scaling mode
@@ -261,6 +280,7 @@ VAStatus DdiMediaDecode::BeginPicture(
     MOS_STATUS eStatus = m_ddiDecodeCtx->pCodecHal->BeginFrame();
     if (eStatus != MOS_STATUS_SUCCESS)
     {
+        m_decodeErrorFlag = true;
         return VA_STATUS_ERROR_DECODING_ERROR;
     }
 
@@ -913,6 +933,7 @@ VAStatus DdiMediaDecode::EndPicture(
     MOS_STATUS status = m_ddiDecodeCtx->pCodecHal->Execute((void *)(&m_ddiDecodeCtx->DecodeParams));
     if (status != MOS_STATUS_SUCCESS)
     {
+        m_decodeErrorFlag = true;
         DDI_ASSERTMESSAGE("DDI:DdiDecode_DecodeInCodecHal return failure.");
         return VA_STATUS_ERROR_DECODING_ERROR;
     }
@@ -924,6 +945,7 @@ VAStatus DdiMediaDecode::EndPicture(
     status = m_ddiDecodeCtx->pCodecHal->EndFrame();
     if (status != MOS_STATUS_SUCCESS)
     {
+        m_decodeErrorFlag = true;
         return VA_STATUS_ERROR_DECODING_ERROR;
     }
 
@@ -1163,9 +1185,18 @@ VAStatus DdiMediaDecode::CreateCodecHal(
 
     if (nullptr == codecHal)
     {
-        DDI_ASSERTMESSAGE("Failure in CodecHal create.\n");
-        vaStatus = VA_STATUS_ERROR_ALLOCATION_FAILED;
-        return vaStatus;
+        codecHal = CodechalDeviceNext::CreateFactory(
+            nullptr,
+            mosCtx,
+            standardInfo,
+            m_codechalSettings);
+
+        if (nullptr == codecHal)
+        {
+            DDI_ASSERTMESSAGE("Failure in CodecHal create.\n");
+            vaStatus = VA_STATUS_ERROR_ALLOCATION_FAILED;
+            return vaStatus;
+        }
     }
 
     if (codecHal->IsApogeiosEnabled())
@@ -1303,6 +1334,9 @@ void DdiMediaDecode::GetDummyReferenceFromDPB(
 void DdiMediaDecode::ReportDecodeMode(
     uint16_t      wMode)
  {
+    PMOS_INTERFACE      osInterface = m_ddiDecodeCtx->pCodecHal ? m_ddiDecodeCtx->pCodecHal->GetOsInterface() : nullptr;
+    MOS_CONTEXT_HANDLE  ctxHandle   = osInterface ? (MOS_CONTEXT_HANDLE)osInterface->pOsContext : nullptr;
+
     MOS_USER_FEATURE_VALUE_WRITE_DATA userFeatureWriteData;
     MOS_ZeroMemory(&userFeatureWriteData, sizeof(userFeatureWriteData));
     userFeatureWriteData.Value.i32Data = wMode;
@@ -1311,38 +1345,47 @@ void DdiMediaDecode::ReportDecodeMode(
         case CODECHAL_DECODE_MODE_MPEG2IDCT:
         case CODECHAL_DECODE_MODE_MPEG2VLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_MPEG2_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_VC1IT:
         case CODECHAL_DECODE_MODE_VC1VLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_VC1_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_AVCVLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_AVC_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_JPEG:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_JPEG_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_VP8VLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_VP8_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_HEVCVLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_HEVC_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_VP9VLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_VP9_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         case CODECHAL_DECODE_MODE_AV1VLD:
             userFeatureWriteData.ValueID = __MEDIA_USER_FEATURE_VALUE_DECODE_AV1_MODE_ID;
-            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, nullptr);
+            MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, ctxHandle);
             break;
         default:
             break;
     }
+
+#if MOS_EVENT_TRACE_DUMP_SUPPORTED
+    {
+        DECODE_EVENTDATA_VA_FEATURE_REPORTMODE eventData;
+        eventData.wMode = (uint32_t)wMode;
+        eventData.ValueID = userFeatureWriteData.ValueID;
+        MOS_TraceEvent(EVENT_DECODE_FEATURE_DECODEMODE_REPORTVA, EVENT_TYPE_INFO, &eventData, sizeof(eventData), NULL, 0);
+    }
+#endif
  }

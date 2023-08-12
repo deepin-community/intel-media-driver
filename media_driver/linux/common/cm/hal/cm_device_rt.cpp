@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2007-2017, Intel Corporation
+* Copyright (c) 2007-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -50,8 +50,8 @@ CmDeviceRT::CmDeviceRT(uint32_t options) : CmDeviceRTBase(options)
 //*-----------------------------------------------------------------------------
 CmDeviceRT::~CmDeviceRT()
 {
-    m_mosContext->SkuTable.reset();
-    m_mosContext->WaTable.reset();
+    m_mosContext->m_skuTable.reset();
+    m_mosContext->m_waTable.reset();
 
     DestroyAuxDevice();
 };
@@ -166,7 +166,7 @@ int32_t CmDeviceRT::CreateAuxDevice(MOS_CONTEXT *mosContext)  //VADriverContextP
     CM_CHK_MOSSTATUS_GOTOFINISH_CMERROR(cmHalState->pfnCmAllocate(cmHalState));
 
     // allocate cmContext
-    cmContext = (PCM_CONTEXT)MOS_AllocAndZeroMemory(sizeof(CM_CONTEXT));
+    cmContext = (PCM_CONTEXT)MOS_New(CM_CONTEXT);
     CM_CHK_NULL_GOTOFINISH_CMERROR(cmContext);
     cmContext->mosCtx     = *mosContext; // mos context
     cmContext->cmHalState = cmHalState;
@@ -194,11 +194,11 @@ int32_t CmDeviceRT::DestroyAuxDevice()
     // Delete VPHAL State
     if (cmData && cmData->cmHalState)
     {
-        cmData->mosCtx.SkuTable.reset();
-        cmData->mosCtx.WaTable.reset();
+        cmData->mosCtx.m_skuTable.reset();
+        cmData->mosCtx.m_waTable.reset();
         HalCm_Destroy(cmData->cmHalState);
         // Delete CM Data itself
-        MOS_FreeMemory(cmData);
+        MOS_Delete(cmData);
 
     }
 
@@ -351,10 +351,10 @@ int32_t CmDeviceRT::LoadJITDll()
         }
         if ((nullptr == m_fJITCompile && nullptr == m_fJITCompile_v2) || nullptr == m_fFreeBlock || nullptr == m_fJITVersion)
         {
-            m_fJITCompile = (pJITCompile)MOS_GetProcAddress(m_hJITDll, JITCOMPILE_FUNCTION_STR);
-            m_fJITCompile_v2 = (pJITCompile_v2)MOS_GetProcAddress(m_hJITDll, JITCOMPILEV2_FUNCTION_STR);
-            m_fFreeBlock = (pFreeBlock)MOS_GetProcAddress(m_hJITDll, FREEBLOCK_FUNCTION_STR);
-            m_fJITVersion = (pJITVersion)MOS_GetProcAddress(m_hJITDll, JITVERSION_FUNCTION_STR);
+            m_fJITCompile = (pJITCompile)MosUtilities::MosGetProcAddress(m_hJITDll, JITCOMPILE_FUNCTION_STR);
+            m_fJITCompile_v2 = (pJITCompile_v2)MosUtilities::MosGetProcAddress(m_hJITDll, JITCOMPILEV2_FUNCTION_STR);
+            m_fFreeBlock = (pFreeBlock)MosUtilities::MosGetProcAddress(m_hJITDll, FREEBLOCK_FUNCTION_STR);
+            m_fJITVersion = (pJITVersion)MosUtilities::MosGetProcAddress(m_hJITDll, JITVERSION_FUNCTION_STR);
         }
 
         if ((nullptr == m_fJITCompile && nullptr == m_fJITCompile_v2) || (nullptr == m_fFreeBlock) || (nullptr == m_fJITVersion))

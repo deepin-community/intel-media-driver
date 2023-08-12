@@ -24,15 +24,16 @@
 //! \brief   Container class for the basic gpu context
 //!
 
-#include "mos_gpucontext_next.h"
 #include "mos_gpucontext_specific_next.h"
 
 GpuContextNext *GpuContextNext::Create(
     const MOS_GPU_NODE gpuNode,
     CmdBufMgrNext         *cmdBufMgr,
-    GpuContextNext        *reusedContext)
+    GpuContextNext        *reusedContext,
+    OsContextNext         *osContext)
 {
     MOS_OS_FUNCTION_ENTER;
+    MOS_UNUSED(osContext);
 
     GpuContextNext* gpuContextNext = nullptr;
 

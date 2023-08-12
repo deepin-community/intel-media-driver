@@ -68,6 +68,40 @@ public:
     {
         return VP_VEBOX_STATISTICS_SIZE_G12;
     }
+
+    virtual MOS_STATUS ConfigVirtualEngine()
+    {
+        return MOS_STATUS_SUCCESS;    // the config would be set in MhwVeboxInterfaceG12::CreateGpuContext().
+    }
+
+    virtual bool IsGpuContextCreatedInPipelineInit()
+    {
+        return false;
+    }
+
+    virtual bool IsAdvanceNativeKernelSupported()
+    {
+        return false;
+    }
+
+    virtual MOS_STATUS GetInputFrameWidthHeightAlignUnit(
+        PVP_MHWINTERFACE          pvpMhwInterface,
+        uint32_t                 &widthAlignUnit,
+        uint32_t                 &heightAlignUnit,
+        bool                      bVdbox,
+        CODECHAL_STANDARD         codecStandard,
+        CodecDecodeJpegChromaType jpegChromaType);
+
+    virtual MOS_STATUS GetVeboxHeapInfo(
+        PVP_MHWINTERFACE          pvpMhwInterface,
+        const MHW_VEBOX_HEAP    **ppVeboxHeap);
+
+    virtual bool IsVeboxScalabilityWith4KNotSupported(
+        VP_MHWINTERFACE           vpMhwInterface);
+
+    virtual MOS_STATUS ConfigureVpScalability(VP_MHWINTERFACE &vpMhwInterface);
+
+    MEDIA_CLASS_DEFINE_END(vp__VpPlatformInterfaceG12Tgllp)
 };
 
 }

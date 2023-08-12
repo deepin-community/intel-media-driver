@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2020, Intel Corporation
+* Copyright (c) 2017-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -686,7 +686,7 @@ CodechalVdencAvcStateG11::CodechalVdencAvcStateG11(
 {
     CODECHAL_ENCODE_FUNCTION_ENTER;
 
-    CODECHAL_ENCODE_ASSERT(m_osInterface);
+    CODECHAL_ENCODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
 #if defined(ENABLE_KERNELS)
     m_kernelBase = (uint8_t*)IGCODECKRN_G11;
@@ -711,7 +711,7 @@ CodechalVdencAvcStateG11::CodechalVdencAvcStateG11(
     m_16xMeSupported = true;
     m_32xMeSupported = true;
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, false, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, false, true);
 
     CODECHAL_DEBUG_TOOL(
         CODECHAL_ENCODE_CHK_NULL_NO_STATUS_RETURN(m_encodeParState = MOS_New(CodechalDebugEncodeParG11, this));
@@ -969,6 +969,12 @@ MOS_STATUS CodechalVdencAvcStateG11::ExecuteSliceLevel()
         sliceState.oneOnOneMapping = m_oneOnOneMapping;
         CODECHAL_ENCODE_CHK_STATUS_RETURN(SendSlice(&cmdBuffer, &sliceState));
 
+        // Report slice size
+        if (m_presMetadataBuffer != nullptr)
+        {
+            CODECHAL_ENCODE_CHK_STATUS_RETURN(ReportSliceSizeMetaData(m_presMetadataBuffer, &cmdBuffer, slcCount));
+        }
+
         // Add dumps for 2nd level batch buffer
         if (sliceState.bSingleTaskPhaseSupported && !sliceState.bVdencInUse)
         {
@@ -1100,7 +1106,7 @@ MOS_STATUS CodechalVdencAvcStateG11::ExecuteSliceLevel()
 #endif
 
     // Prepare MetaData
-    if ((m_presMetadataBuffer != nullptr) && (m_currPass == m_numPasses))
+    if (m_presMetadataBuffer != nullptr)
     {
         CODECHAL_ENCODE_CHK_STATUS_RETURN(PrepareHWMetaData(m_presMetadataBuffer, &m_pakSliceSizeStreamoutBuffer, &cmdBuffer));
     }
@@ -1198,8 +1204,8 @@ MOS_STATUS CodechalVdencAvcStateG11::ExecuteSliceLevel()
     CODECHAL_DEBUG_TOOL(
         // here add the dump buffer for PAK statistics.
         CODECHAL_ENCODE_CHK_STATUS_RETURN(m_debugInterface->DumpBuffer(
-            &m_pakStatsBufferFull,
-            CodechalDbgAttr::attrInput,
+            &m_pakStatsBufferFull[m_currRecycledBufIdx],
+            CodechalDbgAttr::attrPakOutput,
             "MB and FrameLevel PAK staistics vdenc",
             m_vdencBrcPakStatsBufferSize + m_picWidthInMb * m_picHeightInMb * 64,   //size
             0, //offset

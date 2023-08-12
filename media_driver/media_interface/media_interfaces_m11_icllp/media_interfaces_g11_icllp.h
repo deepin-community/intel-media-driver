@@ -33,7 +33,6 @@
 
 #include "media_interfaces_cmhal.h"
 
-#include "media_interfaces_mosutil.h"
 #include "media_interfaces_vphal.h"
 #include "media_interfaces_renderhal.h"
 #include "media_interfaces_nv12top010.h"
@@ -244,15 +243,6 @@ protected:
         CM_HAL_STATE *pCmState);
 };
 
-
-class MosUtilDeviceG11Icllp : public MosUtilDevice
-{
-public:
-    using MosUtil = MediaUserSettingsMgr;
-
-    MOS_STATUS Initialize();
-};
-
 class VphalInterfacesG11Icllp : public VphalDevice
 {
 public:
@@ -260,9 +250,9 @@ public:
 
     MOS_STATUS Initialize(
         PMOS_INTERFACE  osInterface,
-        PMOS_CONTEXT    osDriverContext,
         bool            bInitVphalState,
-        MOS_STATUS      *eStatus);
+        MOS_STATUS      *eStatus,
+        bool            clearViewMode = false);
 };
 
 class RenderHalInterfacesG11Icllp : public RenderHalDevice

@@ -30,7 +30,7 @@
 #include "codec_def_decode.h"
 #include "decode_allocator.h"
 #include "media_feature.h"
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 
 namespace decode {
 
@@ -63,6 +63,8 @@ public:
     bool             m_predicationNotEqualZero = false;  //!< Predication mode
 protected:
     DecodeAllocator* m_allocator;                        //!< Decode allocator
+
+MEDIA_CLASS_DEFINE_END(decode__DecodePredication)
 };
 
 }//decode

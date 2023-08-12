@@ -28,7 +28,7 @@
 #define __VPHAL_RENDER_VEBOX_BASE_H__
 
 #include "mos_os.h"
-#include "renderhal.h"
+#include "renderhal_legacy.h"
 #include "mhw_vebox.h"
 #include "vphal.h"
 #include "vphal_render_renderstate.h"
@@ -36,6 +36,7 @@
 #include "vphal_render_vebox_iecp.h"
 #include "vphal_render_sfc_base.h"
 #include "vphal_render_vebox_denoise.h"
+#include "vp_pipeline_common.h"
 
 #define VPHAL_MAX_NUM_FFDI_SURFACES     4                                       //!< 2 for ADI plus additional 2 for parallel execution on HSW+
 #define VPHAL_NUM_FFDN_SURFACES         2                                       //!< Number of FFDN surfaces
@@ -63,6 +64,7 @@
 #define NOISE_LOWTEMPORALPIXELDIFF_THRESHOLD_DEFAULT    6
 #define NOISE_TEMPORALPIXELDIFF_THRESHOLD_DEFAULT       12
 #define NOISE_SUMABSTEMPORALDIFF_THRESHOLD_DEFAULT      128
+#define RESOLUTION_THRESHOLD                            2073600                  //!< The size of 1080P
 
 //!
 //! \brief Spatial Denoise Definitions
@@ -450,16 +452,6 @@ struct VEBOX_SPATIAL_ATTRIBUTES_CONFIGURATION
     // Padding for 32-byte alignment, VEBOX_SPATIAL_ATTRIBUTES_CONFIGURATION_G9 is 7 uint32_ts
     uint32_t dwPad[7];
 };
-
-//!
-//! \brief Enumeration for the user feature key "Bypass Composition" values
-//!
-typedef enum _VPHAL_COMP_BYPASS_MODE
-{
-    VPHAL_COMP_BYPASS_NOT_SET  = 0xffffffff,
-    VPHAL_COMP_BYPASS_DISABLED = 0x0,
-    VPHAL_COMP_BYPASS_ENABLED  = 0x1
-} VPHAL_COMP_BYPASS_MODE, *PVPHAL_COMP_BYPASS_MODE;
 
 //!
 //! \brief Kernel IDs
@@ -1288,6 +1280,11 @@ protected:
     //!
     virtual MOS_STATUS VeboxSetDNDIParams(
         PVPHAL_SURFACE              pSrcSurface);
+
+    virtual bool IsDnDisabled()
+    {
+        return false;
+    }
 
     //!
     //! \brief    Vebox Set FMD parameter

@@ -25,9 +25,21 @@
 //! \details    Render functions
 //!
 
-#include "renderhal.h"
+#include "renderhal_legacy.h"
 #include "renderhal_g12_base.h"
 #include "mhw_mi_g12_X.h"
+#include "media_common_defs.h"
+#include "media_skuwa_specific.h"
+#include "mhw_mi.h"
+#include "mhw_render.h"
+#include "mhw_state_heap_g12.h"
+#include "mhw_utilities_next.h"
+#include "mos_defs_specific.h"
+#include "mos_os.h"
+#include "mos_os_hw.h"
+#include "mos_utilities.h"
+#include "mos_utilities_common.h"
+#include "renderhal_dsh.h"
 
 //!
 //! \brief      GSH settings for G12
@@ -195,24 +207,42 @@ MOS_STATUS XRenderHal_Interface_G12_Base::SetupSurfaceState (
                     pRenderHal->pOsInterface->pfnGetGmmClientContext(pRenderHal->pOsInterface)).DwordValue;
                 MHW_RENDERHAL_NORMALMESSAGE(" disable  CameraCapture  caches on render path ");
             }
+
+            // use RESOURCE_USAGE_CCS_MEDIA_WRITABLE to ensure displayable output LLC write-uncached
+            if (pParams->isOutput && gmmFlags.Gpu.FlipChain && pSurface->MmcState == MOS_MEMCOMP_MC)
+            {
+                SurfStateParams.dwCacheabilityControl = pRenderHal->pOsInterface->pfnCachePolicyGetMemoryObject(
+                                                                                    MOS_RESOURCE_USAGE_CCS_MEDIA_WRITABLE,
+                                                                                    pRenderHal->pOsInterface->pfnGetGmmClientContext(pRenderHal->pOsInterface))
+                                                            .DwordValue;
+                MHW_RENDERHAL_NORMALMESSAGE(" MOS_RESOURCE_USAGE_CCS_MEDIA_WRITABLE is queried, and target SurfStateParams.dwCacheabilityControl = %d \n", SurfStateParams.dwCacheabilityControl);
+            }
+            #if (_DEBUG || _RELEASE_INTERNAL)
+                pSurface->OsResource.memObjCtrlState.DwordValue = SurfStateParams.dwCacheabilityControl;
+                pParams->MemObjCtl                              = SurfStateParams.dwCacheabilityControl;
+                pSurface->oldCacheSetting                       = (SurfStateParams.dwCacheabilityControl >> 1) & 0x0000003f;
+                if (pParams->isOutput)
+                {
+                    pRenderHal->oldCacheSettingForTargetSurface = pSurface->oldCacheSetting;
+                }
+            #endif
         }
     #endif
-
         if (IsFormatMMCSupported(pSurface->Format) &&
             m_renderHalMMCEnabled)
         {
             // Set surface compression states
-            if (pSurface->MmcState == MOS_MEMCOMP_RC && pParams->bRenderTarget)
+            if (pSurface->MmcState == MOS_MEMCOMP_RC && pParams->isOutput)
             {
                 // bCompressionEnabled/bCompressionMode is deprecated on Gen12+, use MmcState instead.
                 // RC compression mode is not supported on render output surface on tgllp.
-                SurfStateParams.MmcState            = MOS_MEMCOMP_DISABLED;
+                SurfStateParams.MmcState = MOS_MEMCOMP_DISABLED;
                 SurfStateParams.dwCompressionFormat = 0;
             }
-            else if (pSurface->MmcState == MOS_MEMCOMP_MC ||
-                     pSurface->MmcState == MOS_MEMCOMP_RC)
+            else if(pSurface->MmcState == MOS_MEMCOMP_MC ||
+                    pSurface->MmcState == MOS_MEMCOMP_RC)
             {
-                SurfStateParams.MmcState            = pSurface->MmcState;
+                SurfStateParams.MmcState    = pSurface->MmcState;
 
                 if (pSurfaceEntry->YUVPlane == MHW_U_PLANE && 
                    (pSurface->Format        == Format_NV12 ||
@@ -569,9 +599,10 @@ MOS_STATUS XRenderHal_Interface_G12_Base::EnableL3Caching(
     MHW_RENDER_ENGINE_L3_CACHE_SETTINGS_G12  mHwL3CacheConfig = {};
     PMHW_RENDER_ENGINE_L3_CACHE_SETTINGS pCacheConfig;
     MhwRenderInterface                   *pMhwRender;
+    PRENDERHAL_INTERFACE_LEGACY          pRenderHalLegacy = (PRENDERHAL_INTERFACE_LEGACY)pRenderHal;
 
-    MHW_RENDERHAL_CHK_NULL(pRenderHal);
-    pMhwRender = pRenderHal->pMhwRenderInterface;
+    MHW_RENDERHAL_CHK_NULL(pRenderHalLegacy);
+    pMhwRender = pRenderHalLegacy->pMhwRenderInterface;
     MHW_RENDERHAL_CHK_NULL(pMhwRender);
 
     if (nullptr == pCacheSettings)
@@ -636,7 +667,7 @@ MOS_STATUS XRenderHal_Interface_G12_Base::GetSamplerOffsetAndPtr_DSH(
     MHW_RENDERHAL_CHK_NULL(pRenderHal->pHwSizes);
 
     pStateHeap    = pRenderHal->pStateHeap;
-    pDynamicState = pStateHeap->pCurMediaState->pDynamicState;
+    pDynamicState = ((PRENDERHAL_MEDIA_STATE_LEGACY)pStateHeap->pCurMediaState)->pDynamicState;
 
     MHW_RENDERHAL_CHK_NULL(pDynamicState);
 
@@ -714,10 +745,10 @@ finish:
 void XRenderHal_Interface_G12_Base::InitDynamicHeapSettings(
     PRENDERHAL_INTERFACE  pRenderHal)
 {
-    MHW_RENDERHAL_ASSERT(pRenderHal);
-
+    PRENDERHAL_INTERFACE_LEGACY pRenderHalLegacy = static_cast<PRENDERHAL_INTERFACE_LEGACY>(pRenderHal);
+    MHW_RENDERHAL_ASSERT(pRenderHalLegacy);
     // Additional Dynamic State Heap settings for g12
-    pRenderHal->DynamicHeapSettings           = g_cRenderHal_DSH_Settings_g12;
+    pRenderHalLegacy->DynamicHeapSettings           = g_cRenderHal_DSH_Settings_g12;
 }
 
 void XRenderHal_Interface_G12_Base::SetFusedEUDispatch(bool enable)
@@ -856,7 +887,7 @@ MOS_STATUS XRenderHal_Interface_G12_Base::IsRenderHalMMCEnabled(
     MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
 
     UserFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
-#if(LINUX)
+#if (LINUX) && (!WDDM_LINUX)
     UserFeatureData.bData = !MEDIA_IS_WA(pRenderHal->pWaTable, WaDisableVPMmc) || !MEDIA_IS_WA(pRenderHal->pWaTable, WaDisableCodecMmc); // Enable MMC on Linux based on platforms settings
 #else
     UserFeatureData.bData = true; // init as default value to enable MMCD on Gen12LP
@@ -1023,6 +1054,7 @@ bool XRenderHal_Interface_G12_Base::IsFormatMMCSupported(MOS_FORMAT format)
         (format != Format_B10G10R10A2)      &&
         (format != Format_R10G10B10A2)      &&
         (format != Format_A16R16G16B16F)    &&
+        (format != Format_A16B16G16R16F)    &&
         (format != Format_IMC3)             &&
         (format != Format_444P)             &&
         (format != Format_422H)             &&
@@ -1085,7 +1117,7 @@ MOS_STATUS XRenderHal_Interface_G12_Base::SetScratchSpaceBufferState(
     RENDERHAL_SURFACE_STATE_PARAMS renderhal_surface_state_param;
     MOS_ZeroMemory(&renderhal_surface_state_param,
                    sizeof(renderhal_surface_state_param));
-    renderhal_surface_state_param.bRenderTarget = 1;
+    renderhal_surface_state_param.isOutput = 1;
     renderhal_surface_state_param.MemObjCtl = 2;
 
     RENDERHAL_SURFACE_STATE_ENTRY *renderhal_surface_state_entry = nullptr;

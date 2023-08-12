@@ -33,8 +33,15 @@
 #include "codechal_secure_decode_interface.h"
 #include "mhw_cp_interface.h"
 #include "mos_os_cp_interface_specific.h"
+#ifndef WDDM_LINUX
 #include "media_libva_cp_interface.h"
 #include "media_libva_caps_cp_interface.h"
+#else
+class DdiCpInterface;
+class MediaLibvaCaps;
+class MediaLibvaCapsCpInterface;
+struct DDI_MEDIA_CONTEXT;
+#endif
 #include "cp_streamout_interface.h"
 #include "decodecp_interface.h"
 
@@ -170,33 +177,6 @@ public:
     virtual void Delete_MediaLibvaCapsCpInterface(MediaLibvaCapsCpInterface* pInterface) = 0;
 
     //!
-    //! \brief   Create CpStreamOutInterface Object
-    //!          Must use Delete_CpStreamOutInterface to delete created Object to avoid ULT Memory Leak errors
-    //!
-    //! \param   [in] pipeline
-    //!          MediaPipeline*
-    //! \param   [in] task
-    //!          MediaTask*
-    //! \param   [in] hwInterface
-    //!          CodechalHwInterface*
-    //!
-    //! \return  CpStreamOutInterface*
-    //!          Return CP Wrapper Object
-    //!
-    virtual CpStreamOutInterface *Create_CpStreamOutInterface(
-        MediaPipeline *pipeline,
-        MediaTask *task,
-        CodechalHwInterface *hwInterface) = 0;
-
-    //!
-    //! \brief   Delete the CpStreamOutInterface Object
-    //!
-    //! \param   [in] pInterface
-    //!          CpStreamOutInterface
-    //!
-    virtual void Delete_CpStreamOutInterface(CpStreamOutInterface *pInterface) = 0;
-
-    //!
     //! \brief   Create DecodeCpInterface Object
     //!          Must use Delete_DecodeCpInterface to delete created Object to avoid ULT Memory Leak errors
     //!
@@ -210,7 +190,8 @@ public:
     //!
     virtual DecodeCpInterface *Create_DecodeCpInterface(
         CodechalSetting *    codechalSettings,
-        CodechalHwInterface *hwInterfaceInput) = 0;
+        MhwCpInterface  *cpInterface,
+        PMOS_INTERFACE   osInterface) = 0;
 
     //!
     //! \brief   Delete the DecodeCpInterface Object

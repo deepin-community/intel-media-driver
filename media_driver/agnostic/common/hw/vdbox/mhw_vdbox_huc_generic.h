@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2018, Intel Corporation
+* Copyright (c) 2017-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,6 +29,7 @@
 #define _MHW_VDBOX_HUC_GENERIC_H_
 
 #include "mhw_vdbox_huc_interface.h"
+#include "mhw_cp_interface.h"
 
 //!  MHW Vdbox Huc generic interface
 /*!
@@ -38,7 +39,6 @@ template <class THucCmds, class TMiCmds>
 class MhwVdboxHucInterfaceGeneric : public MhwVdboxHucInterface
 {
 protected:
-    #define PATCH_LIST_COMMAND(x)  (x##_NUMBER_OF_ADDRESSES)
     //!
     //! \enum     CommandsNumberOfAddresses
     //! \brief    Commands number of addresses
@@ -93,7 +93,7 @@ protected:
         uint32_t standard = CodecHal_GetStandardFromMode(mode);
         uint32_t numSlices = 1;
         uint32_t numStoreDataImm = 1;
-        uint32_t numStoreReg = 1;
+        uint32_t numStoreReg = 3;
 
         MHW_MI_CHK_NULL(commandsSize);
         MHW_MI_CHK_NULL(patchListSize);
@@ -148,7 +148,7 @@ protected:
         else if (mode == CODECHAL_ENCODE_MODE_AVC)
         {
             numStoreDataImm = 2;
-            numStoreReg     = 2;
+            numStoreReg     = 4;
 
             maxSize +=
                 2 * TMiCmds::MI_CONDITIONAL_BATCH_BUFFER_END_CMD::byteSize;
@@ -281,6 +281,7 @@ protected:
         MOS_COMMAND_BUFFER                  *cmdBuffer,
         MHW_VDBOX_PIPE_MODE_SELECT_PARAMS   *params)
     {
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -294,7 +295,7 @@ protected:
         cmd.DW1.IndirectStreamOutEnable = params->bStreamOutEnabled;
         cmd.DW2.MediaSoftResetCounterPer1000Clocks = params->dwMediaSoftResetCounterValue;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -303,6 +304,7 @@ protected:
         MOS_COMMAND_BUFFER                  *cmdBuffer,
         MHW_VDBOX_HUC_IMEM_STATE_PARAMS     *params)
     {
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -310,7 +312,7 @@ protected:
 
         cmd.DW4.HucFirmwareDescriptor = params->dwKernelDescriptor;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -319,7 +321,7 @@ protected:
         MOS_COMMAND_BUFFER                  *cmdBuffer,
         MHW_VDBOX_HUC_DMEM_STATE_PARAMS     *params)
     {
-
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -351,7 +353,7 @@ protected:
             cmd.DW5.HucDataLength = params->dwDataLength >> MHW_VDBOX_HUC_GENERAL_STATE_SHIFT;
         }
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -360,6 +362,7 @@ protected:
         MOS_COMMAND_BUFFER                  *cmdBuffer,
         MHW_VDBOX_HUC_VIRTUAL_ADDR_PARAMS   *params)
     {
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -391,7 +394,7 @@ protected:
             }
         }
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -400,6 +403,7 @@ protected:
         MOS_COMMAND_BUFFER                  *cmdBuffer,
         MHW_VDBOX_IND_OBJ_BASE_ADDR_PARAMS  *params)
     {
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -446,7 +450,7 @@ protected:
                 &resourceParams));
         }
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -455,6 +459,7 @@ protected:
         MOS_COMMAND_BUFFER                  *cmdBuffer,
         MHW_VDBOX_HUC_STREAM_OBJ_PARAMS     *params)
     {
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -473,7 +478,7 @@ protected:
         cmd.DW4.StartCodeByte1 = params->ucStartCodeByte1;
         cmd.DW4.StartCodeByte0 = params->ucStartCodeByte0;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -482,6 +487,7 @@ protected:
         MOS_COMMAND_BUFFER             *cmdBuffer,
         bool                            lastStreamObject)
     {
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
 
         typename THucCmds::HUC_START_CMD cmd;
@@ -489,7 +495,7 @@ protected:
         // set last stream object or not
         cmd.DW1.Laststreamobject = (lastStreamObject != 0);
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return MOS_STATUS_SUCCESS;
     }

@@ -30,6 +30,8 @@
 #define __DECODE_UNIQUE_ID_H__
 
 #include "decode_utils.h"
+#include "media_class_trace.h"
+#include <stdint.h>
 
 namespace decode {
 
@@ -46,6 +48,8 @@ protected:
 private:
     static uint32_t m_decodeUniqueId;
     static Mutex    m_mutex;
+
+MEDIA_CLASS_DEFINE_END(decode__DecodeUniqueId)
 };
 
 #define DeclareDecodeUniqueId(type, name) \
