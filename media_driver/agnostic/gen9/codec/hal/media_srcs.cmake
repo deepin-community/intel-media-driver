@@ -1,4 +1,4 @@
-# Copyright (c) 2017, Intel Corporation
+# Copyright (c) 2017-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -27,7 +27,7 @@ set(TMP_1_HEADERS_
     ${CMAKE_CURRENT_LIST_DIR}/codechal_hw_g9_X.h
 )
 
-if(${MMC_Supported} STREQUAL "yes")
+if(${MMC_Supported} STREQUAL "yes" AND ENABLE_NONFREE_KERNELS AND ENABLE_KERNELS)
     set(TMP_1_SOURCES_
         ${TMP_1_SOURCES_}
         ${CMAKE_CURRENT_LIST_DIR}/codechal_memdecomp_g9.cpp
@@ -169,15 +169,15 @@ set(HEADERS_
     ${TMP_3_HEADERS_}
 )
 
-set(COMMON_SOURCES_
-    ${COMMON_SOURCES_}
+set(CODEC_SOURCES_
+    ${CODEC_SOURCES_}
     ${TMP_1_SOURCES_}
     ${TMP_2_SOURCES_}
     ${TMP_3_SOURCES_}
 )
 
-set(COMMON_HEADERS_
-    ${COMMON_HEADERS_}
+set(CODEC_HEADERS_
+    ${CODEC_HEADERS_}
     ${TMP_1_HEADERS_}
     ${TMP_2_HEADERS_}
     ${TMP_3_HEADERS_}
@@ -186,6 +186,11 @@ set(COMMON_HEADERS_
 source_group( CodecHal\\Common FILES ${TMP_1_SOURCES_} ${TMP_1_HEADERS_} )
 source_group( CodecHal\\Decode FILES ${TMP_2_SOURCES_} ${TMP_2_HEADERS_} )
 source_group( CodecHal\\Encode FILES ${TMP_3_SOURCES_} ${TMP_3_HEADERS_} )
-
+set(TMP_1_SOURCES_ "")
+set(TMP_1_HEADERS_ "")
+set(TMP_2_SOURCES_ "")
+set(TMP_2_HEADERS_ "")
+set(TMP_3_SOURCES_ "")
+set(TMP_3_HEADERS_ "")
 
 media_add_curr_to_include_path()

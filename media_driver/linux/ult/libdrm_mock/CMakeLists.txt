@@ -1,4 +1,4 @@
-# Copyright (c) 2018-2021, Intel Corporation
+# Copyright (c) 2018-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -21,7 +21,7 @@ cmake_minimum_required(VERSION 2.8)
 
 project(libdrm_mock)
 
-include_directories(../../common/os ../../common/os/i915/include ../inc)
+include_directories(../../common/os ${MEDIA_SOFTLET}/linux/common/os/i915/include ../inc)
 aux_source_directory(. SOURCES)
 
 if (MEDIA_EXT)
@@ -35,10 +35,15 @@ endif ()
 
 set(SOURCES
     ${SOURCES}
-    ../../common/os/mos_vma.c
+    ${MEDIA_SOFTLET}/linux/common/os/mos_vma.c
 )
 
 set_source_files_properties(${SOURCES} PROPERTIES LANGUAGE "CXX")
 add_library(drm_mock SHARED ${SOURCES})
-
+target_include_directories(drm_mock BEFORE PRIVATE
+${COMMON_CP_DIRECTORIES_}
+${SOFTLET_MOS_PREPEND_INCLUDE_DIRS_}
+${MOS_PUBLIC_INCLUDE_DIRS_}     ${SOFTLET_MOS_PUBLIC_INCLUDE_DIRS_}
+${COMMON_PRIVATE_INCLUDE_DIRS_} ${SOFTLET_COMMON_PRIVATE_INCLUDE_DIRS_}
+)
 set_target_properties(drm_mock PROPERTIES VERSION 2.4.0 SOVERSION 2)

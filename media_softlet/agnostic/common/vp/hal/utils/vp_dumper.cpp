@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,7 +28,7 @@
 
 #if (_DEBUG || _RELEASE_INTERNAL)
 #include <stdio.h>
-#include "vphal.h"
+
 #include "mos_os.h"
 #include "vp_dumper.h"
 #include "mos_context_next.h"
@@ -375,7 +375,7 @@ MOS_STATUS VpSurfaceDumper::GetPlaneDefs(
         break;
 
     default:
-        VPHAL_DEBUG_NORMALMESSAGE("Format '%d' not supported in current driver, using default 1 plane for dump", pSurface->Format);
+        VP_DEBUG_NORMALMESSAGE("Format '%d' not supported in current driver, using default 1 plane for dump", pSurface->Format);
         *pdwNumPlanes = 1;
         pPlanes[0].dwWidth = pSurface->dwWidth;
         pPlanes[0].dwHeight = pSurface->dwHeight;
@@ -430,7 +430,7 @@ MOS_STATUS VpSurfaceDumper::GetPlaneDefs(
             }
             break;
         default:
-            VPHAL_DEBUG_ASSERTMESSAGE("More than 3 planes not supported.");
+            VP_DEBUG_ASSERTMESSAGE("More than 3 planes not supported.");
         }
     }
 
@@ -757,7 +757,7 @@ MOS_STATUS VpSurfaceDumper::GetPlaneDefs(
         break;
 
     default:
-        VPHAL_DEBUG_NORMALMESSAGE("Format '%d' not supported in current driver, using default 1 plane for dump", pSurface->osSurface->Format);
+        VP_DEBUG_NORMALMESSAGE("Format '%d' not supported in current driver, using default 1 plane for dump", pSurface->osSurface->Format);
         *pdwNumPlanes = 1;
 
         pPlanes[0].dwWidth = pSurface->osSurface->dwWidth;
@@ -806,7 +806,7 @@ MOS_STATUS VpSurfaceDumper::GetPlaneDefs(
             }
             break;
         default:
-            VPHAL_DEBUG_ASSERTMESSAGE("More than 3 planes not supported.");
+            VP_DEBUG_ASSERTMESSAGE("More than 3 planes not supported.");
         }
     }
 
@@ -852,6 +852,119 @@ bool VpSurfaceDumper::HasAuxSurf(
     return hasAuxSurf;
 }
 
+MOS_STATUS VpSurfaceDumper::CopyThenLockResources(
+    PMOS_INTERFACE               pOsInterface,
+    PVPHAL_SURFACE               pSurface,
+    bool                         hasAuxSurf,
+    bool                         enableAuxDump,
+    PMOS_LOCK_PARAMS             pLockFlags,
+    PMOS_RESOURCE                pLockedResource,
+    VPHAL_SURF_DUMP_SURFACE_DEF *pPlanes,
+    uint32_t                    *pdwNumPlanes,
+    uint32_t                    *pdwSize,
+    uint8_t                     *&pData,
+    const char                  *psPathPrefix,
+    uint64_t                     iCounter)
+{
+    VP_FUNC_CALL();
+
+    MOS_STATUS     eStatus = MOS_STATUS_SUCCESS;
+    bool           bAllocated;
+    PVPHAL_SURFACE temp2DSurfForCopy = nullptr;
+
+    temp2DSurfForCopy = (PVPHAL_SURFACE)MOS_AllocAndZeroMemory(sizeof(VPHAL_SURFACE));
+    VP_DEBUG_CHK_NULL(temp2DSurfForCopy);
+    VP_RENDER_CHK_STATUS(VpUtils::ReAllocateSurface(
+        pOsInterface,
+        temp2DSurfForCopy,
+        "Temp2DSurfForSurfDumper",
+        pSurface->Format,
+        MOS_GFXRES_2D,
+        MOS_TILE_LINEAR,
+        pSurface->dwWidth,
+        pSurface->dwHeight,
+        false,
+        MOS_MMC_DISABLED,
+        &bAllocated,
+        MOS_HW_RESOURCE_DEF_MAX,
+        MOS_TILE_UNSET_GMM,
+        MOS_MEMPOOL_SYSTEMMEMORY));
+
+    pOsInterface->pfnDoubleBufferCopyResource(
+        pOsInterface,
+        &pSurface->OsResource,
+        &temp2DSurfForCopy->OsResource,
+        false);
+
+    if (pOsInterface->pfnIsAsynDevice(pOsInterface) && pSurface->OsResource.bConvertedFromDDIResource)
+    {
+        MOS_LOCK_PARAMS LockFlags;
+        char            sPath[MAX_PATH];
+        MOS_ZeroMemory(sPath, MAX_PATH);
+        MOS_SecureStringPrint(
+            sPath,
+            MAX_PATH,
+            sizeof(sPath),
+            "%s_f[%04lld]_w[%d]_h[%d]_p[%d].%s",
+            psPathPrefix,
+            iCounter,
+            temp2DSurfForCopy->dwWidth,
+            pPlanes[0].dwHeight,
+            temp2DSurfForCopy->dwPitch,
+            VpDumperTool::GetFormatStr(temp2DSurfForCopy->Format));
+        LockFlags.DumpAfterSubmit      = true;
+        ResourceDumpAttri resDumpAttri = {};
+        MOS_GFXRES_FREE_FLAGS resFreeFlags = {0};
+        if (VpUtils::IsSyncFreeNeededForMMCSurface(temp2DSurfForCopy, pOsInterface))
+        {
+            resFreeFlags.SynchronousDestroy = 1;
+        }
+        resDumpAttri.lockFlags         = LockFlags;
+        resDumpAttri.res               = temp2DSurfForCopy->OsResource;
+        resDumpAttri.res.Format        = temp2DSurfForCopy->Format;
+        resDumpAttri.fullFileName      = sPath;
+        resDumpAttri.width             = temp2DSurfForCopy->dwWidth;
+        resDumpAttri.height            = temp2DSurfForCopy->dwHeight;
+        resDumpAttri.pitch             = temp2DSurfForCopy->dwPitch;
+        resDumpAttri.resFreeFlags      = resFreeFlags;
+        pOsInterface->resourceDumpAttriArray.push_back(resDumpAttri);
+
+        goto finish;
+    }
+
+    pData = (uint8_t *)pOsInterface->pfnLockResource(
+        pOsInterface,
+        &temp2DSurfForCopy->OsResource,
+        pLockFlags);
+    pLockedResource = &temp2DSurfForCopy->OsResource;
+
+    // get plane definitions
+    VP_DEBUG_CHK_STATUS(GetPlaneDefs(
+        temp2DSurfForCopy,
+        pPlanes,
+        pdwNumPlanes,
+        pdwSize,
+        hasAuxSurf,        //(hasAuxSurf && enableAuxDump),
+        !enableAuxDump));  // !(hasAuxSurf && enableAuxDump)));
+
+finish:
+    if (temp2DSurfForCopy)
+    {
+        MOS_GFXRES_FREE_FLAGS resFreeFlags = {0};
+        if (!pOsInterface->pfnIsAsynDevice(pOsInterface))
+        {
+            if (VpUtils::IsSyncFreeNeededForMMCSurface(temp2DSurfForCopy, pOsInterface))
+            {
+                resFreeFlags.SynchronousDestroy = 1;
+            }
+            pOsInterface->pfnFreeResourceWithFlag(pOsInterface, &(temp2DSurfForCopy->OsResource), resFreeFlags.Value);
+        }
+    }
+    MOS_SafeFreeMemory(temp2DSurfForCopy);
+
+    return eStatus;
+}
+
 MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     PMOS_INTERFACE          pOsInterface,
     PVPHAL_SURFACE          pSurface,
@@ -871,15 +984,13 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     VPHAL_SURF_DUMP_SURFACE_DEF         planes[3];
     uint32_t                            dstPlaneOffset[3] = {0};
     MOS_LOCK_PARAMS                     LockFlags;
-    MOS_USER_FEATURE_VALUE_WRITE_DATA   UserFeatureWriteData;
     bool                                hasAuxSurf;
     bool                                enableAuxDump;
     bool                                enablePlaneDump = false;
     PMOS_RESOURCE                       pLockedResource = nullptr;
-
-    VPHAL_DEBUG_ASSERT(pSurface);
-    VPHAL_DEBUG_ASSERT(pOsInterface);
-    VPHAL_DEBUG_ASSERT(psPathPrefix);
+    VP_DEBUG_ASSERT(pSurface);
+    VP_DEBUG_ASSERT(pOsInterface);
+    VP_DEBUG_ASSERT(psPathPrefix);
 
     eStatus         = MOS_STATUS_SUCCESS;
     isSurfaceLocked = false;
@@ -899,7 +1010,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     hasAuxSurf = HasAuxSurf(&pSurface->OsResource);
 
     // get plane definitions
-    VPHAL_DEBUG_CHK_STATUS(GetPlaneDefs(
+    VP_DEBUG_CHK_STATUS(GetPlaneDefs(
         pSurface,
         planes,
         &dwNumPlanes,
@@ -910,7 +1021,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     if (bLockSurface)
     {
         // Caller should not give pData when it expect the function to lock surf
-        VPHAL_DEBUG_ASSERT(pData = nullptr);
+        VP_DEBUG_ASSERT(pData = nullptr);
 
         LockFlags.Value     = 0;
         LockFlags.ReadOnly  = 1;
@@ -928,70 +1039,78 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
         }
 
         bool isPlanar = false;
+#if !EMUL
         isPlanar      = (pSurface->Format == Format_NV12) || (pSurface->Format == Format_P010) || (pSurface->Format == Format_P016);
+#endif
+        VP_DEBUG_CHK_NULL(pOsInterface);
+        VP_DEBUG_CHK_NULL(pOsInterface->pfnGetSkuTable);
+        auto *skuTable = pOsInterface->pfnGetSkuTable(pOsInterface);
 
-        if (isPlanar && pSurface->TileType != MOS_TILE_LINEAR)
+        // RGBP and BGRP support tile output but should not transfer to linear surface due to height 16 align issue.
+        if (((skuTable && MEDIA_IS_SKU(skuTable, FtrE2ECompression) || isPlanar) &&
+            (pSurface->TileType != MOS_TILE_LINEAR) &&
+            !(pSurface->Format == Format_RGBP || pSurface->Format == Format_BGRP)) ||
+            (pOsInterface->pfnIsAsynDevice(pOsInterface) && pSurface->OsResource.bConvertedFromDDIResource))
         {
-            bool bAllocated;
-
-            PVPHAL_SURFACE m_temp2DSurfForCopy = (PVPHAL_SURFACE)MOS_AllocAndZeroMemory(sizeof(VPHAL_SURFACE));
-
-            VPHAL_RENDER_CHK_STATUS(VpHal_ReAllocateSurface(
-                pOsInterface,
-                m_temp2DSurfForCopy,
-                "Temp2DSurfForSurfDumper",
-                pSurface->Format,
-                MOS_GFXRES_2D,
-                MOS_TILE_LINEAR,
-                pSurface->dwWidth,
-                pSurface->dwHeight,
-                false,
-                MOS_MMC_DISABLED,
-                &bAllocated));
-
-            m_osInterface->pfnDoubleBufferCopyResource(
-                m_osInterface,
-                &pSurface->OsResource,
-                &m_temp2DSurfForCopy->OsResource,
-                false);
-
-            pData = (uint8_t *)pOsInterface->pfnLockResource(
-                pOsInterface,
-                &m_temp2DSurfForCopy->OsResource,
-                &LockFlags);
-            pLockedResource = &m_temp2DSurfForCopy->OsResource;
-
-            // get plane definitions
-            VPHAL_DEBUG_CHK_STATUS(GetPlaneDefs(
-                m_temp2DSurfForCopy,
-                planes,
-                &dwNumPlanes,
-                &dwSize,
-                hasAuxSurf,        //(hasAuxSurf && enableAuxDump),
-                !enableAuxDump));  // !(hasAuxSurf && enableAuxDump)));
+            bool isConvertedFromDDIResource = pSurface->OsResource.bConvertedFromDDIResource;
+            CopyThenLockResources(pOsInterface, pSurface, hasAuxSurf, enableAuxDump, &LockFlags, pLockedResource, planes, &dwNumPlanes, &dwSize, pData, psPathPrefix, iCounter);
+            if (pOsInterface->pfnIsAsynDevice(pOsInterface) && isConvertedFromDDIResource)
+            {
+                return eStatus;
+            }
         }
         else
         {
-            pData = (uint8_t *)pOsInterface->pfnLockResource(
-                pOsInterface,
-                &pSurface->OsResource,
-                &LockFlags);
-            pLockedResource = &pSurface->OsResource;
+            if (pOsInterface->pfnIsAsynDevice(pOsInterface))
+            {
+                MOS_SecureStringPrint(
+                    sPath,
+                    MAX_PATH,
+                    sizeof(sPath),
+                    "%s_f[%04lld]_w[%d]_h[%d]_p[%d].%s",
+                    psPathPrefix,
+                    iCounter,
+                    pSurface->dwWidth,
+                    planes[0].dwHeight,
+                    pSurface->dwPitch,
+                    VpDumperTool::GetFormatStr(pSurface->Format));
+                LockFlags.DumpAfterSubmit = true;
+                ResourceDumpAttri resDumpAttri = {};
+                resDumpAttri.lockFlags         = LockFlags;
+                resDumpAttri.res               = pSurface->OsResource;
+                resDumpAttri.res.Format        = pSurface->Format;
+                resDumpAttri.fullFileName      = sPath;
+                resDumpAttri.width             = pSurface->dwWidth;
+                resDumpAttri.height            = pSurface->dwHeight;
+                resDumpAttri.pitch             = pSurface->dwPitch;
+                pOsInterface->resourceDumpAttriArray.push_back(resDumpAttri);
+
+                return eStatus;
+            }
+            else
+            {
+                pData = (uint8_t *)pOsInterface->pfnLockResource(
+                    pOsInterface,
+                    &pSurface->OsResource,
+                    &LockFlags);
+                pLockedResource = &pSurface->OsResource;
+                // if lock failed, fallback to DoubleBufferCopy
+                if (nullptr == pData)
+                {
+                    CopyThenLockResources(pOsInterface, pSurface, hasAuxSurf, enableAuxDump, &LockFlags, pLockedResource, planes, &dwNumPlanes, &dwSize, pData);
+                }
+            }
         }
-        VPHAL_DEBUG_CHK_NULL(pData);
+        VP_DEBUG_CHK_NULL(pData);
 
         // Write error to user feauture key
-        MOS_ZeroMemory(&UserFeatureWriteData, sizeof(UserFeatureWriteData));
-        UserFeatureWriteData.Value.u32Data  = 1;
-        UserFeatureWriteData.ValueID        = __VPHAL_DBG_SURF_DUMPER_RESOURCE_LOCK_ID;
-
-        eStatus = MOS_UserFeature_WriteValues_ID(
-            nullptr,
-            &UserFeatureWriteData,
+        eStatus = ReportUserSettingForDebug(
+            m_userSettingPtr,
+            __VPHAL_DBG_SURF_DUMPER_RESOURCE_LOCK,
             1,
-            m_osInterface->pOsContext);
+            MediaUserSetting::Group::Device);
 
-        VPHAL_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
+        VP_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
         isSurfaceLocked = true;
     }
 
@@ -1010,8 +1129,8 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     VpDumperTool::GetOsFilePath(sPath, sOsPath);
 
     pDst = (uint8_t*)MOS_AllocAndZeroMemory(dwSize);
-    VPHAL_DEBUG_CHK_NULL(pDst);
-    VPHAL_DEBUG_CHK_NULL(pData);
+    VP_DEBUG_CHK_NULL(pDst);
+    VP_DEBUG_CHK_NULL(pData);
     pTmpSrc = pData;
     pTmpDst = pDst;
 
@@ -1097,16 +1216,16 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
 
                 VpDumperTool::GetOsFilePath(sPlanePath, sPlaneOsPath);
 
-                VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sPlaneOsPath, pDst + dstPlaneOffset[j], dstPlaneOffset[j + 1]));
+                VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sPlaneOsPath, pDst + dstPlaneOffset[j], dstPlaneOffset[j + 1]));
             }
             else
             {
-                VPHAL_DEBUG_ASSERTMESSAGE("More than 3 planes not supported during plane dump.");
+                VP_DEBUG_ASSERTMESSAGE("More than 3 planes not supported during plane dump.");
             }
         }
     }
 
-    VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sOsPath, pDst, dwSize));
+    VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sOsPath, pDst, dwSize));
 
 #if !EMUL
     // Dump Aux surface data
@@ -1158,7 +1277,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
         VpDumperTool::GetOsFilePath(sPath, sOsPath);
 
         uint8_t  *pDstAux = (uint8_t*)MOS_AllocAndZeroMemory(auxSizeY);
-        VPHAL_DEBUG_CHK_NULL(pDstAux);
+        VP_DEBUG_CHK_NULL(pDstAux);
 
         MOS_SecureMemcpy(
             pDstAux,
@@ -1166,7 +1285,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
             auxDataY,
             auxSizeY);
 
-        VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sOsPath, pDstAux, auxSizeY));
+        VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sOsPath, pDstAux, auxSizeY));
         MOS_SafeFreeMemory(pDstAux);
 
         if (auxSizeUV && isPlanar)
@@ -1186,7 +1305,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
             VpDumperTool::GetOsFilePath(sPath, sOsPath);
 
             uint8_t  *pDstUVAux = (uint8_t*)MOS_AllocAndZeroMemory(auxSizeUV);
-            VPHAL_DEBUG_CHK_NULL(pDstUVAux);
+            VP_DEBUG_CHK_NULL(pDstUVAux);
 
             MOS_SecureMemcpy(
                 pDstUVAux,
@@ -1194,7 +1313,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
                 auxDataUV,
                 auxSizeUV);
 
-            VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sOsPath, pDstUVAux, auxSizeUV));
+            VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sOsPath, pDstUVAux, auxSizeUV));
             MOS_SafeFreeMemory(pDstUVAux);
         }
     }
@@ -1206,7 +1325,7 @@ finish:
     if (isSurfaceLocked && pLockedResource != nullptr)
     {
         eStatus = (MOS_STATUS)pOsInterface->pfnUnlockResource(pOsInterface, pLockedResource);
-        VPHAL_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
+        VP_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
     }
 
     return eStatus;
@@ -1232,15 +1351,14 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     VPHAL_SURF_DUMP_SURFACE_DEF         planes[3];
     uint32_t                            dstPlaneOffset[3] = {0};
     MOS_LOCK_PARAMS                     LockFlags;
-    MOS_USER_FEATURE_VALUE_WRITE_DATA   UserFeatureWriteData;
     bool                                hasAuxSurf;
     bool                                enableAuxDump;
     bool                                enablePlaneDump = false;
     PMOS_RESOURCE                       pLockedResource = nullptr;
 
-    VPHAL_DEBUG_ASSERT(pSurface);
-    VPHAL_DEBUG_ASSERT(pOsInterface);
-    VPHAL_DEBUG_ASSERT(psPathPrefix);
+    VP_DEBUG_ASSERT(pSurface);
+    VP_DEBUG_ASSERT(pOsInterface);
+    VP_DEBUG_ASSERT(psPathPrefix);
 
     eStatus         = MOS_STATUS_SUCCESS;
     isSurfaceLocked = false;
@@ -1260,7 +1378,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     hasAuxSurf = HasAuxSurf(&pSurface->osSurface->OsResource);
 
     // get plane definitions
-    VPHAL_DEBUG_CHK_STATUS(GetPlaneDefs(
+    VP_DEBUG_CHK_STATUS(GetPlaneDefs(
         pSurface,
         planes,
         &dwNumPlanes,
@@ -1271,7 +1389,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     if (bLockSurface)
     {
         // Caller should not give pData when it expect the function to lock surf
-        VPHAL_DEBUG_ASSERT(pData = nullptr);
+        VP_DEBUG_ASSERT(pData = nullptr);
 
         LockFlags.Value     = 0;
         LockFlags.ReadOnly  = 1;
@@ -1298,20 +1416,16 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
                 &LockFlags);
             pLockedResource = &pSurface->osSurface->OsResource;
         }
-        VPHAL_DEBUG_CHK_NULL(pData);
+        VP_DEBUG_CHK_NULL(pData);
 
         // Write error to user feauture key
-        MOS_ZeroMemory(&UserFeatureWriteData, sizeof(UserFeatureWriteData));
-        UserFeatureWriteData.Value.u32Data  = 1;
-        UserFeatureWriteData.ValueID        = __VPHAL_DBG_SURF_DUMPER_RESOURCE_LOCK_ID;
-
-        eStatus = MOS_UserFeature_WriteValues_ID(
-            nullptr,
-            &UserFeatureWriteData,
+        eStatus = ReportUserSettingForDebug(
+            m_userSettingPtr,
+            __VPHAL_DBG_SURF_DUMPER_RESOURCE_LOCK,
             1,
-            m_osInterface->pOsContext);
+            MediaUserSetting::Group::Device);
 
-        VPHAL_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
+        VP_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
         isSurfaceLocked = true;
     }
 
@@ -1330,8 +1444,8 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
     VpDumperTool::GetOsFilePath(sPath, sOsPath);
 
     pDst = (uint8_t*)MOS_AllocAndZeroMemory(dwSize);
-    VPHAL_DEBUG_CHK_NULL(pDst);
-    VPHAL_DEBUG_CHK_NULL(pData);
+    VP_DEBUG_CHK_NULL(pDst);
+    VP_DEBUG_CHK_NULL(pData);
     pTmpSrc = pData;
     pTmpDst = pDst;
 
@@ -1390,16 +1504,16 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceToFile(
 
                 VpDumperTool::GetOsFilePath(sPlanePath, sPlaneOsPath);
 
-                VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sPlaneOsPath, pDst + dstPlaneOffset[j], dstPlaneOffset[j + 1]));
+                VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sPlaneOsPath, pDst + dstPlaneOffset[j], dstPlaneOffset[j + 1]));
             }
             else
             {
-                VPHAL_DEBUG_ASSERTMESSAGE("More than 3 planes not supported during plane dump.");
+                VP_DEBUG_ASSERTMESSAGE("More than 3 planes not supported during plane dump.");
             }
         }
     }
 
-    VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sOsPath, pDst, dwSize));
+    VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sOsPath, pDst, dwSize));
 
 finish:
     MOS_SafeFreeMemory(pDst);
@@ -1407,7 +1521,7 @@ finish:
     if (isSurfaceLocked && pLockedResource != nullptr)
     {
         eStatus = (MOS_STATUS)pOsInterface->pfnUnlockResource(pOsInterface, pLockedResource);
-        VPHAL_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
+        VP_DEBUG_ASSERT(eStatus == MOS_STATUS_SUCCESS);
     }
 
     return eStatus;
@@ -1420,7 +1534,7 @@ char* VpSurfaceDumper::WhitespaceTrim(
 
     char*    pcTemp;                             // pointer to temp string to remove spces
 
-    VPHAL_DEBUG_ASSERT(ptr);
+    VP_DEBUG_ASSERT(ptr);
 
     if(strlen(ptr) == 0)
     {
@@ -1516,7 +1630,7 @@ MOS_STATUS VpSurfaceDumper::LocStringToEnum(
     }
     else
     {
-        VPHAL_DEBUG_NORMALMESSAGE("Unknown dump location \"%s\".", pcLocString);
+        VP_DEBUG_NORMALMESSAGE("Unknown dump location \"%s\".", pcLocString);
         eStatus = MOS_STATUS_UNKNOWN;
         goto finish;
     }
@@ -1576,13 +1690,13 @@ MOS_STATUS VpSurfaceDumper::EnumToLocString(
             MOS_SecureStringPrint(pcLocString, MAX_PATH, MAX_PATH, VPHAL_SURF_DUMP_LOC_VEBOX_KERNELHEAP);
             break;
         default:
-            VPHAL_DEBUG_ASSERTMESSAGE("Unknown dump location \"%d\".", Location);
+            VP_DEBUG_ASSERTMESSAGE("Unknown dump location \"%d\".", Location);
             eStatus = MOS_STATUS_UNKNOWN;
             goto finish;
     } // end switch
 
     stStrLen = strlen(pcLocString);
-    VPHAL_DEBUG_ASSERT(stStrLen > 1);          // assert b/c invalid access if <= 1
+    VP_DEBUG_ASSERT(stStrLen > 1);      // assert b/c invalid access if <= 1
     i = pcLocString[1] == 'r' ? 3 : 4; // If pre, start i at 3, else 4
     // Maybe should add error case in case macros get changed later?
     for (; i < stStrLen; i++)
@@ -1627,7 +1741,7 @@ MOS_STATUS VpSurfaceDumper::SurfTypeStringToEnum(
     }
     else
     {
-        VPHAL_DEBUG_ASSERTMESSAGE("Unknown surface type \"%s\".", pcSurfType);
+        VP_DEBUG_ASSERTMESSAGE("Unknown surface type \"%s\".", pcSurfType);
         eStatus = MOS_STATUS_UNKNOWN;
         goto finish;
     }
@@ -1695,14 +1809,14 @@ MOS_STATUS VpSurfaceDumper::ProcessDumpLocations(
                 pcColonLoc++;
 
                 pcColonLoc = WhitespaceTrim(pcColonLoc);
-                VPHAL_DEBUG_CHK_STATUS(SurfTypeStringToEnum(pcColonLoc,
+                VP_DEBUG_CHK_STATUS(SurfTypeStringToEnum(pcColonLoc,
                                     &(pDumpSpec->pDumpLocations[i].SurfType)));
             }
 
             //trim the whitespaces from dump location
             pcCurrToken = WhitespaceTrim(pcCurrToken);
 
-            VPHAL_DEBUG_CHK_STATUS(LocStringToEnum(pcCurrToken,
+            VP_DEBUG_CHK_STATUS(LocStringToEnum(pcCurrToken,
                                 &(pDumpSpec->pDumpLocations[i].DumpLocation)));
             if (pcCommaLoc != nullptr)
             {
@@ -1714,63 +1828,87 @@ finish:
     return eStatus;
 }
 
-void VpSurfaceDumper::GetSurfaceDumpSpec()
+void VpSurfaceDumper::GetSurfaceDumpSpecForVPSolo(VPHAL_SURF_DUMP_SPEC *pDumpSpec, MediaUserSetting::Value outValue)
 {
     VP_FUNC_CALL();
 
-    MOS_STATUS                      eStatus = MOS_STATUS_SUCCESS;
-    MOS_USER_FEATURE_VALUE_DATA     UserFeatureData;
-    bool                            bDumpEnabled;
-    char                            cStringData[MOS_USER_CONTROL_MAX_DATA_SIZE];
-    char                            pcDumpLocData[VPHAL_SURF_DUMP_MAX_DATA_LEN];
-    VPHAL_SURF_DUMP_SPEC           *pDumpSpec = &m_dumpSpec;
-
-    pDumpSpec->uiStartFrame    = 0xFFFFFFFF;
-    pDumpSpec->uiEndFrame      = 0;
-    pDumpSpec->pcOutputPath[0] = '\0';
-    pcDumpLocData[0]           = '\0';
-    bDumpEnabled               = false;
-
-    // Get start frame
-    // if start frame is not got assign a default value of 0
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_START_FRAME_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->uiStartFrame = UserFeatureData.u32Data;
-
-    // Get end frame
-    // if end frame is not got assign a default value of max
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_END_FRAME_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->uiEndFrame = UserFeatureData.u32Data;
-
-    // Get out file path
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.StringData.pStringData = cStringData;
-    UserFeatureData.StringData.uMaxSize    = MOS_USER_CONTROL_MAX_DATA_SIZE;
-    UserFeatureData.StringData.uSize       = 0;    //set the default value. 0 is empty buffer.
-
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_OUTFILE_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-
-    if (UserFeatureData.StringData.uSize > 0)
+    MOS_STATUS eStatus      = MOS_STATUS_SUCCESS;
+    pDumpSpec->uiStartFrame = 0;
+    pDumpSpec->uiEndFrame   = 0xFFFFFFFF;
+    outValue                = "C:\\dumps";
+    if (outValue.ConstString().size() > 0 && outValue.ConstString().size() < MOS_USER_CONTROL_MAX_DATA_SIZE)
     {
         // Copy the Output path
         MOS_SecureMemcpy(
             pDumpSpec->pcOutputPath,
             MAX_PATH,
-            UserFeatureData.StringData.pStringData,
-            UserFeatureData.StringData.uSize);
+            outValue.ConstString().c_str(),
+            outValue.ConstString().size());
+    }
+    outValue = "postall";
+    if (outValue.ConstString().size() > 0 && outValue.ConstString().size() < MOS_USER_CONTROL_MAX_DATA_SIZE && pDumpSpec->pcOutputPath[0] != '\0')
+    {
+        VP_DEBUG_CHK_STATUS(ProcessDumpLocations(const_cast<char *>(outValue.ConstString().c_str())));
+    }
+
+finish:
+    if ((eStatus != MOS_STATUS_SUCCESS) || (pDumpSpec->pcOutputPath[0] == '\0'))
+    {
+        pDumpSpec->uiStartFrame = 1;
+        pDumpSpec->uiEndFrame   = 0;
+    }
+}
+
+void VpSurfaceDumper::GetSurfaceDumpSpec()
+{
+    VP_FUNC_CALL();
+
+    MOS_STATUS                      eStatus = MOS_STATUS_SUCCESS;
+    char                            pcDumpLocData[VPHAL_SURF_DUMP_MAX_DATA_LEN];
+    VPHAL_SURF_DUMP_SPEC           *pDumpSpec = &m_dumpSpec;
+    MediaUserSetting::Value         outValue;
+
+    pDumpSpec->uiStartFrame    = 0xFFFFFFFF;
+    pDumpSpec->uiEndFrame      = 0;
+    pDumpSpec->pcOutputPath[0] = '\0';
+    pcDumpLocData[0]           = '\0';
+
+#if EMUL
+    GetSurfaceDumpSpecForVPSolo(pDumpSpec, outValue);
+    return;
+#endif
+
+    // Get start frame
+    // if start frame is not got assign a default value of 0
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->uiStartFrame,
+        __VPHAL_DBG_SURF_DUMP_START_FRAME_KEY_NAME,
+        MediaUserSetting::Group::Device);
+
+    // Get end frame
+    // if end frame is not got assign a default value of max
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->uiEndFrame,
+        __VPHAL_DBG_SURF_DUMP_END_FRAME_KEY_NAME,
+        MediaUserSetting::Group::Device);
+
+    // Get out file path
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        outValue,
+        __VPHAL_DBG_SURF_DUMP_OUTFILE_KEY_NAME,
+        MediaUserSetting::Group::Device);
+
+    if (outValue.ConstString().size() > 0 && outValue.ConstString().size() < MOS_USER_CONTROL_MAX_DATA_SIZE)
+    {
+        // Copy the Output path
+        MOS_SecureMemcpy(
+            pDumpSpec->pcOutputPath,
+            MAX_PATH,
+            outValue.ConstString().c_str(),
+            outValue.ConstString().size());
     }
 #if !defined(LINUX) && !defined(ANDROID)
     else
@@ -1781,7 +1919,6 @@ void VpSurfaceDumper::GetSurfaceDumpSpec()
         if (SUCCEEDED(GetDriverPersistentStorageLocation(vphalDumpFilePath)))
         {
             std::string m_outputFilePath;
-            MOS_USER_FEATURE_VALUE_WRITE_DATA userFeatureWriteData;
 
             m_outputFilePath = vphalDumpFilePath.c_str();
             m_outputFilePath.append(VPHAL_DUMP_OUTPUT_FOLDER);
@@ -1793,65 +1930,55 @@ void VpSurfaceDumper::GetSurfaceDumpSpec()
                 m_outputFilePath.c_str(),
                 m_outputFilePath.size());
 
-            MOS_ZeroMemory(&userFeatureWriteData, sizeof(userFeatureWriteData));
-            userFeatureWriteData.Value.StringData.pStringData = cStringData;
-            userFeatureWriteData.Value.StringData.pStringData = const_cast<char *>(m_outputFilePath.c_str());
-            userFeatureWriteData.Value.StringData.uSize       = m_outputFilePath.size();
-            userFeatureWriteData.ValueID                      = __VPHAL_DBG_DUMP_OUTPUT_DIRECTORY_ID;
-            MOS_UserFeature_WriteValues_ID(NULL, &userFeatureWriteData, 1, m_osInterface->pOsContext);
+            ReportUserSettingForDebug(m_userSettingPtr, __VPHAL_DBG_DUMP_OUTPUT_DIRECTORY, m_outputFilePath, MediaUserSetting::Group::Sequence);
         }
     }
 #endif
 
     // Get dump locations
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.StringData.pStringData = cStringData;
-    UserFeatureData.StringData.uMaxSize    = MOS_USER_CONTROL_MAX_DATA_SIZE;
-    UserFeatureData.StringData.uSize       = 0;    //set the default value. 0 is empty buffer.
-
-    MOS_CHK_STATUS_SAFE(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_LOCATION_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    if (UserFeatureData.StringData.uSize > 0)
+    outValue = "";
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        outValue,
+        __VPHAL_DBG_SURF_DUMP_LOCATION_KEY_NAME,
+        MediaUserSetting::Group::Device);
+    if (outValue.ConstString().size() > 0 && outValue.ConstString().size() < MOS_USER_CONTROL_MAX_DATA_SIZE
+        && pDumpSpec->pcOutputPath[0] != '\0')
     {
-        bDumpEnabled =  ((pDumpSpec->pcOutputPath[0] != '\0') &&
-                         (UserFeatureData.StringData.pStringData[0] != '\0'));
-    }
-
-    if (bDumpEnabled)
-    {
-        VPHAL_DEBUG_CHK_STATUS(ProcessDumpLocations(
-            UserFeatureData.StringData.pStringData));
+        VP_DEBUG_CHK_STATUS(ProcessDumpLocations(const_cast<char *>(outValue.ConstString().c_str())));
     }
 
     // Get enableAuxDump
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_ENABLE_AUX_DUMP_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->enableAuxDump = UserFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->enableAuxDump,
+        __VPHAL_DBG_SURF_DUMP_ENABLE_AUX_DUMP,
+        MediaUserSetting::Group::Device);
 
     // Get plane dump enabled flag
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->enablePlaneDump,
         __VPHAL_DBG_SURF_DUMPER_ENABLE_PLANE_DUMP,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->enablePlaneDump = UserFeatureData.u32Data;
+        MediaUserSetting::Group::Device);
 
 finish:
-    if ((eStatus != MOS_STATUS_SUCCESS) || (!bDumpEnabled))
+    if ((eStatus != MOS_STATUS_SUCCESS) || (pDumpSpec->pcOutputPath[0] == '\0'))
     {
         pDumpSpec->uiStartFrame = 1;
         pDumpSpec->uiEndFrame   = 0;
     }
 }
 
+VpSurfaceDumper::VpSurfaceDumper(PMOS_INTERFACE pOsInterface) :
+    m_dumpSpec(),
+    m_osInterface(pOsInterface)
+{
+    if (m_osInterface)
+    {
+        m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    }
+}
 
 VpSurfaceDumper::~VpSurfaceDumper()
 {
@@ -1867,7 +1994,6 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 {
     VP_FUNC_CALL();
 
-    MOS_USER_FEATURE_VALUE_DATA UserFeatureData;
     int32_t VphalSurfDumpManualTrigger = VPHAL_SURF_DUMP_MANUAL_TRIGGER_DEFAULT_NOT_SET;
 
     MOS_STATUS  eStatus;
@@ -1875,7 +2001,10 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
     VPHAL_SURF_DUMP_SPEC*      pDumpSpec = &m_dumpSpec;
     bool                       isDumpFromDecomp;
     bool                       orgDumpAuxEnable;
+    int32_t                    pid = MosUtilities::MosGetPid();
+    uint64_t                   timeStamp = 0;
 
+    MosUtilities::MosQueryPerformanceCounter(&timeStamp);
     eStatus = MOS_STATUS_SUCCESS;
     i       = 0;
     isDumpFromDecomp    = (Location == VPHAL_DUMP_TYPE_PRE_MEMDECOMP || Location == VPHAL_DUMP_TYPE_POST_MEMDECOMP);
@@ -1911,19 +2040,17 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 
 
     // Get if manual triggered build
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_MANUAL_TRIGGER_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext);
-    VphalSurfDumpManualTrigger = UserFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        VphalSurfDumpManualTrigger,
+        __VPHAL_DBG_SURF_DUMP_MANUAL_TRIGGER_KEY_NAME,
+        MediaUserSetting::Group::Device);
 
     if (VphalSurfDumpManualTrigger != VPHAL_SURF_DUMP_MANUAL_TRIGGER_DEFAULT_NOT_SET)
     {
         if (VphalSurfDumpManualTrigger == VPHAL_SURF_DUMP_MANUAL_TRIGGER_STARTED)
         {
-            VPHAL_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump started: %d \n", VphalSurfDumpManualTrigger);
+            VP_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump started: %d \n", VphalSurfDumpManualTrigger);
 
             for (i = 0; i < pDumpSpec->iNumDumpLocs; i++)
             {
@@ -1936,7 +2063,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
                     {
                         loc = osCtx->GetdumpLoc();
                     }
-                    VPHAL_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
+                    VP_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
                     if (!isDumpFromDecomp && pSurf->bIsCompressed && loc)
                     {
                         EnumToLocString(Location, loc);
@@ -1944,13 +2071,13 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 
                     if (!isDumpFromDecomp || (loc && loc[0] == 0))
                     {
-                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s]_lyr[%d]", pDumpSpec->pcOutputPath, m_dumpLoc, uiCounter);
+                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc[%s]_lyr[%d]", pDumpSpec->pcOutputPath, pid, timeStamp, m_dumpLoc, uiCounter);
                     }
                     else
                     {
                         if (loc)
                         {
-                            MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]", pDumpSpec->pcOutputPath, loc, m_dumpLoc, uiCounter);
+                            MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc[%s_%s]_lyr[%d]", pDumpSpec->pcOutputPath, pid, timeStamp, loc, m_dumpLoc, uiCounter);
                         }
                     }
                     DumpSurfaceToFile(
@@ -1967,11 +2094,11 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
         }
         else if (VphalSurfDumpManualTrigger == VPHAL_SURF_DUMP_MANUAL_TRIGGER_STOPPED)
         {
-            VPHAL_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump stopped: %d \n", VphalSurfDumpManualTrigger);
+            VP_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump stopped: %d \n", VphalSurfDumpManualTrigger);
         }
         else
         {
-            VPHAL_DEBUG_NORMALMESSAGE("Dump manaul trigger flag: %d \n", VphalSurfDumpManualTrigger);
+            VP_DEBUG_NORMALMESSAGE("Dump manaul trigger flag: %d \n", VphalSurfDumpManualTrigger);
         }
     }
     else if (pDumpSpec->uiStartFrame <= uiFrameNumber &&
@@ -1988,7 +2115,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
                 {
                     loc = osCtx->GetdumpLoc();
                 }
-                VPHAL_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
+                VP_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
                 if (!isDumpFromDecomp && pSurf->bIsCompressed && loc)
                 {
                     EnumToLocString(Location, loc);
@@ -1996,15 +2123,15 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 
                 if (!isDumpFromDecomp || (loc && loc[0] == 0))
                 {
-                    MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s]_lyr[%d]",
-                        pDumpSpec->pcOutputPath, m_dumpLoc, uiCounter);
+                    MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc_loc[%s]_lyr[%d]",
+                        pDumpSpec->pcOutputPath, pid, timeStamp, m_dumpLoc, uiCounter);
                 }
                 else
                 {
                     if (loc)
                     {
-                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]",
-                            pDumpSpec->pcOutputPath, loc, m_dumpLoc, uiCounter);
+                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc_loc[%s_%s]_lyr[%d]",
+                            pDumpSpec->pcOutputPath, pid, timeStamp, loc, m_dumpLoc, uiCounter);
                     }
                 }
 
@@ -2022,7 +2149,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
     }
     else
     {
-        VPHAL_DEBUG_VERBOSEMESSAGE("No surface dumpped, VphalSurfDumpManualTrigger: %d, uiStartFrame: %d,  uiEndFrame: %d\n", VphalSurfDumpManualTrigger, pDumpSpec->uiStartFrame, pDumpSpec->uiEndFrame);
+        VP_DEBUG_VERBOSEMESSAGE("No surface dumpped, VphalSurfDumpManualTrigger: %d, uiStartFrame: %d,  uiEndFrame: %d\n", VphalSurfDumpManualTrigger, pDumpSpec->uiStartFrame, pDumpSpec->uiEndFrame);
     }
 
 finish:
@@ -2052,7 +2179,10 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
     VPHAL_SURF_DUMP_SPEC*      pDumpSpec = &m_dumpSpec;
     bool                       isDumpFromDecomp;
     bool                       orgDumpAuxEnable;
+    int32_t                    pid = MosUtilities::MosGetPid();
+    uint64_t                   timeStamp = 0;
 
+    MosUtilities::MosQueryPerformanceCounter(&timeStamp);
     eStatus = MOS_STATUS_SUCCESS;
     i       = 0;
     isDumpFromDecomp    = (Location == VPHAL_DUMP_TYPE_PRE_MEMDECOMP || Location == VPHAL_DUMP_TYPE_POST_MEMDECOMP);
@@ -2086,21 +2216,18 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 
     }
 
-
     // Get if manual triggered build
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_SURF_DUMP_MANUAL_TRIGGER_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext);
-    VphalSurfDumpManualTrigger = UserFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        VphalSurfDumpManualTrigger,
+        __VPHAL_DBG_SURF_DUMP_MANUAL_TRIGGER_KEY_NAME,
+        MediaUserSetting::Group::Device);
 
     if (VphalSurfDumpManualTrigger != VPHAL_SURF_DUMP_MANUAL_TRIGGER_DEFAULT_NOT_SET)
     {
         if (VphalSurfDumpManualTrigger == VPHAL_SURF_DUMP_MANUAL_TRIGGER_STARTED)
         {
-            VPHAL_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump started: %d \n", VphalSurfDumpManualTrigger);
+            VP_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump started: %d \n", VphalSurfDumpManualTrigger);
 
             for (i = 0; i < pDumpSpec->iNumDumpLocs; i++)
             {
@@ -2113,7 +2240,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
                     {
                         loc = osCtx->GetdumpLoc();
                     }
-                    VPHAL_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
+                    VP_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
                     if (!isDumpFromDecomp && pSurf->osSurface->bIsCompressed && loc)
                     {
                         EnumToLocString(Location, loc);
@@ -2121,13 +2248,13 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 
                     if (!isDumpFromDecomp || (loc && loc[0] == 0))
                     {
-                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s]_lyr[%d]", pDumpSpec->pcOutputPath, m_dumpLoc, uiCounter);
+                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc[%s]_lyr[%d]", pDumpSpec->pcOutputPath, pid, timeStamp, m_dumpLoc, uiCounter);
                     }
                     else
                     {
                         if (loc)
                         {
-                            MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]", pDumpSpec->pcOutputPath, loc, m_dumpLoc, uiCounter);
+                            MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc[%s_%s]_lyr[%d]", pDumpSpec->pcOutputPath, pid, timeStamp, loc, m_dumpLoc, uiCounter);
                         }
                     }
                     DumpSurfaceToFile(
@@ -2144,11 +2271,11 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
         }
         else if (VphalSurfDumpManualTrigger == VPHAL_SURF_DUMP_MANUAL_TRIGGER_STOPPED)
         {
-            VPHAL_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump stopped: %d \n", VphalSurfDumpManualTrigger);
+            VP_DEBUG_NORMALMESSAGE("Dump manaul trigger enabled, dump stopped: %d \n", VphalSurfDumpManualTrigger);
         }
         else
         {
-            VPHAL_DEBUG_NORMALMESSAGE("Dump manaul trigger flag: %d \n", VphalSurfDumpManualTrigger);
+            VP_DEBUG_NORMALMESSAGE("Dump manaul trigger flag: %d \n", VphalSurfDumpManualTrigger);
         }
     }
     else if (pDumpSpec->uiStartFrame <= uiFrameNumber &&
@@ -2165,7 +2292,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
                 {
                     loc = osCtx->GetdumpLoc();
                 }
-                VPHAL_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
+                VP_DEBUG_CHK_STATUS(EnumToLocString(Location, m_dumpLoc));
                 if (!isDumpFromDecomp && pSurf->osSurface->bIsCompressed && loc)
                 {
                     EnumToLocString(Location, loc);
@@ -2173,15 +2300,15 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
 
                 if (!isDumpFromDecomp || (loc && loc[0] == 0))
                 {
-                    MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s]_lyr[%d]",
-                        pDumpSpec->pcOutputPath, m_dumpLoc, uiCounter);
+                    MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc[%s]_lyr[%d]",
+                        pDumpSpec->pcOutputPath, pid, timeStamp, m_dumpLoc, uiCounter);
                 }
                 else
                 {
                     if (loc)
                     {
-                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_loc[%s_%s]_lyr[%d]",
-                            pDumpSpec->pcOutputPath, loc, m_dumpLoc, uiCounter);
+                        MOS_SecureStringPrint(m_dumpPrefix, MAX_PATH, MAX_PATH, "%s/surfdump_pid%x_ts%llx_loc[%s_%s]_lyr[%d]",
+                            pDumpSpec->pcOutputPath, pid, timeStamp, loc, m_dumpLoc, uiCounter);
                     }
                 }
 
@@ -2199,7 +2326,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurface(
     }
     else
     {
-        VPHAL_DEBUG_VERBOSEMESSAGE("No surface dumpped, VphalSurfDumpManualTrigger: %d, uiStartFrame: %d,  uiEndFrame: %d\n", VphalSurfDumpManualTrigger, pDumpSpec->uiStartFrame, pDumpSpec->uiEndFrame);
+        VP_DEBUG_VERBOSEMESSAGE("No surface dumpped, VphalSurfDumpManualTrigger: %d, uiStartFrame: %d,  uiEndFrame: %d\n", VphalSurfDumpManualTrigger, pDumpSpec->uiStartFrame, pDumpSpec->uiEndFrame);
     }
 
 finish:
@@ -2227,7 +2354,7 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceArray(
     uint32_t        uiLayer;
 
     //---------------------------------------------------
-    VPHAL_DEBUG_ASSERT(ppSurfaces);
+    VP_DEBUG_ASSERT(ppSurfaces);
     //---------------------------------------------------
 
     eStatus = MOS_STATUS_SUCCESS;
@@ -2237,9 +2364,9 @@ MOS_STATUS VpSurfaceDumper::DumpSurfaceArray(
     {
         if (ppSurfaces[uiIndex])
         {
-            VPHAL_DEBUG_ASSERT(!Mos_ResourceIsNull(&ppSurfaces[uiIndex]->OsResource));
+            VP_DEBUG_ASSERT(!Mos_ResourceIsNull(&ppSurfaces[uiIndex]->OsResource));
 
-            VPHAL_DEBUG_CHK_STATUS(DumpSurface(
+            VP_DEBUG_CHK_STATUS(DumpSurface(
                 ppSurfaces[uiIndex],
                 uiFrameNumber,
                 uiLayer,
@@ -2259,56 +2386,45 @@ void VpParameterDumper::GetParametersDumpSpec()
     VP_FUNC_CALL();
 
     MOS_STATUS                      eStatus = MOS_STATUS_SUCCESS;
-    MOS_USER_FEATURE_VALUE_DATA     UserFeatureData;
     bool                            bDumpEnabled;
-    char                            cStringData[MOS_USER_CONTROL_MAX_DATA_SIZE];
     VPHAL_PARAMS_DUMP_SPEC         *pDumpSpec = &m_dumpSpec;
+    MediaUserSetting::Value        outValue;
 
     pDumpSpec->uiStartFrame       = 0xFFFFFFFF;
     pDumpSpec->uiEndFrame         = 0;
     pDumpSpec->outFileLocation[0] = '\0';
-    cStringData[0]                = '\0';
     bDumpEnabled                  = false;
 
     // Get start frame
     // if start frame is not got assign a default value of 0
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_PARAM_DUMP_START_FRAME_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->uiStartFrame = UserFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->uiStartFrame,
+        __VPHAL_DBG_PARAM_DUMP_START_FRAME_KEY_NAME,
+        MediaUserSetting::Group::Sequence);
 
     // Get end frame
     // if end frame is not got assign a default value of max
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_PARAM_DUMP_END_FRAME_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->uiEndFrame = UserFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->uiEndFrame,
+        __VPHAL_DBG_PARAM_DUMP_END_FRAME_KEY_NAME,
+        MediaUserSetting::Group::Sequence);
 
     // Get out file path
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.StringData.pStringData = cStringData;
-    UserFeatureData.StringData.uMaxSize = MOS_USER_CONTROL_MAX_DATA_SIZE;
-    UserFeatureData.StringData.uSize = 0;    //set the default value. 0 is empty buffer.
-
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_PARAM_DUMP_OUTFILE_KEY_NAME_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    if (UserFeatureData.StringData.uSize > 0)
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        outValue,
+        __VPHAL_DBG_PARAM_DUMP_OUTFILE_KEY_NAME,
+        MediaUserSetting::Group::Sequence);
+    if (outValue.ConstString().size() > 0 && outValue.ConstString().size() < MOS_USER_CONTROL_MAX_DATA_SIZE)
     {
         // Copy the Output path
         MOS_SecureMemcpy(
             pDumpSpec->outFileLocation,
             MAX_PATH,
-            UserFeatureData.StringData.pStringData,
-            UserFeatureData.StringData.uSize);
+            outValue.ConstString().c_str(),
+            outValue.ConstString().size());
         bDumpEnabled = true;
     }
 #if !defined(LINUX) && !defined(ANDROID)
@@ -2320,7 +2436,6 @@ void VpParameterDumper::GetParametersDumpSpec()
         if (SUCCEEDED(GetDriverPersistentStorageLocation(vphalDumpFilePath)))
         {
             std::string m_outputFilePath;
-            MOS_USER_FEATURE_VALUE_WRITE_DATA userFeatureWriteData;
 
             m_outputFilePath = vphalDumpFilePath.c_str();
             m_outputFilePath.append(VPHAL_DUMP_OUTPUT_FOLDER);
@@ -2332,12 +2447,7 @@ void VpParameterDumper::GetParametersDumpSpec()
                 m_outputFilePath.c_str(),
                 m_outputFilePath.size());
 
-            MOS_ZeroMemory(&userFeatureWriteData, sizeof(userFeatureWriteData));
-            userFeatureWriteData.Value.StringData.pStringData = cStringData;
-            userFeatureWriteData.Value.StringData.pStringData = const_cast<char *>(m_outputFilePath.c_str());
-            userFeatureWriteData.Value.StringData.uSize       = m_outputFilePath.size();
-            userFeatureWriteData.ValueID                      = __VPHAL_DBG_DUMP_OUTPUT_DIRECTORY_ID;
-            MOS_UserFeature_WriteValues_ID(NULL, &userFeatureWriteData, 1, m_osInterface->pOsContext);
+            ReportUserSettingForDebug(m_userSettingPtr, __VPHAL_DBG_DUMP_OUTPUT_DIRECTORY, m_outputFilePath, MediaUserSetting::Group::Sequence);
 
             bDumpEnabled = true;
         }
@@ -2345,13 +2455,11 @@ void VpParameterDumper::GetParametersDumpSpec()
 #endif
 
     // Get enableSkuWaDump
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_DBG_PARA_DUMP_ENABLE_SKUWA_DUMP_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-    pDumpSpec->enableSkuWaDump = UserFeatureData.u32Data;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        pDumpSpec->enableSkuWaDump,
+        __VPHAL_DBG_PARA_DUMP_ENABLE_SKUWA_DUMP,
+        MediaUserSetting::Group::Sequence);
 
     if ((eStatus != MOS_STATUS_SUCCESS) || (!bDumpEnabled))
     {
@@ -2371,203 +2479,221 @@ MOS_STATUS VpParameterDumper::DumpSourceSurface(
 
     MOS_STATUS                      eStatus;
     char                            sSurfaceFilePath[MAX_PATH] = { 0 }, sOsSurfaceFilePath[MAX_PATH] = { 0 };
+    int32_t                         pid = MosUtilities::MosGetPid();
+    uint64_t                        timeStamp = 0;
 
+    MosUtilities::MosQueryPerformanceCounter(&timeStamp);
     eStatus               = MOS_STATUS_SUCCESS;
 
     //Color Information
     {
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Color Information -->\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_CSPACE>%s</VPHAL_CSPACE>\n",             GetColorSpaceStr(pSrc->ColorSpace)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<EXTENDED_GAMUT></EXTENDED_GAMUT>\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<PALETTE_ALLOCATION>%d</PALETTE_ALLOCATION>\n", (pSrc->iPalette)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<PALETTE_DATA>\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<PALETTE_DATA_TYPE>%s</PALETTE_DATA_TYPE>\n", GetPaletteTypeStr(pSrc->Palette.PaletteType)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_CSPACE>%s</VPHAL_CSPACE>\n",           GetColorSpaceStr(pSrc->Palette.ColorSpace)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HAS_ALPHA>%d</HAS_ALPHA>\n",                 pSrc->Palette.bHasAlpha ? 1 : 0));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<TOTAL_ENTRIES>%d</TOTAL_ENTRIES>\n",         pSrc->Palette.iTotalEntries));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<NUM_ENTRIES>%d</NUM_ENTRIES>\n",             pSrc->Palette.iNumEntries));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Color Information -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_CSPACE>%s</VPHAL_CSPACE>\n",             GetColorSpaceStr(pSrc->ColorSpace)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<EXTENDED_GAMUT></EXTENDED_GAMUT>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<PALETTE_ALLOCATION>%d</PALETTE_ALLOCATION>\n", (pSrc->iPalette)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<PALETTE_DATA>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<PALETTE_DATA_TYPE>%s</PALETTE_DATA_TYPE>\n", GetPaletteTypeStr(pSrc->Palette.PaletteType)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_CSPACE>%s</VPHAL_CSPACE>\n",           GetColorSpaceStr(pSrc->Palette.ColorSpace)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HAS_ALPHA>%d</HAS_ALPHA>\n",                 pSrc->Palette.bHasAlpha ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<TOTAL_ENTRIES>%d</TOTAL_ENTRIES>\n",         pSrc->Palette.iTotalEntries));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<NUM_ENTRIES>%d</NUM_ENTRIES>\n",             pSrc->Palette.iNumEntries));
         for (int nIndex = 0; nIndex < pSrc->Palette.iTotalEntries; nIndex++)
         {
             if (pSrc->Palette.pPalette8)
             {
-                VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<PVPHAL_COLOR_SAMPLE>%08x</PVPHAL_COLOR_SAMPLE>\n", pSrc->Palette.pPalette8[nIndex].dwValue));
+                VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<PVPHAL_COLOR_SAMPLE>%08x</PVPHAL_COLOR_SAMPLE>\n", pSrc->Palette.pPalette8[nIndex].dwValue));
             }
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</PALETTE_DATA>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</PALETTE_DATA>\n"));
 
         //Rendering parameters
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Rendering parameters -->\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_BLENDING_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Rendering parameters -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_BLENDING_PARAMS>\n"));
         if (pSrc->pBlendingParams)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_BLEND_TYPE>%s</VPHAL_BLEND_TYPE>\n", GetBlendTypeStr(pSrc->pBlendingParams->BlendType)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ALPHA type=\"real\">%.3f</ALPHA>\n",       pSrc->pBlendingParams->fAlpha));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_BLEND_TYPE>%s</VPHAL_BLEND_TYPE>\n", GetBlendTypeStr(pSrc->pBlendingParams->BlendType)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ALPHA type=\"real\">%.3f</ALPHA>\n",       pSrc->pBlendingParams->fAlpha));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ALPHA type=\"real\"></ALPHA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ALPHA type=\"real\"></ALPHA>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_BLENDING_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_BLENDING_PARAMS>\n"));
 
         //Luma key params
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_LUMAKEY_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_LUMAKEY_PARAMS>\n"));
         if (pSrc->pLumaKeyParams)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_LOW>%d</LUMA_LOW>\n", pSrc->pLumaKeyParams->LumaLow));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_HIGH>%d</LUMA_HIGH>\n", pSrc->pLumaKeyParams->LumaHigh));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_LOW>%d</LUMA_LOW>\n", pSrc->pLumaKeyParams->LumaLow));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_HIGH>%d</LUMA_HIGH>\n", pSrc->pLumaKeyParams->LumaHigh));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_LOW></LUMA_LOW>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_HIGH></LUMA_HIGH>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_LOW></LUMA_LOW>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<LUMA_HIGH></LUMA_HIGH>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_LUMAKEY_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_LUMAKEY_PARAMS>\n"));
+
+        //ChromaSitting params
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_CHROMASITTING_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CHROMA_SITING_HORZ_LEFT>%d</CHROMA_SITING_HORZ_LEFT>\n", (pSrc->ChromaSiting & CHROMA_SITING_HORZ_LEFT) == CHROMA_SITING_HORZ_LEFT ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CHROMA_SITING_HORZ_CENTER>%d</CHROMA_SITING_HORZ_CENTER>\n", (pSrc->ChromaSiting & CHROMA_SITING_HORZ_CENTER) == CHROMA_SITING_HORZ_CENTER ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CHROMA_SITING_HORZ_RIGHT>%d</CHROMA_SITING_HORZ_RIGHT>\n", (pSrc->ChromaSiting & CHROMA_SITING_HORZ_RIGHT) == CHROMA_SITING_HORZ_RIGHT ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CHROMA_SITING_VERT_TOP>%d</CHROMA_SITING_VERT_TOP>\n", (pSrc->ChromaSiting & CHROMA_SITING_VERT_TOP) == CHROMA_SITING_VERT_TOP ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CHROMA_SITING_VERT_CENTER>%d</CHROMA_SITING_VERT_CENTER>\n", (pSrc->ChromaSiting & CHROMA_SITING_VERT_CENTER) == CHROMA_SITING_VERT_CENTER ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CHROMA_SITING_VERT_BOTTOM>%d</CHROMA_SITING_VERT_BOTTOM>\n", (pSrc->ChromaSiting & CHROMA_SITING_VERT_BOTTOM) == CHROMA_SITING_VERT_BOTTOM ? 1 : 0));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_CHROMASITTING_PARAMS>\n"));
 
         //Propcamp params
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_PROCAMP_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_PROCAMP_PARAMS>\n"));
         if (pSrc->pProcampParams)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLED>%d</ENABLED>\n",                       (pSrc->pProcampParams->bEnabled ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<BRIGHTNESS type=\"real\">%.3f</BRIGHTNESS>\n", pSrc->pProcampParams->fBrightness));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CONTRAST type=\"real\">%.3f</CONTRAST>\n",     pSrc->pProcampParams->fContrast));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HUE type=\"real\">%.3f</HUE>\n",               pSrc->pProcampParams->fHue));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<SATURATION type=\"real\">%.3f</SATURATION>\n", pSrc->pProcampParams->fSaturation));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLED>%d</ENABLED>\n",                       (pSrc->pProcampParams->bEnabled ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<BRIGHTNESS type=\"real\">%.3f</BRIGHTNESS>\n", pSrc->pProcampParams->fBrightness));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CONTRAST type=\"real\">%.3f</CONTRAST>\n",     pSrc->pProcampParams->fContrast));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HUE type=\"real\">%.3f</HUE>\n",               pSrc->pProcampParams->fHue));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<SATURATION type=\"real\">%.3f</SATURATION>\n", pSrc->pProcampParams->fSaturation));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLED></ENABLED>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<BRIGHTNESS type=\"real\"></BRIGHTNESS>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CONTRAST type=\"real\"></CONTRAST>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HUE type=\"real\"></HUE>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<SATURATION type=\"real\"></SATURATION>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLED></ENABLED>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<BRIGHTNESS type=\"real\"></BRIGHTNESS>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CONTRAST type=\"real\"></CONTRAST>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HUE type=\"real\"></HUE>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<SATURATION type=\"real\"></SATURATION>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_PROCAMP_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_PROCAMP_PARAMS>\n"));
 
         //IEF parameter
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_IEF_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_IEF_PARAMS>\n"));
         if (pSrc->pIEFParams)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<IEFFACTOR type = \"real\">%.3f</IEFFACTOR>\n", pSrc->pIEFParams->fIEFFactor));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<IEFFACTOR type = \"real\">%.3f</IEFFACTOR>\n", pSrc->pIEFParams->fIEFFactor));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<IEFFACTOR type = \"real\"></IEFFACTOR>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<IEFFACTOR type = \"real\"></IEFFACTOR>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_IEF_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_IEF_PARAMS>\n"));
 
         //Advanced processing
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Advanced processing -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Advanced processing -->\n"));
         //DI
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_DI_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_DI_PARAMS>\n"));
         if (pSrc->pDeinterlaceParams)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<DIMODE>%s</DIMODE>\n",             GetDIModeStr(pSrc->pDeinterlaceParams->DIMode)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<ENABLE_FMD>%d</ENABLE_FMD>\n",     (pSrc->pDeinterlaceParams->bEnableFMD ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SINGLE_FIELD>%d</SINGLE_FIELD>\n", (pSrc->pDeinterlaceParams->bSingleField ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<DIMODE>%s</DIMODE>\n",             GetDIModeStr(pSrc->pDeinterlaceParams->DIMode)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<ENABLE_FMD>%d</ENABLE_FMD>\n",     (pSrc->pDeinterlaceParams->bEnableFMD ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SINGLE_FIELD>%d</SINGLE_FIELD>\n", (pSrc->pDeinterlaceParams->bSingleField ? 1 : 0)));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<DIMODE></DIMODE>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<ENABLE_FMD></ENABLE_FMD>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SINGLE_FIELD></SINGLE_FIELD>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<DIMODE></DIMODE>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<ENABLE_FMD></ENABLE_FMD>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SINGLE_FIELD></SINGLE_FIELD>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_DI_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_DI_PARAMS>\n"));
         //Denoise
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_DENOISE_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_DENOISE_PARAMS>\n"));
         if (pSrc->pDenoiseParams)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_LUMA>%d</ENABLE_LUMA>\n",         (pSrc->pDenoiseParams->bEnableLuma ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_CHROMA>%d</ENABLE_CHROMA>\n",     (pSrc->pDenoiseParams->bEnableChroma ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<AUTO_DETECT>%d</AUTO_DETECT>\n",         (pSrc->pDenoiseParams->bAutoDetect ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DENOISE_FACTOR>%.3f</DENOISE_FACTOR>\n", (pSrc->pDenoiseParams->fDenoiseFactor)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<NOISE_LEVEL>%s</NOISE_LEVEL>\n",    GetDenoiseModeStr(pSrc->pDenoiseParams->NoiseLevel)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_LUMA>%d</ENABLE_LUMA>\n",         (pSrc->pDenoiseParams->bEnableLuma ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_CHROMA>%d</ENABLE_CHROMA>\n",     (pSrc->pDenoiseParams->bEnableChroma ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<AUTO_DETECT>%d</AUTO_DETECT>\n",         (pSrc->pDenoiseParams->bAutoDetect ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DENOISE_FACTOR>%.3f</DENOISE_FACTOR>\n", (pSrc->pDenoiseParams->fDenoiseFactor)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<NOISE_LEVEL>%s</NOISE_LEVEL>\n", GetDenoiseModeStr(pSrc->pDenoiseParams->NoiseLevel)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_HVS_DENOISE>%d</ENABLE_HVS_DENOISE>\n", (pSrc->pDenoiseParams->bEnableHVSDenoise ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HVS_DENOISE_QP>%d</HVS_DENOISE_QP>\n", (pSrc->pDenoiseParams->HVSDenoise.QP)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HVS_DENOISE_STRENGTH>%d</HVS_DENOISE_STRENGTH>\n", (pSrc->pDenoiseParams->HVSDenoise.Strength)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HVS_DENOISE_MODE>%s</HVS_DENOISE_MODE>\n", GetHVSDenoiseModeStr(pSrc->pDenoiseParams->HVSDenoise.Mode)));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_LUMA></ENABLE_LUMA>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_CHROMA></ENABLE_CHROMA>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<AUTO_DETECT></AUTO_DETECT>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DENOISE_FACTOR></DENOISE_FACTOR>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_LUMA></ENABLE_LUMA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_CHROMA></ENABLE_CHROMA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<AUTO_DETECT></AUTO_DETECT>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DENOISE_FACTOR></DENOISE_FACTOR>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_DENOISE_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_DENOISE_PARAMS>\n"));
         //ColorPipe
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_COLORPIPE_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_COLORPIPE_PARAMS>\n"));
         if (pSrc->pColorPipeParams)
         {
             VPHAL_TCC_PARAMS TccParams = pSrc->pColorPipeParams->TccParams;
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_ACE>%d</ENABLE_ACE>\n",                (pSrc->pColorPipeParams->bEnableACE ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_STE>%d</ENABLE_STE>\n",                (pSrc->pColorPipeParams->bEnableSTE ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_TCC>%d</ENABLE_TCC>\n",                (pSrc->pColorPipeParams->bEnableTCC ? 1 : 0)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ACE_LEVEL>%d</ACE_LEVEL>\n",                  (pSrc->pColorPipeParams->dwAceLevel)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ACE_STRENGHTH>%d</ACE_STRENGHTH>\n",          (pSrc->pColorPipeParams->dwAceStrength)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<STE_PARAMS>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t\t<STE_FACTOR>%d</STE_FACTOR>\n",              (pSrc->pColorPipeParams->SteParams.dwSTEFactor)));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t</STE_PARAMS>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<TCC_PARAMS>%d,%d,%d,%d,%d,%d</TCC_PARAMS>\n", TccParams.Blue, TccParams.Cyan, TccParams.Green, TccParams.Magenta, TccParams.Red, TccParams.Yellow));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_ACE>%d</ENABLE_ACE>\n",                (pSrc->pColorPipeParams->bEnableACE ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_STE>%d</ENABLE_STE>\n",                (pSrc->pColorPipeParams->bEnableSTE ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_TCC>%d</ENABLE_TCC>\n",                (pSrc->pColorPipeParams->bEnableTCC ? 1 : 0)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ACE_LEVEL>%d</ACE_LEVEL>\n",                  (pSrc->pColorPipeParams->dwAceLevel)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ACE_STRENGHTH>%d</ACE_STRENGHTH>\n",          (pSrc->pColorPipeParams->dwAceStrength)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<STE_PARAMS>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t\t<STE_FACTOR>%d</STE_FACTOR>\n",              (pSrc->pColorPipeParams->SteParams.dwSTEFactor)));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t</STE_PARAMS>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<TCC_PARAMS>%d,%d,%d,%d,%d,%d</TCC_PARAMS>\n", TccParams.Blue, TccParams.Cyan, TccParams.Green, TccParams.Magenta, TccParams.Red, TccParams.Yellow));
         }
         else
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_ACE></ENABLE_ACE>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_STE></ENABLE_STE>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_TCC></ENABLE_TCC>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ACE_LEVEL></ACE_LEVEL>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<STE_PARAMS></STE_PARAMS>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<TCC_PARAMS></TCC_PARAMS>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_ACE></ENABLE_ACE>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_STE></ENABLE_STE>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ENABLE_TCC></ENABLE_TCC>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<ACE_LEVEL></ACE_LEVEL>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<STE_PARAMS></STE_PARAMS>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<TCC_PARAMS></TCC_PARAMS>\n"));
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_COLORPIPE_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_COLORPIPE_PARAMS>\n"));
         //Gamut
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_GAMUT_PARAMS>\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<GCOMP_MODE></GCOMP_MODE>\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_GAMUT_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_GAMUT_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<GCOMP_MODE></GCOMP_MODE>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_GAMUT_PARAMS>\n"));
 
         //Sample information
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Sample information -->\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_FORMAT>%s</VPHAL_FORMAT>\n",             GetWholeFormatStr(pSrc->Format)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SURFACE_TYPE>%s</VPHAL_SURFACE_TYPE>\n", GetSurfaceTypeStr(pSrc->SurfType)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SAMPLE_TYPE>%s</VPHAL_SAMPLE_TYPE>\n",   GetSampleTypeStr(pSrc->SampleType)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SCALING_MODE>%s</VPHAL_SCALING_MODE>\n", GetScalingModeStr(pSrc->ScalingMode)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_ROTATION_MODE>%s</VPHAL_ROTATION_MODE>\n", GetRotationModeStr(pSrc->Rotation)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCSRC>%d,%d,%d,%d</RCSRC>\n",                  pSrc->rcSrc.left, pSrc->rcSrc.top, pSrc->rcSrc.right, pSrc->rcSrc.bottom));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCDST>%d,%d,%d,%d</RCDST>\n",                  pSrc->rcDst.left, pSrc->rcDst.top, pSrc->rcDst.right, pSrc->rcDst.bottom));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Sample information -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_FORMAT>%s</VPHAL_FORMAT>\n",             GetWholeFormatStr(pSrc->Format)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SURFACE_TYPE>%s</VPHAL_SURFACE_TYPE>\n", GetSurfaceTypeStr(pSrc->SurfType)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SAMPLE_TYPE>%s</VPHAL_SAMPLE_TYPE>\n",   GetSampleTypeStr(pSrc->SampleType)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SCALING_MODE>%s</VPHAL_SCALING_MODE>\n", GetScalingModeStr(pSrc->ScalingMode)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_ROTATION_MODE>%s</VPHAL_ROTATION_MODE>\n", GetRotationModeStr(pSrc->Rotation)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCSRC>%d,%d,%d,%d</RCSRC>\n",                  pSrc->rcSrc.left, pSrc->rcSrc.top, pSrc->rcSrc.right, pSrc->rcSrc.bottom));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCDST>%d,%d,%d,%d</RCDST>\n",                  pSrc->rcDst.left, pSrc->rcDst.top, pSrc->rcDst.right, pSrc->rcDst.bottom));
 
         //Basic information
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Basic information -->\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_TILE_TYPE>%s</VPHAL_TILE_TYPE>\n", GetTileTypeStr(pSrc->TileType)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<WIDTH>%d</WIDTH>\n",                     pSrc->dwWidth));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<HEIGHT>%d</HEIGHT>\n",                   pSrc->dwHeight));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<PITCH>%d</PITCH>\n",                     pSrc->dwPitch));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SIZE>%d</SIZE>\n",                       pSrc->dwPitch * pSrc->dwHeight));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Basic information -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_TILE_TYPE>%s</VPHAL_TILE_TYPE>\n", GetTileTypeStr(pSrc->TileType)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_TILE_MODE>%s</VPHAL_TILE_MODE>\n", GetTileModeGMMStr(pSrc->TileModeGMM)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<WIDTH>%d</WIDTH>\n",                     pSrc->dwWidth));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<HEIGHT>%d</HEIGHT>\n",                   pSrc->dwHeight));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<PITCH>%d</PITCH>\n",                     pSrc->dwPitch));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SIZE>%d</SIZE>\n",                       pSrc->dwPitch * pSrc->dwHeight));
 
         //Surface content initialization
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Surface content initialization -->\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<DATA>\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DEFAULT_COLOR type=\"integer\">0x000000FF</DEFAULT_COLOR>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<!-- Surface content initialization -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<DATA>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DEFAULT_COLOR type=\"integer\">0x000000FF</DEFAULT_COLOR>\n"));
         if (pcOutputPath)
         {
             memset(sSurfaceFilePath, 0, MAX_PATH);
             memset(sOsSurfaceFilePath, 0, MAX_PATH);
 
-            MOS_SecureStringPrint(sSurfaceFilePath, MAX_PATH, MAX_PATH, "%s%csurfdump_loc[preALL]_lyr[%d]_f[%04d]_w[%d]_h[%d]_p[%d].%s",
-                pcOutputPath, MOS_DIR_SEPERATOR, index, uiFrameCounter, pSrc->dwWidth, pSrc->dwHeight, pSrc->dwPitch, VpDumperTool::GetFormatStr(pSrc->Format));
+            MOS_SecureStringPrint(sSurfaceFilePath, MAX_PATH, MAX_PATH, "%s%csurfdump_pid%x_ts%llx_loc[preALL]_lyr[%d]_f[%04d]_w[%d]_h[%d]_p[%d].%s",
+                pcOutputPath, MOS_DIR_SEPERATOR, pid, timeStamp, index, uiFrameCounter, pSrc->dwWidth, pSrc->dwHeight, pSrc->dwPitch, VpDumperTool::GetFormatStr(pSrc->Format));
             VpDumperTool::GetOsFilePath(sSurfaceFilePath, sOsSurfaceFilePath);
         }
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<FILE>%s</FILE>\n", sOsSurfaceFilePath));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</DATA>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<FILE>%s</FILE>\n", sOsSurfaceFilePath));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</DATA>\n"));
         // get backward reference
         if (pSrc->pBwdRef)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<BACKREFDATA>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DEFAULT_COLOR type=\"integer\">0x000000FF</DEFAULT_COLOR>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<Num>%d</Num>\n", pSrc->uBwdRefCount));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<FILE></FILE>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</BACKREFDATA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<BACKREFDATA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DEFAULT_COLOR type=\"integer\">0x000000FF</DEFAULT_COLOR>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<Num>%d</Num>\n", pSrc->uBwdRefCount));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<FILE></FILE>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</BACKREFDATA>\n"));
         }
         // get forward reference
         if (pSrc->pFwdRef)
         {
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<FWDREFDATA>\n"));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<Num>%d</Num>\n", pSrc->uFwdRefCount));
-            VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</FWDREFDATA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<FWDREFDATA>\n"));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<Num>%d</Num>\n", pSrc->uFwdRefCount));
+            VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</FWDREFDATA>\n"));
         }
     }
 
@@ -2588,22 +2714,23 @@ MOS_STATUS VpParameterDumper::DumpTargetSurface(
 
     eStatus = MOS_STATUS_SUCCESS;
 
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_FORMAT>%s</VPHAL_FORMAT>\n",             VpParameterDumper::GetWholeFormatStr(pTarget->Format)));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_SURFACE_TYPE>%s</VPHAL_SURFACE_TYPE>\n", VpParameterDumper::GetSurfaceTypeStr(pTarget->SurfType)));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_SAMPLE_TYPE>%s</VPHAL_SAMPLE_TYPE>\n",   GetSampleTypeStr(pTarget->SampleType)));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_CSPACE>%s</VPHAL_CSPACE>\n",             GetColorSpaceStr(pTarget->ColorSpace)));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_SCALING_MODE>%s</VPHAL_SCALING_MODE>\n", GetScalingModeStr(pTarget->ScalingMode)));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_TILE_TYPE>%s</VPHAL_TILE_TYPE>\n",       GetTileTypeStr(pTarget->TileType)));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<WIDTH>%d</WIDTH>\n",                           pTarget->dwWidth));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HEIGHT>%d</HEIGHT>\n",                         pTarget->dwHeight));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<PITCH>%d</PITCH>\n",                           pTarget->dwPitch));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<SIZE>%d</SIZE>\n",                             pTarget->dwPitch*pTarget->dwHeight));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCSRC>%d,%d,%d,%d</RCSRC>\n",                    pTarget->rcSrc.left, pTarget->rcSrc.top, pTarget->rcSrc.right, pTarget->rcSrc.bottom));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCDST>%d,%d,%d,%d</RCDST>\n",                    pTarget->rcDst.left, pTarget->rcDst.top, pTarget->rcDst.right, pTarget->rcDst.bottom));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DATA>\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t\t<DEFAULT_COLOR type=\"integer\">0x000000FF</DEFAULT_COLOR>\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t\t<FILE></FILE>\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t</DATA>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_FORMAT>%s</VPHAL_FORMAT>\n",             VpParameterDumper::GetWholeFormatStr(pTarget->Format)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_SURFACE_TYPE>%s</VPHAL_SURFACE_TYPE>\n", VpParameterDumper::GetSurfaceTypeStr(pTarget->SurfType)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_SAMPLE_TYPE>%s</VPHAL_SAMPLE_TYPE>\n",   GetSampleTypeStr(pTarget->SampleType)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_CSPACE>%s</VPHAL_CSPACE>\n",             GetColorSpaceStr(pTarget->ColorSpace)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_SCALING_MODE>%s</VPHAL_SCALING_MODE>\n", GetScalingModeStr(pTarget->ScalingMode)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_TILE_TYPE>%s</VPHAL_TILE_TYPE>\n",       GetTileTypeStr(pTarget->TileType)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<VPHAL_TILE_MODE>%s</VPHAL_TILE_MODE>\n",       GetTileModeGMMStr(pTarget->TileModeGMM)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<WIDTH>%d</WIDTH>\n",                           pTarget->dwWidth));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<HEIGHT>%d</HEIGHT>\n",                         pTarget->dwHeight));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<PITCH>%d</PITCH>\n",                           pTarget->dwPitch));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<SIZE>%d</SIZE>\n",                             pTarget->dwPitch*pTarget->dwHeight));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCSRC>%d,%d,%d,%d</RCSRC>\n",                    pTarget->rcSrc.left, pTarget->rcSrc.top, pTarget->rcSrc.right, pTarget->rcSrc.bottom));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<RCDST>%d,%d,%d,%d</RCDST>\n",                    pTarget->rcDst.left, pTarget->rcDst.top, pTarget->rcDst.right, pTarget->rcDst.bottom));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<DATA>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t\t<DEFAULT_COLOR type=\"integer\">0x000000FF</DEFAULT_COLOR>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t\t<FILE></FILE>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t</DATA>\n"));
 
 finish:
     return eStatus;
@@ -2623,28 +2750,28 @@ MOS_STATUS VpParameterDumper::DumpRenderParameter(
 
     if (pRenderParams->pTarget[0])
     {
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SURFACE_TARGET>\n"));
-        VPHAL_DEBUG_CHK_STATUS(DumpTargetSurface(
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_SURFACE_TARGET>\n"));
+        VP_DEBUG_CHK_STATUS(DumpTargetSurface(
             uiFrameCounter,
             pcOutputPath,
             pRenderParams->pTarget[0],
             0,
             pcOutContents));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_SURFACE_TARGET>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_SURFACE_TARGET>\n"));
     }
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SRC_COUNT>%d</SRC_COUNT>\n", pRenderParams->uSrcCount));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<SRC_COUNT>%d</SRC_COUNT>\n", pRenderParams->uSrcCount));
 
     //Color fill
     if (pRenderParams->pColorFillParams)
     {
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_COLORFILL_PARAMS>\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<bYCbCr>%d</bYCbCr>\n", pRenderParams->pColorFillParams->bYCbCr));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<COLOR type=\"integer\">%08x</COLOR>\n", pRenderParams->pColorFillParams->Color));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CSPACE>%s</CSPACE>\n", GetColorSpaceStr(pRenderParams->pColorFillParams->CSpace)));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_COLORFILL_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_COLORFILL_PARAMS>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<bYCbCr>%d</bYCbCr>\n", pRenderParams->pColorFillParams->bYCbCr));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<COLOR type=\"integer\">%08x</COLOR>\n", pRenderParams->pColorFillParams->Color));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t\t<CSPACE>%s</CSPACE>\n", GetColorSpaceStr(pRenderParams->pColorFillParams->CSpace)));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t</VPHAL_COLORFILL_PARAMS>\n"));
     }
 
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_COMPONENT>%s</VPHAL_COMPONENT>\n", GetComponentStr(pRenderParams->Component)));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t\t<VPHAL_COMPONENT>%s</VPHAL_COMPONENT>\n", GetComponentStr(pRenderParams->Component)));
 
 finish:
     return eStatus;
@@ -2665,7 +2792,10 @@ MOS_STATUS VpParameterDumper::DumpToXML(
     char*                           pCurFrameFileName;
     char*                           pBwdFrameFileName;
     VPHAL_PARAMS_DUMP_SPEC         *pParamsDumpSpec = &m_dumpSpec;
+    int32_t                         pid = MosUtilities::MosGetPid();
+    uint64_t                        timeStamp = 0;
 
+    MosUtilities::MosQueryPerformanceCounter(&timeStamp);
     eStatus               = MOS_STATUS_SUCCESS;
     dwStrLen              = 0;
     pcOutContents         = nullptr;
@@ -2673,33 +2803,33 @@ MOS_STATUS VpParameterDumper::DumpToXML(
     pCurFrameFileName     = nullptr;
     pBwdFrameFileName     = nullptr;
 
-    VPHAL_DEBUG_CHK_NULL(pRenderParams);
-    VPHAL_DEBUG_CHK_NULL(pParamsDumpSpec);
+    VP_DEBUG_CHK_NULL(pRenderParams);
+    VP_DEBUG_CHK_NULL(pParamsDumpSpec);
 
-    if ((pParamsDumpSpec->uiEndFrame < pParamsDumpSpec->uiStartFrame) || strlen(pParamsDumpSpec->outFileLocation) == 0)
+    if ((pParamsDumpSpec->uiEndFrame < pParamsDumpSpec->uiStartFrame) || pParamsDumpSpec->uiEndFrame ==0 || strlen(pParamsDumpSpec->outFileLocation) == 0)
         goto finish;
 
     // Create a processing instruction element.
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(true, &pcOutContents,  "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(true, &pcOutContents,  "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\n"));
     // Create the root element.
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "<VPHAL_SCENARIO>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "<VPHAL_SCENARIO>\n"));
     // General infomation
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<ID>%d</ID>\n", MOS_GetPid()));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<ID>%d</ID>\n", MosUtilities::MosGetPid()));
 
-    VPHAL_DEBUG_CHK_NULL(pRenderParams->pSrc[0]);
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<DESCRIPTION>%d</DESCRIPTION>\n", pRenderParams->pSrc[0]->FrameID));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- Number of frames to render -->\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<FRAME_COUNT type = \"integer\">1</FRAME_COUNT>\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- 60i or 30p BLT -->\n"));
+    VP_DEBUG_CHK_NULL(pRenderParams->pSrc[0]);
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<DESCRIPTION>%d</DESCRIPTION>\n", pRenderParams->pSrc[0]->FrameID));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- Number of frames to render -->\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<FRAME_COUNT type = \"integer\">1</FRAME_COUNT>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- 60i or 30p BLT -->\n"));
     if ((pRenderParams->uSrcCount > 0) &&
         (pRenderParams->pSrc[0]->SampleType != SAMPLE_PROGRESSIVE))
     {
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<BLT_TYPE>60i</BLT_TYPE>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<BLT_TYPE>60i</BLT_TYPE>\n"));
     }
     else
     {
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<BLT_TYPE>30p</BLT_TYPE>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<BLT_TYPE>30p</BLT_TYPE>\n"));
     }
 
     // Surface
@@ -2709,35 +2839,35 @@ MOS_STATUS VpParameterDumper::DumpToXML(
             continue;
 
         //surface infomation
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- Input surface definitions -->\n"));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<VPHAL_SURFACE>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- Input surface definitions -->\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<VPHAL_SURFACE>\n"));
 
-        VPHAL_DEBUG_CHK_STATUS(DumpSourceSurface(
+        VP_DEBUG_CHK_STATUS(DumpSourceSurface(
             uiFrameCounter,
             pcOutputPath,
             pRenderParams->pSrc[i],
             i,
             pcOutContents));
-        VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t</VPHAL_SURFACE>\n"));
+        VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t</VPHAL_SURFACE>\n"));
     }
 
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- Rendering parameters -->\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<VPHAL_RENDER_PARAMS>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<!-- Rendering parameters -->\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t<VPHAL_RENDER_PARAMS>\n"));
 
-    VPHAL_DEBUG_CHK_STATUS(DumpRenderParameter(
+    VP_DEBUG_CHK_STATUS(DumpRenderParameter(
         uiFrameCounter,
         pcOutputPath,
         pRenderParams,
         pcOutContents));
 
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t</VPHAL_RENDER_PARAMS>\n"));
-    VPHAL_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "</VPHAL_SCENARIO>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "\t</VPHAL_RENDER_PARAMS>\n"));
+    VP_DEBUG_CHK_STATUS(VpDumperTool::AppendString(false, &pcOutContents, "</VPHAL_SCENARIO>\n"));
 
-    MOS_SecureStringPrint(sPath, MAX_PATH, MAX_PATH, "%s%cparam_dump[%04d].xml", pParamsDumpSpec->outFileLocation, MOS_DIR_SEPERATOR, uiFrameCounter);
+    MOS_SecureStringPrint(sPath, MAX_PATH, MAX_PATH, "%s%cparam_dump_pid%x_ts%llx[%04d].xml", pParamsDumpSpec->outFileLocation, MOS_DIR_SEPERATOR, pid, timeStamp, uiFrameCounter);
 
     VpDumperTool::GetOsFilePath(sPath, sOsPath);
 
-    VPHAL_DEBUG_CHK_STATUS(MOS_WriteFileFromPtr(sOsPath, pcOutContents, strlen(pcOutContents)));
+    VP_DEBUG_CHK_STATUS(MosUtilities::MosWriteFileFromPtr(sOsPath, pcOutContents, strlen(pcOutContents)));
 finish:
     if (pcOutContents)
     {
@@ -2745,6 +2875,16 @@ finish:
         pcOutContents = nullptr;
     }
     return eStatus;
+}
+
+VpParameterDumper::VpParameterDumper(PMOS_INTERFACE pOsInterface):
+    m_dumpSpec(),
+    m_osInterface(pOsInterface)
+{
+    if (m_osInterface)
+    {
+        m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    }
 }
 
 VpParameterDumper::~VpParameterDumper()
@@ -2764,7 +2904,7 @@ const char * VpDumperTool::GetFormatStr(MOS_FORMAT format)
         case Format_A16R16G16B16: return _T("argb16");
         case Format_A16B16G16R16: return _T("abgr16");
         case Format_R5G6B5      : return _T("rgb16");
-        case Format_R8G8B8      : return _T("rgb24");
+        case Format_R8G8B8      : return _T("rgb");
         case Format_R32U        : return _T("r32u");
         case Format_RGBP        : return _T("rgbp");
         case Format_BGRP        : return _T("bgrp");
@@ -2840,9 +2980,9 @@ MOS_STATUS VpDumperTool::GetSurfaceSize(
     uint32_t    iHeightInRows;
 
     //-------------------------------------------
-    VPHAL_DEBUG_ASSERT(pSurface->dwWidth >= 1);
-    VPHAL_DEBUG_ASSERT(pSurface->dwHeight >= 1);
-    VPHAL_DEBUG_ASSERT(pSurface->dwPitch >= 1);
+    VP_DEBUG_ASSERT(pSurface->dwWidth >= 1);
+    VP_DEBUG_ASSERT(pSurface->dwHeight >= 1);
+    VP_DEBUG_ASSERT(pSurface->dwPitch >= 1);
     //-------------------------------------------
 
     eStatus = MOS_STATUS_SUCCESS;
@@ -3162,7 +3302,7 @@ MOS_STATUS VpDumperTool::GetSurfaceSize(
             iHeightInRows = pSurface->dwHeight * 2;
 
         default:
-            VPHAL_DEBUG_ASSERTMESSAGE("Format %d not supported.", pSurface->Format);
+            VP_DEBUG_ASSERTMESSAGE("Format %d not supported.", pSurface->Format);
             eStatus = MOS_STATUS_UNKNOWN;
             goto finish;
     }
@@ -3213,7 +3353,7 @@ MOS_STATUS VpDumperTool::AppendString(
     }
 
     va_start(argList, pcToAppendFmt);
-    MOS_SecureVStringPrint(pcToAppend, ALLOC_GRANULARITY, ALLOC_GRANULARITY, pcToAppendFmt, argList);
+    MosUtilities::MosSecureVStringPrint(pcToAppend, ALLOC_GRANULARITY, ALLOC_GRANULARITY, pcToAppendFmt, argList);
     va_end(argList);
 
     stStrLenToAppend = strlen(pcToAppend);
@@ -3223,7 +3363,7 @@ MOS_STATUS VpDumperTool::AppendString(
         stTotalStrLen = stStrLenToAppend + 1;
         stTotalAlloc  = MOS_ALIGN_CEIL(stStrLenToAppend, ALLOC_GRANULARITY);
         *ppcBigString = (char*)MOS_AllocAndZeroMemory(stTotalAlloc);
-        VPHAL_DEBUG_CHK_NULL(*ppcBigString);
+        VP_DEBUG_CHK_NULL(*ppcBigString);
         *ppcBigString[0] = '\0';
         stStrLenOld++;
     }
@@ -3236,7 +3376,7 @@ MOS_STATUS VpDumperTool::AppendString(
             // Below should be equivalent to *ppcBigString = (char*)realloc(*ppcBigString, stTotalAlloc);
             pcTmpPtr = *ppcBigString;
             *ppcBigString = (char*)MOS_AllocAndZeroMemory(stTotalAlloc);
-            VPHAL_DEBUG_CHK_NULL(*ppcBigString);
+            VP_DEBUG_CHK_NULL(*ppcBigString);
             MOS_SecureStringPrint(*ppcBigString, stTotalAlloc, stTotalAlloc, "%s", pcTmpPtr);
             MOS_FreeMemory(pcTmpPtr);
         }
@@ -3300,7 +3440,7 @@ void VpDumperTool::WriteFrame(
 
     if(pData == nullptr)
     {
-        VPHAL_DEBUG_ASSERTMESSAGE("pData == nullptr.");
+        VP_DEBUG_ASSERTMESSAGE("pData == nullptr.");
 
         return;
     }
@@ -3321,7 +3461,7 @@ void VpDumperTool::WriteFrame(
     // Write the data to file
     if (pSurface->dwPitch == iWidthInBytes)
     {
-        MOS_WriteFileFromPtr((const char *)sOsPath, pData, iSize);
+        MosUtilities::MosWriteFileFromPtr((const char *)sOsPath, pData, iSize);
     }
     else
     {
@@ -3336,7 +3476,7 @@ void VpDumperTool::WriteFrame(
             pTmpDst += iWidthInBytes;
         }
 
-        MOS_WriteFileFromPtr((const char *)sOsPath, pDst, iSize);
+        MosUtilities::MosWriteFileFromPtr((const char *)sOsPath, pDst, iSize);
     }
 
     if (pDst)
@@ -3499,6 +3639,25 @@ const char * VpParameterDumper::GetTileTypeStr(MOS_TILE_TYPE tile_type)
     }
 
     return nullptr;
+}
+
+const char *VpParameterDumper::GetTileModeGMMStr(MOS_TILE_MODE_GMM tile_mode)
+{
+    VP_FUNC_CALL();
+
+    switch (tile_mode)
+    {
+    case MOS_TILE_64_GMM:
+        return _T("MOS_TILE_64_GMM");
+    case MOS_TILE_4_GMM:
+        return _T("MOS_TILE_4_GMM");
+    case MOS_TILE_LINEAR_GMM:
+        return _T("MOS_TILE_LINEAR_GMM");
+    case MOS_TILE_UNSET_GMM:
+        return _T("MOS_TILE_UNSET_GMM");
+    default:
+        return _T("Err");
+    }
 }
 
 const char * VpParameterDumper::GetSurfaceTypeStr(VPHAL_SURFACE_TYPE surface_type)
@@ -3666,6 +3825,23 @@ const char * VpParameterDumper::GetDenoiseModeStr(VPHAL_NOISELEVEL noise_level)
     case NOISELEVEL_DEFAULT:         return _T("NOISELEVEL_DEFAULT");
     case NOISELEVEL_VC1_HD:          return _T("NOISELEVEL_VC1_HD");
     default:                         return _T("Err");
+    }
+
+    return nullptr;
+}
+
+const char *VpParameterDumper::GetHVSDenoiseModeStr(VPHAL_HVSDN_MODE hvs_dn_mode)
+{
+    switch (hvs_dn_mode)
+    {
+    case HVSDENOISE_AUTO_BDRATE:
+        return _T("HVSDENOISE_AUTO_BDRATE");
+    case HVSDENOISE_AUTO_SUBJECTIVE:
+        return _T("HVSDENOISE_AUTO_SUBJECTIVE");
+    case HVSDENOISE_MANUAL:
+        return _T("HVSDENOISE_MANUAL");
+    default:
+        return _T("Err");
     }
 
     return nullptr;

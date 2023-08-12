@@ -297,7 +297,7 @@ VAStatus MediaLibvaCapsG11::GetPlatformSpecificAttrib(VAProfile profile,
         case VAConfigAttribDecProcessing:
         {
 #ifdef _DECODE_PROCESSING_SUPPORTED
-            if (IsAvcProfile(profile) || IsHevcProfile(profile))
+            if ((IsAvcProfile(profile) || IsHevcProfile(profile)) && !(MEDIA_IS_SKU(&(m_mediaCtx->SkuTable), FtrDisableVDBox2SFC)))
             {
                 *value = VA_DEC_PROCESSING;
             }
@@ -410,6 +410,68 @@ VAStatus MediaLibvaCapsG11::GetPlatformSpecificAttrib(VAProfile profile,
             }
             break;
         }
+#if VA_CHECK_VERSION(1, 12, 0)
+        case VAConfigAttribEncHEVCFeatures:
+        {
+            if ((entrypoint == VAEntrypointEncSlice || entrypoint == VAEntrypointEncSliceLP) && IsHevcProfile(profile))
+            {
+                VAConfigAttribValEncHEVCFeatures hevcFeatures = {0};
+                hevcFeatures.bits.separate_colour_planes = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.scaling_lists = VA_FEATURE_SUPPORTED;
+                hevcFeatures.bits.amp = VA_FEATURE_REQUIRED;
+                hevcFeatures.bits.sao = VA_FEATURE_SUPPORTED;
+                hevcFeatures.bits.pcm = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.temporal_mvp = VA_FEATURE_SUPPORTED;
+                hevcFeatures.bits.strong_intra_smoothing = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.dependent_slices = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.sign_data_hiding = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.constrained_intra_pred = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.transform_skip = VA_FEATURE_SUPPORTED;
+                hevcFeatures.bits.cu_qp_delta = VA_FEATURE_REQUIRED;
+                hevcFeatures.bits.weighted_prediction = VA_FEATURE_SUPPORTED;
+                hevcFeatures.bits.transquant_bypass = VA_FEATURE_NOT_SUPPORTED;
+                hevcFeatures.bits.deblocking_filter_disable = VA_FEATURE_NOT_SUPPORTED;
+                *value = hevcFeatures.value;
+            }
+            break;
+        }
+        case VAConfigAttribEncHEVCBlockSizes:
+        {
+            if (entrypoint == VAEntrypointEncSlice && IsHevcProfile(profile))
+            {
+                VAConfigAttribValEncHEVCBlockSizes hevcBlockSize = {0};
+                hevcBlockSize.bits.log2_max_coding_tree_block_size_minus3     = 2;
+                hevcBlockSize.bits.log2_min_coding_tree_block_size_minus3     = 1;
+                hevcBlockSize.bits.log2_min_luma_coding_block_size_minus3     = 0;
+                hevcBlockSize.bits.log2_max_luma_transform_block_size_minus2  = 3;
+                hevcBlockSize.bits.log2_min_luma_transform_block_size_minus2  = 0;
+                hevcBlockSize.bits.max_max_transform_hierarchy_depth_inter    = 2;
+                hevcBlockSize.bits.min_max_transform_hierarchy_depth_inter    = 0;
+                hevcBlockSize.bits.max_max_transform_hierarchy_depth_intra    = 2;
+                hevcBlockSize.bits.min_max_transform_hierarchy_depth_intra    = 0;
+                hevcBlockSize.bits.log2_max_pcm_coding_block_size_minus3      = 0;
+                hevcBlockSize.bits.log2_min_pcm_coding_block_size_minus3      = 0;
+                *value = hevcBlockSize.value;
+            }
+            if (entrypoint == VAEntrypointEncSliceLP && IsHevcProfile(profile))
+            {
+                VAConfigAttribValEncHEVCBlockSizes hevcBlockSize = {0};
+                hevcBlockSize.bits.log2_max_coding_tree_block_size_minus3     = 3;
+                hevcBlockSize.bits.log2_min_coding_tree_block_size_minus3     = 3;
+                hevcBlockSize.bits.log2_min_luma_coding_block_size_minus3     = 0;
+                hevcBlockSize.bits.log2_max_luma_transform_block_size_minus2  = 3;
+                hevcBlockSize.bits.log2_min_luma_transform_block_size_minus2  = 0;
+                hevcBlockSize.bits.max_max_transform_hierarchy_depth_inter    = 2;
+                hevcBlockSize.bits.min_max_transform_hierarchy_depth_inter    = 0;
+                hevcBlockSize.bits.max_max_transform_hierarchy_depth_intra    = 2;
+                hevcBlockSize.bits.min_max_transform_hierarchy_depth_intra    = 0;
+                hevcBlockSize.bits.log2_max_pcm_coding_block_size_minus3      = 0;
+                hevcBlockSize.bits.log2_min_pcm_coding_block_size_minus3      = 0;
+                *value = hevcBlockSize.value;
+            }
+            break;
+        }
+#endif
         default:
             status = VA_STATUS_ERROR_INVALID_PARAMETER;
             break;
@@ -914,7 +976,7 @@ VAStatus MediaLibvaCapsG11::QuerySurfaceAttributes(
         attribs[i].value.value.i = VP_MIN_PIC_HEIGHT;
         i++;
 
-        for (int32_t j = 0; j < m_numVpSurfaceAttr; j++)
+        for (int32_t j = 0; j < m_numVpSurfaceAttr && m_vpSurfaceAttr[j]; j++)
         {
             attribs[i].type = VASurfaceAttribPixelFormat;
             attribs[i].value.type = VAGenericValueTypeInteger;
@@ -929,7 +991,8 @@ VAStatus MediaLibvaCapsG11::QuerySurfaceAttributes(
         attribs[i].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA |
             VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR |
             VA_SURFACE_ATTRIB_MEM_TYPE_KERNEL_DRM |
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME |
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2;
         i++;
 
         attribs[i].type = VASurfaceAttribExternalBufferDescriptor;
@@ -1149,7 +1212,8 @@ VAStatus MediaLibvaCapsG11::QuerySurfaceAttributes(
         attribs[i].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA |
             VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR |
             VA_SURFACE_ATTRIB_MEM_TYPE_KERNEL_DRM |
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME |
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2;
         i++;
     }
     else if(entrypoint == VAEntrypointEncSlice || entrypoint == VAEntrypointEncSliceLP || entrypoint == VAEntrypointEncPicture || entrypoint == VAEntrypointFEI)
@@ -1334,7 +1398,8 @@ VAStatus MediaLibvaCapsG11::QuerySurfaceAttributes(
         attribs[i].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA |
             VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR |
             VA_SURFACE_ATTRIB_MEM_TYPE_KERNEL_DRM |
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME |
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2;
         i++;
     }
     else
@@ -1354,6 +1419,36 @@ VAStatus MediaLibvaCapsG11::QuerySurfaceAttributes(
     MOS_SecureMemcpy(attribList, i * sizeof(*attribs), attribs, i * sizeof(*attribs));
 
     MOS_FreeMemory(attribs);
+    return status;
+}
+
+VAStatus MediaLibvaCapsG11::CreateEncAttributes(
+        VAProfile profile,
+        VAEntrypoint entrypoint,
+        AttribMap **attributeList)
+{
+    VAStatus status = MediaLibvaCaps::CreateEncAttributes(profile, entrypoint, attributeList);
+    DDI_CHK_RET(status, "Failed to create base encode attributes");
+
+    auto attribList = *attributeList;
+    DDI_CHK_NULL(attribList, "Null pointer", VA_STATUS_ERROR_INVALID_PARAMETER);
+
+#if VA_CHECK_VERSION(1, 12, 0)
+    if (IsHevcProfile(profile)) {
+        VAConfigAttrib attrib;
+
+        attrib.type = VAConfigAttribEncHEVCFeatures;
+        GetPlatformSpecificAttrib(profile, entrypoint,
+                                  attrib.type, &attrib.value);
+        (*attribList)[attrib.type] = attrib.value;
+
+        attrib.type = VAConfigAttribEncHEVCBlockSizes;
+        GetPlatformSpecificAttrib(profile, entrypoint,
+                                  attrib.type, &attrib.value);
+        (*attribList)[attrib.type] = attrib.value;
+    }
+#endif
+
     return status;
 }
 

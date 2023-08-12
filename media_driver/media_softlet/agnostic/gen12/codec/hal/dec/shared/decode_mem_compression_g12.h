@@ -31,6 +31,7 @@
 
 #include "decode_mem_compression.h"
 #include "codec_mem_compression_g12.h"
+#include "codechal_hw.h"
 
 class DecodeMemCompG12 : public DecodeMemComp, public CodecMmcAuxTableG12
 {
@@ -52,6 +53,9 @@ class DecodeMemCompG12 : public DecodeMemComp, public CodecMmcAuxTableG12
         PMOS_COMMAND_BUFFER cmdBuffer,
         bool bRcsIsUsed);
 
+    MhwMiInterface *m_mhwMiInterface = nullptr;  //!< Point to MI interface
+
+MEDIA_CLASS_DEFINE_END(DecodeMemCompG12)
 };
 
 #endif //__MEDIA_DECODE_MEM_COMPRESSION_G12_H__

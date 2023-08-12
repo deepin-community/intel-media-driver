@@ -1,4 +1,4 @@
-# Copyright (c) 2020, Intel Corporation
+# Copyright (c) 2021, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -19,3 +19,33 @@
 # OTHER DEALINGS IN THE SOFTWARE.
 
 media_include_subdirectory(bitstreamWriter)
+media_include_subdirectory(pipeline)
+media_include_subdirectory(packet)
+media_include_subdirectory(features)
+media_include_subdirectory(bufferMgr)
+media_include_subdirectory(scalability)
+media_include_subdirectory(statusreport)
+media_include_subdirectory(mmc)
+
+if(${Common_Encode_Supported} STREQUAL "yes")
+
+set(TMP_HEADERS_
+    ${TMP_HEADERS_}
+    ${CMAKE_CURRENT_LIST_DIR}/encode_utils.h
+)
+
+set(SOFTLET_ENCODE_COMMON_HEADERS_
+    ${SOFTLET_ENCODE_COMMON_HEADERS_}
+    ${TMP_HEADERS_}
+)
+
+source_group( CodecHalNext\\Shared\\Encode FILES ${TMP_HEADERS_} )
+
+set(TMP_HEADERS_ "")
+
+endif()
+
+set(SOFTLET_ENCODE_COMMON_PRIVATE_INCLUDE_DIRS_
+    ${SOFTLET_ENCODE_COMMON_PRIVATE_INCLUDE_DIRS_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)

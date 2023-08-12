@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2009-2020, Intel Corporation
+* Copyright (c) 2009-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,312 +28,35 @@
 #include "vphal.h"
 #include "hal_kerneldll.h"
 #include "mos_os.h"
-
+#include "vp_hal_ddi_utils.h"
 #include <math.h>
 
 #if EMUL || VPHAL_LIB
 #include "support.h"
 #endif
 
-//!
-//! \brief    Performs Color Space Convert for Sample 8 bit Using Specified Coeff Matrix
-//! \details  Performs Color Space Convert from Src Color Spase to Dst Color Spase
-//            Using Secified input CSC Coeff Matrix
-//! \param    [out] pOutput
-//!           Pointer to VPHAL_COLOR_SAMPLE_8
-//! \param    [in] pInput
-//!           Pointer to VPHAL_COLOR_SAMPLE_8
-//! \param    [in] srcCspace
-//!           Source Color Space
-//! \param    [in] dstCspace
-//!           Dest Color Space
-//! \param    [in] piCscMatrix
-//!           input CSC coeff Matrxi
-//! \return   bool
-//!           Return true if successful, otherwise false
-//!
-bool VpHal_CSC(
-    VPHAL_COLOR_SAMPLE_8    *pOutput,
-    VPHAL_COLOR_SAMPLE_8    *pInput,
-    VPHAL_CSPACE            srcCspace,
-    VPHAL_CSPACE            dstCspace,
-    int32_t*                piCscMatrix)
+union FP32
 {
-    bool        bResult;
-    int32_t     A, R, G, B;
-    int32_t     Y1, U1, V1;
-
-    bResult = true;
-
-    Y1 = R = pInput->YY;
-    U1 = G = pInput->Cb;
-    V1 = B = pInput->Cr;
-    A      = pInput->Alpha;
-
-    if (srcCspace == dstCspace)
+    uint32_t u;
+    float f;
+    struct
     {
-        // no conversion needed
-        if ((dstCspace == CSpace_sRGB) || (dstCspace == CSpace_stRGB) || IS_COLOR_SPACE_BT2020_RGB(dstCspace))
-        {
-            pOutput->A = (uint8_t)A;
-            pOutput->R = (uint8_t)R;
-            pOutput->G = (uint8_t)G;
-            pOutput->B = (uint8_t)B;
-        }
-        else
-        {
-            pOutput->a = (uint8_t)A;
-            pOutput->Y = (uint8_t)Y1;
-            pOutput->U = (uint8_t)U1;
-            pOutput->V = (uint8_t)V1;
-        }
-    }
-    else
-    {
-        // conversion needed
-        R = (Y1 * piCscMatrix[0]  + U1 * piCscMatrix[1]  +
-             V1 * piCscMatrix[2]  +      piCscMatrix[3]  + 0x00080000) >> 20;
-        G = (Y1 * piCscMatrix[4]  + U1 * piCscMatrix[5]  +
-             V1 * piCscMatrix[6]  +      piCscMatrix[7]  + 0x00080000) >> 20;
-        B = (Y1 * piCscMatrix[8]  + U1 * piCscMatrix[9]  +
-             V1 * piCscMatrix[10] +      piCscMatrix[11] + 0x00080000) >> 20;
+        uint32_t Mantissa : 23;
+        uint32_t Exponent : 8;
+        uint32_t Sign : 1;
+    };
+};
 
-        switch (dstCspace)
-        {
-            case CSpace_sRGB:
-                pOutput->A = (uint8_t)A;
-                pOutput->R = MOS_MIN(MOS_MAX(0,R),255);
-                pOutput->G = MOS_MIN(MOS_MAX(0,G),255);
-                pOutput->B = MOS_MIN(MOS_MAX(0,B),255);
-                break;
-
-            case CSpace_stRGB:
-                pOutput->A = (uint8_t)A;
-                pOutput->R = MOS_MIN(MOS_MAX(16,R),235);
-                pOutput->G = MOS_MIN(MOS_MAX(16,G),235);
-                pOutput->B = MOS_MIN(MOS_MAX(16,B),235);
-                break;
-
-            case CSpace_BT601:
-            case CSpace_BT709:
-                pOutput->a = (uint8_t)A;
-                pOutput->Y = MOS_MIN(MOS_MAX(16,R),235);
-                pOutput->U = MOS_MIN(MOS_MAX(16,G),240);
-                pOutput->V = MOS_MIN(MOS_MAX(16,B),240);
-                break;
-
-            case CSpace_xvYCC601:
-            case CSpace_xvYCC709:
-            case CSpace_BT601_FullRange:
-            case CSpace_BT709_FullRange:
-                pOutput->a = (uint8_t)A;
-                pOutput->Y = MOS_MIN(MOS_MAX(0,R),255);
-                pOutput->U = MOS_MIN(MOS_MAX(0,G),255);
-                pOutput->V = MOS_MIN(MOS_MAX(0,B),255);
-                break;
-
-            default:
-                VPHAL_PUBLIC_NORMALMESSAGE("Unsupported Output ColorSpace %d.", (uint32_t)dstCspace);
-                bResult = false;
-                break;
-        }
-    }
-
-    return bResult;
-}
-
-//!
-//! \brief    Performs Color Space Convert for Sample 8 bit
-//! \details  Performs Color Space Convert from Src Color Spase to Dst Color Spase
-//! \param    [out] pOutput
-//!           Pointer to VPHAL_COLOR_SAMPLE_8
-//! \param    [in] pInput
-//!           Pointer to VPHAL_COLOR_SAMPLE_8
-//! \param    [in] srcCspace
-//!           Source Color Space
-//! \param    [in] dstCspace
-//!           Dest Color Space
-//! \return   bool
-//!           Return true if successful, otherwise false
-//!
-bool VpHal_CSC_8(
-    VPHAL_COLOR_SAMPLE_8    *pOutput,
-    VPHAL_COLOR_SAMPLE_8    *pInput,
-    VPHAL_CSPACE            srcCspace,
-    VPHAL_CSPACE            dstCspace)
+union FP16
 {
-    float    pfCscMatrix[12] = {0};
-    int32_t piCscMatrix[12] = {0};
-    bool    bResult;
-    int32_t i;
-
-    KernelDll_GetCSCMatrix(srcCspace, dstCspace, pfCscMatrix);
-
-    // convert float to fixed point format for the 3x4 matrix
-    for (i = 0; i < 12; i++)
+    uint16_t u;
+    struct
     {
-        // multiply by 2^20 and round up
-        piCscMatrix[i] = (int32_t)((pfCscMatrix[i] * 1048576.0f) + 0.5f);
-    }
-
-    bResult = VpHal_CSC(pOutput, pInput, srcCspace, dstCspace, piCscMatrix);
-
-    return bResult;
-}
-
-//!
-//! \brief    Get CSC matrix in a form usable by Vebox, SFC and IECP kernels
-//! \param    [in] SrcCspace
-//!           Source Cspace
-//! \param    [in] DstCspace
-//!           Destination Cspace
-//! \param    [out] pfCscCoeff
-//!           [3x3] Coefficients matrix
-//! \param    [out] pfCscInOffset
-//!           [3x1] Input Offset matrix
-//! \param    [out] pfCscOutOffset
-//!           [3x1] Output Offset matrix
-//! \return   void
-//!
-void VpHal_GetCscMatrix(
-    VPHAL_CSPACE                SrcCspace,                                      // [in] Source Cspace
-    VPHAL_CSPACE                DstCspace,                                      // [in] Destination Cspace
-    float*                      pfCscCoeff,                                     // [out] [3x3] Coefficients matrix
-    float*                      pfCscInOffset,                                  // [out] [3x1] Input Offset matrix
-    float*                      pfCscOutOffset)                                 // [out] [3x1] Output Offset matrix
-{
-    float   fCscMatrix[12] = {0};
-    int32_t i;
-
-    KernelDll_GetCSCMatrix(
-        SrcCspace,
-        DstCspace,
-        fCscMatrix);
-
-    // Copy [3x3] into Coeff
-    for (i = 0; i < 3; i++)
-    {
-        MOS_SecureMemcpy(
-            &pfCscCoeff[i*3],
-            sizeof(float) * 3,
-            &fCscMatrix[i*4],
-            sizeof(float) * 3);
-    }
-
-    // Get the input offsets
-    switch(SrcCspace)
-    {
-        CASE_YUV_CSPACE_LIMITEDRANGE:
-            pfCscInOffset[0] =  -16.0F;
-            pfCscInOffset[1] = -128.0F;
-            pfCscInOffset[2] = -128.0F;
-            break;
-
-        CASE_YUV_CSPACE_FULLRANGE:
-            pfCscInOffset[0] =    0.0F;
-            pfCscInOffset[1] = -128.0F;
-            pfCscInOffset[2] = -128.0F;
-            break;
-
-        case CSpace_sRGB:
-            pfCscInOffset[0] = 0.0F;
-            pfCscInOffset[1] = 0.0F;
-            pfCscInOffset[2] = 0.0F;
-            break;
-
-        case CSpace_stRGB:
-            pfCscInOffset[0] = -16.0F;
-            pfCscInOffset[1] = -16.0F;
-            pfCscInOffset[2] = -16.0F;
-            break;
-
-        //BT2020 YUV->RGB
-        case CSpace_BT2020:
-            pfCscInOffset[0] = -16.0F;
-            pfCscInOffset[1] = -128.0F;
-            pfCscInOffset[2] = -128.0F;
-            break;
-
-        case CSpace_BT2020_FullRange:
-            pfCscInOffset[0] =    0.0F;
-            pfCscInOffset[1] = -128.0F;
-            pfCscInOffset[2] = -128.0F;
-            break;
-
-        //BT2020 RGB->YUV
-        case CSpace_BT2020_RGB:
-            pfCscInOffset[0] = 0.0F;
-            pfCscInOffset[1] = 0.0F;
-            pfCscInOffset[2] = 0.0F;
-            break;
-
-        //BT2020 RGB->YUV
-        case CSpace_BT2020_stRGB:
-            pfCscInOffset[0] = -16.0F;
-            pfCscInOffset[1] = -16.0F;
-            pfCscInOffset[2] = -16.0F;
-            break;
-
-        default:
-            VPHAL_PUBLIC_NORMALMESSAGE("Unsupported Input ColorSpace for Vebox %d.", (uint32_t)SrcCspace);
-    }
-
-    // Get the output offsets
-    switch(DstCspace)
-    {
-        CASE_YUV_CSPACE_LIMITEDRANGE:
-            pfCscOutOffset[0] =  16.0F;
-            pfCscOutOffset[1] = 128.0F;
-            pfCscOutOffset[2] = 128.0F;
-            break;
-
-        CASE_YUV_CSPACE_FULLRANGE:
-            pfCscOutOffset[0] =   0.0F;
-            pfCscOutOffset[1] = 128.0F;
-            pfCscOutOffset[2] = 128.0F;
-            break;
-
-        case CSpace_sRGB:
-            pfCscOutOffset[0] = 0.0F;
-            pfCscOutOffset[1] = 0.0F;
-            pfCscOutOffset[2] = 0.0F;
-            break;
-
-        case CSpace_stRGB:
-            pfCscOutOffset[0] = 16.0F;
-            pfCscOutOffset[1] = 16.0F;
-            pfCscOutOffset[2] = 16.0F;
-            break;
-
-        //BT2020 RGB->YUV
-        case CSpace_BT2020:
-            pfCscOutOffset[0] = 16.0F;
-            pfCscOutOffset[1] = 128.0F;
-            pfCscOutOffset[2] = 128.0F;
-            break;
-
-        case CSpace_BT2020_FullRange:
-            pfCscOutOffset[0] =   0.0F;
-            pfCscOutOffset[1] = 128.0F;
-            pfCscOutOffset[2] = 128.0F;
-            break;
-
-        case CSpace_BT2020_RGB:
-            pfCscOutOffset[0] = 0.0F;
-            pfCscOutOffset[1] = 0.0F;
-            pfCscOutOffset[2] = 0.0F;
-            break;
-
-        case CSpace_BT2020_stRGB:
-            pfCscOutOffset[0] = 16.0F;
-            pfCscOutOffset[1] = 16.0F;
-            pfCscOutOffset[2] = 16.0F;
-            break;
-
-        default:
-            VPHAL_PUBLIC_NORMALMESSAGE("Unsupported Output ColorSpace for Vebox %d.", (uint32_t)DstCspace);
-    }
-}
+        uint16_t Mantissa : 10;
+        uint16_t Exponent : 5;
+        uint16_t Sign : 1;
+    };
+};
 
 //!
 //! \brief    sinc
@@ -464,7 +187,7 @@ MOS_STATUS VpHal_ReAllocateSurface(
 
     //---------------------------------
     VPHAL_PUBLIC_ASSERT(pOsInterface);
-    VPHAL_PUBLIC_ASSERT(&pSurface->OsResource);
+    VPHAL_PUBLIC_ASSERT(pSurface);
     //---------------------------------
 
     eStatus      = MOS_STATUS_SUCCESS;
@@ -478,7 +201,9 @@ MOS_STATUS VpHal_ReAllocateSurface(
         (pSurface->Format          == Format)             &&
         (pSurface->bCompressible   == bCompressible)      &&
         (pSurface->CompressionMode == CompressionMode)    &&
-        (pSurface->TileType        == DefaultTileType))
+        (pSurface->TileType        == DefaultTileType     ||
+        MOS_TILE_Y                 == DefaultTileType     &&
+        IS_Y_MAJOR_TILE_FORMAT(pSurface->TileType)))
     {
         goto finish;
     }
@@ -531,8 +256,8 @@ MOS_STATUS VpHal_ReAllocateSurface(
 
     *pbAllocated     = true;
 
-    MT_LOG7(MT_VP_HAL_REALLOC_SURF, MT_NORMAL, MT_VP_INTERNAL_SURF_TYPE, pSurfaceName ? *((int64_t*)pSurfaceName) : 0,
-        MT_SURF_WIDTH, dwWidth, MT_SURF_HEIGHT, dwHeight, MT_SURF_MOS_FORMAT, Format, MT_SURF_TILE_TYPE, pSurface->TileModeGMM,
+    MT_LOG7(MT_VP_HAL_REALLOC_SURF, MT_NORMAL, MT_VP_HAL_INTER_SURF_TYPE, pSurfaceName ? *((int64_t*)pSurfaceName) : 0,
+        MT_SURF_WIDTH, dwWidth, MT_SURF_HEIGHT, dwHeight, MT_SURF_MOS_FORMAT, Format, MT_SURF_TILE_MODE, pSurface->TileModeGMM,
         MT_SURF_COMP_ABLE, pSurface->bCompressible, MT_SURF_COMP_MODE, pSurface->CompressionMode);
 
 finish:
@@ -708,96 +433,6 @@ finish:
 }
 
 //!
-//! \brief    Get the color pack type of a surface
-//! \details  Map mos surface format to color pack format and return.
-//!           For unknown format return VPHAL_COLORPACK_UNKNOWN
-//! \param    [in] Format
-//!           MOS_FORMAT of a surface
-//! \return   VPHAL_COLORPACK
-//!           Color pack type of the surface
-//!
-VPHAL_COLORPACK VpHal_GetSurfaceColorPack (
-    MOS_FORMAT      Format)
-{
-    VPHAL_COLORPACK ColorPack;
-
-    ColorPack = VPHAL_COLORPACK_UNKNOWN;
-
-    switch (Format)
-    {
-        case Format_Y8:
-        case Format_Y16S:
-        case Format_Y16U:
-            ColorPack = VPHAL_COLORPACK_400;
-            break;
-
-        case Format_IMC1:
-        case Format_IMC2:
-        case Format_IMC3:
-        case Format_IMC4:
-        case Format_NV12:
-        case Format_NV21:
-        case Format_YV12:
-        case Format_I420:
-        case Format_IYUV:
-        case Format_P010:
-        case Format_P016:
-            ColorPack = VPHAL_COLORPACK_420;
-            break;
-
-        case Format_YUY2:
-        case Format_YUYV:
-        case Format_YVYU:
-        case Format_UYVY:
-        case Format_VYUY:
-        case Format_P208:
-        case Format_422H:
-        case Format_422V:
-        case Format_Y210:
-        case Format_Y216:
-            ColorPack = VPHAL_COLORPACK_422;
-            break;
-
-        case Format_A8R8G8B8:
-        case Format_X8R8G8B8:
-        case Format_A8B8G8R8:
-        case Format_X8B8G8R8:
-        case Format_A16B16G16R16:
-        case Format_A16R16G16B16:
-        case Format_R5G6B5:
-        case Format_R8G8B8:
-        case Format_RGBP:
-        case Format_BGRP:
-        case Format_Y416:
-        case Format_Y410:
-        case Format_AYUV:
-        case Format_AUYV:
-        case Format_444P:
-        case Format_R10G10B10A2:
-        case Format_B10G10R10A2:
-        case Format_A16B16G16R16F:
-        case Format_A16R16G16B16F:
-            ColorPack = VPHAL_COLORPACK_444;
-            break;
-
-        case Format_400P:
-            ColorPack = VPHAL_COLORPACK_400;
-            break;
-
-        case Format_411P:
-            ColorPack = VPHAL_COLORPACK_411;
-            break;
-
-        default:
-            VPHAL_PUBLIC_ASSERTMESSAGE("Input format color pack unknown.");
-            ColorPack = VPHAL_COLORPACK_UNKNOWN;
-            break;
-    }
-
-    return ColorPack;
-}
-
-//!
 //! \brief    Decide whether Chroma up sampling is needed
 //! \param    [in] pSource
 //!           Pointer to Source Surface
@@ -818,8 +453,8 @@ bool VpHal_IsChromaUpSamplingNeeded(
 
     bChromaUpSampling = false;
 
-    srcColorPack = VpHal_GetSurfaceColorPack(pSource->Format);
-    dstColorPack = VpHal_GetSurfaceColorPack(pTarget->Format);
+    srcColorPack = VpHalDDIUtils::GetSurfaceColorPack(pSource->Format);
+    dstColorPack = VpHalDDIUtils::GetSurfaceColorPack(pTarget->Format);
 
     if ((srcColorPack == VPHAL_COLORPACK_420 &&
         (dstColorPack == VPHAL_COLORPACK_422 || dstColorPack == VPHAL_COLORPACK_444)) ||
@@ -852,8 +487,8 @@ bool VpHal_IsChromaDownSamplingNeeded(
 
     bChromaDownSampling = false;
 
-    srcColorPack = VpHal_GetSurfaceColorPack(pSource->Format);
-    dstColorPack = VpHal_GetSurfaceColorPack(pTarget->Format);
+    srcColorPack = VpHalDDIUtils::GetSurfaceColorPack(pSource->Format);
+    dstColorPack = VpHalDDIUtils::GetSurfaceColorPack(pTarget->Format);
 
     if ((srcColorPack == VPHAL_COLORPACK_444 &&
         (dstColorPack == VPHAL_COLORPACK_422 || dstColorPack == VPHAL_COLORPACK_420)) ||
@@ -863,83 +498,6 @@ bool VpHal_IsChromaDownSamplingNeeded(
     }
 
     return bChromaDownSampling;
-}
-
-//! \brief    Get the bit depth of a surface
-//! \details  Get bit depth of input mos surface format and return.
-//!           For unknown format return 0
-//! \param    [in] Format
-//!           MOS_FORMAT of a surface
-//! \return   uint32_t
-//!           Bit depth of the surface
-//!
-uint32_t VpHal_GetSurfaceBitDepth (
-    MOS_FORMAT      Format)
-{
-    uint32_t uBitDepth;
-
-    uBitDepth = 0;
-
-    switch (Format)
-    {
-        case Format_IMC1:
-        case Format_IMC2:
-        case Format_IMC3:
-        case Format_IMC4:
-        case Format_NV12:
-        case Format_NV21:
-        case Format_YV12:
-        case Format_I420:
-        case Format_IYUV:
-        case Format_YUY2:
-        case Format_YUYV:
-        case Format_YVYU:
-        case Format_UYVY:
-        case Format_VYUY:
-        case Format_P208:
-        case Format_422H:
-        case Format_422V:
-        case Format_R5G6B5:
-        case Format_R8G8B8:
-        case Format_A8R8G8B8:
-        case Format_X8R8G8B8:
-        case Format_A8B8G8R8:
-        case Format_X8B8G8R8:
-        case Format_444P:
-        case Format_AYUV:
-        case Format_AUYV:
-        case Format_RGBP:
-        case Format_BGRP:
-            uBitDepth = 8;
-            break;
-
-        case Format_P010:
-        case Format_R10G10B10A2:
-        case Format_B10G10R10A2:
-        case Format_Y210:
-        case Format_Y410:
-        case Format_P210:
-            uBitDepth = 10;
-            break;
-
-        case Format_A16B16G16R16:
-        case Format_A16R16G16B16:
-        case Format_A16B16G16R16F:
-        case Format_A16R16G16B16F:
-        case Format_P016:
-        case Format_Y416:
-        case Format_Y216:
-        case Format_P216:
-            uBitDepth = 16;
-            break;
-
-        default:
-            VPHAL_PUBLIC_ASSERTMESSAGE("Input format color pack unknown.");
-            uBitDepth = 0;
-            break;
-    }
-
-    return uBitDepth;
 }
 
 //!
@@ -998,79 +556,59 @@ void VpHal_GetScalingRatio(
 
 //! \brief    Transfer float type to half precision float type
 //! \details  Transfer float type to half precision float (16bit) type
-//! \param    [in] fInput
+//! \param    [in] fInputA
 //!           input FP32 number
 //! \return   uint16_t
 //!           half precision float value in bit
 //!
-uint16_t VpHal_FloatToHalfFloat(
-    float     fInput)
+uint16_t VpHal_FloatToHalfFloatA(float fInputA)
 {
-    bool                        Sign;
-    int32_t                     Exp;
-    bool                        ExpSign;
-    uint32_t                    Mantissa;
-    uint32_t                    dwInput;
-    VPHAL_HALF_PRECISION_FLOAT  outFloat;
 
-    dwInput   = *((uint32_t *) (&fInput));
-    Sign      = (dwInput >> 31) &  0x01;
-    Exp       = (dwInput >> 23) &  0x0FF;
-    Mantissa  = dwInput & 0x07FFFFF;
+    FP32 fInput        = *(FP32*)(&fInputA);
+    FP16 fOutput       = { 0 };
 
-    outFloat.Sign     = Sign;
-    outFloat.Mantissa = (Mantissa >> 13) & 0x03ff;  // truncate to zero
-
-    if (Exp == 0)
+    // Based on ISPC reference code (with minor modifications)
+    if (fInput.Exponent == 0) // Signed zero/denormal (which will underflow)
     {
-        outFloat.Exponent = 0;
+        fOutput.Exponent = 0;
     }
-    else if (Exp == 0xff)
+    else if (fInput.Exponent == 255) // Inf or NaN (all exponent bits set)
     {
-        outFloat.Exponent = 31;
+        fOutput.Exponent = 31;
+        fOutput.Mantissa = fInput.Mantissa ? 0x200 : 0; // NaN->qNaN and Inf->Inf
     }
-    else
+    else // Normalized number
     {
-        // Transfer 15-bit exponent to 4-bit exponent
-        Exp -= 0x7f;
-        Exp += 0xf;
-
-        if (Exp < 1)
+        // Exponent unbias the single, then bias the halfp
+        int newexp = fInput.Exponent - 127 + 15;
+        if (newexp >= 31) // Overflow, return signed infinity
         {
-            Exp = 1;
+            fOutput.Exponent = 31;
         }
-        else if (Exp > 30)
+        else if (newexp <= 0) // Underflow
         {
-            Exp = 30;
+            if ((14 - newexp) <= 24) // Mantissa might be non-zero
+            {
+                uint32_t mant = fInput.Mantissa | 0x800000; // Hidden 1 bit
+                fOutput.Mantissa = mant >> (14 - newexp);
+                if ((mant >> (13 - newexp)) & 1) // Check for rounding
+                {
+                    fOutput.u++; // Round, might overflow into exp bit, but this is OK
+                }
+            }
         }
-
-        outFloat.Exponent = Exp;
+        else
+        {
+            fOutput.Exponent = newexp;
+            fOutput.Mantissa = fInput.Mantissa >> 13;
+            if (fInput.Mantissa & 0x1000) // Check for rounding
+            {
+                fOutput.u++; // Round, might overflow to inf, this is OK
+            }
+        }
     }
 
-    return outFloat.value;
-}
-
-MOS_SURFACE VpHal_ConvertVphalSurfaceToMosSurface(PVPHAL_SURFACE pSurface)
-{
-    VPHAL_PUBLIC_ASSERT(pSurface);
-
-    MOS_SURFACE outSurface;
-    MOS_ZeroMemory(&outSurface, sizeof(MOS_SURFACE));
-    outSurface.OsResource      = pSurface->OsResource;
-    outSurface.Format          = pSurface->Format;
-    outSurface.dwWidth         = pSurface->dwWidth;
-    outSurface.dwHeight        = pSurface->dwHeight;
-    outSurface.TileType        = pSurface->TileType;
-    outSurface.TileModeGMM     = pSurface->TileModeGMM;
-    outSurface.bGMMTileEnabled = pSurface->bGMMTileEnabled;
-    outSurface.dwDepth         = pSurface->dwDepth;
-    outSurface.dwPitch         = pSurface->dwPitch;
-    outSurface.dwSlicePitch    = pSurface->dwSlicePitch;
-    outSurface.dwOffset        = pSurface->dwOffset;
-    outSurface.bCompressible   = pSurface->bCompressible;
-    outSurface.bIsCompressed   = pSurface->bIsCompressed;
-    outSurface.CompressionMode = pSurface->CompressionMode;
-    outSurface.CompressionFormat = pSurface->CompressionFormat;
-
-    return outSurface;
+    fOutput.Sign = fInput.Sign;
+    uint16_t res = *(uint16_t*)(&fOutput);
+    return res;
 }

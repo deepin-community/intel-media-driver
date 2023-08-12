@@ -27,16 +27,34 @@
 #ifndef __VP_PLATFORM_INTERFACE_H__
 #define __VP_PLATFORM_INTERFACE_H__
 
-#include "hal_kerneldll.h"
+#include "hal_kerneldll_next.h"
 #include "vp_feature_manager.h"
 #include "vp_render_common.h"
 #include "vp_kernel_config.h"
+#include "media_copy.h"
 
 namespace vp
 {
 class VPFeatureManager;
 class SfcRenderBase;
 class VpKernelSet;
+typedef void (*DelayLoadedFunc)(vp::VpPlatformInterface &vpPlatformInterface);
+
+struct VP_KERNEL_BINARY_ENTRY
+{
+    const uint32_t        *kernelBin    = nullptr;
+    uint32_t              kernelBinSize = 0;
+    std::string           postfix       = "";
+    DelayLoadedKernelType kernelType    = KernelNone;
+};
+
+struct VP_KERNEL_BINARY
+{
+    const uint32_t        *kernelBin           = nullptr;
+    uint32_t              kernelBinSize        = 0;
+    const uint32_t        *fcPatchKernelBin    = nullptr;
+    uint32_t              fcPatchKernelBinSize = 0;
+};
 
 class VpRenderKernel
 {
@@ -112,6 +130,8 @@ protected:
 
 public:
     const static std::string          s_kernelNameNonAdvKernels;
+
+MEDIA_CLASS_DEFINE_END(vp__VpRenderKernel)
 };
 
 using KERNEL_POOL = std::map<std::string, VpRenderKernel>;
@@ -120,16 +140,18 @@ class VpPlatformInterface
 {
 public:
 
-    VpPlatformInterface(PMOS_INTERFACE pOsInterface)
-    {
-        m_pOsInterface = pOsInterface;
-    }
+    VpPlatformInterface(PMOS_INTERFACE pOsInterface, bool clearViewMode = false);
 
     virtual ~VpPlatformInterface();
 
     virtual MOS_STATUS InitVpCmKernels(
         const uint32_t*       cisaCode,
-        uint32_t              cisaCodeSize);
+        uint32_t              cisaCodeSize,
+        std::string           postfix = "");
+
+    virtual MOS_STATUS InitVpNativeAdvKernels(
+        std::string kernelName,
+        VP_KERNEL_BINARY_ENTRY kernelBinaryEntry);
 
     virtual MOS_STATUS InitVpHwCaps(VP_HW_CAPS &vpHwCaps)
     {
@@ -152,10 +174,7 @@ public:
     {
         return MOS_STATUS_UNIMPLEMENTED;
     }
-    virtual MOS_STATUS InitVpRenderHwCaps()
-    {
-        return MOS_STATUS_UNIMPLEMENTED;
-    }
+    virtual MOS_STATUS        InitVpRenderHwCaps();
     virtual VPFeatureManager *CreateFeatureChecker(_VP_MHWINTERFACE *hwInterface)
     {
         return nullptr;
@@ -165,6 +184,11 @@ public:
         return nullptr;
     }
     virtual VpCmdPacket *CreateRenderPacket(MediaTask * task, _VP_MHWINTERFACE *hwInterface, VpAllocator *&allocator, VPMediaMemComp *mmc, VpKernelSet* kernel)
+    {
+        return nullptr;
+    }
+
+    virtual MediaCopyBaseState* CreateMediaCopy()
     {
         return nullptr;
     }
@@ -198,19 +222,151 @@ public:
         return !m_vpMmcDisabled;
     }
 
+    virtual bool IsGpuContextCreatedInPipelineInit()
+    {
+        return true;
+    }
+
+    virtual MOS_STATUS GetInputFrameWidthHeightAlignUnit(
+        PVP_MHWINTERFACE          pvpMhwInterface,
+        uint32_t                 &widthAlignUnit,
+        uint32_t                 &heightAlignUnit,
+        bool                      bVdbox,
+        CODECHAL_STANDARD         codecStandard,
+        CodecDecodeJpegChromaType jpegChromaType);
+
+    virtual bool IsVeboxScalabilityWith4KNotSupported(
+        VP_MHWINTERFACE           vpMhwInterface);
+
+    virtual MOS_STATUS GetVeboxHeapInfo(
+        PVP_MHWINTERFACE          pvpMhwInterface,
+        const MHW_VEBOX_HEAP    **ppVeboxHeap);
+
+    inline void SetMhwSfcItf(std::shared_ptr<mhw::sfc::Itf> sfcItf)
+    {
+        m_sfcItf = sfcItf;
+    }
+
+    inline void SetMhwVeboxItf(std::shared_ptr<mhw::vebox::Itf> veboxItf)
+    {
+        m_veboxItf = veboxItf;
+    }
+
+    inline void SetMhwRenderItf(std::shared_ptr<mhw::render::Itf> renderItf)
+    {
+        m_renderItf = renderItf;
+    }
+
+    inline void SetMhwMiItf(std::shared_ptr<mhw::mi::Itf> miItf)
+    {
+        m_miItf = miItf;
+    }
+
+    inline std::shared_ptr<mhw::sfc::Itf> GetMhwSfcItf()
+    {
+        return m_sfcItf;
+    }
+
+    inline std::shared_ptr<mhw::vebox::Itf> GetMhwVeboxItf()
+    {
+        return m_veboxItf;
+    }
+
+    inline std::shared_ptr<mhw::render::Itf> GetMhwRenderItf()
+    {
+        return m_renderItf;
+    }
+
+    inline std::shared_ptr<mhw::mi::Itf> GetMhwMiItf()
+    {
+        return m_miItf;
+    }
+
     virtual VpKernelConfig &GetKernelConfig() = 0;
 
     MOS_STATUS GetKernelParam(VpKernelID kernlId, RENDERHAL_KERNEL_PARAM &param);
+
+    void SetVpFCKernelBinary(
+                const uint32_t   *kernelBin,
+                uint32_t         kernelBinSize,
+                const uint32_t   *fcPatchKernelBin,
+                uint32_t         fcPatchKernelBinSize);
+
+    virtual void AddVpIsaKernelEntryToList(
+        const uint32_t       *kernelBin,
+        uint32_t              kernelBinSize,
+        std::string           postfix         = "",
+        DelayLoadedKernelType delayKernelType = KernelNone);
+
+    virtual void AddVpNativeAdvKernelEntryToList(
+                const uint32_t *kernelBin,
+                uint32_t        kernelBinSize,
+                std::string     kernelName);
+
+    virtual void InitVpDelayedNativeAdvKernel(
+        const uint32_t *kernelBin,
+        uint32_t        kernelBinSize,
+        std::string     kernelName);
+
+    virtual void AddNativeAdvKernelToDelayedList(
+        DelayLoadedKernelType kernelType,
+        DelayLoadedFunc       func);
+
     //only for get kernel binary in legacy path not being used in APO path.
     virtual MOS_STATUS GetKernelBinary(const void *&kernelBin, uint32_t &kernelSize, const void *&patchKernelBin, uint32_t &patchKernelSize);
 
+    virtual MOS_STATUS InitializeDelayedKernels(DelayLoadedKernelType type);
+
+    virtual MOS_STATUS ConfigVirtualEngine() = 0;
+
+    virtual MOS_STATUS ConfigureVpScalability(VP_MHWINTERFACE &vpMhwInterface) = 0;
+
+    virtual bool IsEufusionBypassWaEnabled()
+    {
+        return false;
+    }
+
+    virtual bool IsAdvanceNativeKernelSupported()
+    {
+        return true;
+    }
+
+    virtual bool IsRenderMMCLimitationCheckNeeded()
+    {
+        return false;
+    }
+
+    bool IsRenderDisabled()
+    {
+        return m_isRenderDisabled;
+    }
+
+    void DisableRender();
+
 protected:
     PMOS_INTERFACE m_pOsInterface = nullptr;
+    VP_KERNEL_BINARY m_vpKernelBinary = {};                 //!< vp kernels
     KERNEL_POOL    m_kernelPool;
     void (*m_modifyKdllFunctionPointers)(PKdll_State) = nullptr;
     bool m_sfc2PassScalingEnabled = false;
     bool m_sfc2PassScalingPerfMode = false;
     bool m_vpMmcDisabled = false;
+
+    MediaUserSettingSharedPtr m_userSettingPtr  = nullptr;  //!< usersettingInstance
+    std::shared_ptr<mhw::vebox::Itf>        m_veboxItf  = nullptr;
+    std::shared_ptr<mhw::sfc::Itf>          m_sfcItf    = nullptr;
+    std::shared_ptr<mhw::render::Itf>       m_renderItf = nullptr;
+    std::shared_ptr<mhw::mi::Itf>           m_miItf     = nullptr;
+
+    std::vector<VP_KERNEL_BINARY_ENTRY>    m_vpIsaKernelBinaryList;
+    std::vector<VP_KERNEL_BINARY_ENTRY>    m_vpDelayLoadedBinaryList;
+    std::map<DelayLoadedKernelType, bool>  m_vpDelayLoadedFeatureSet;
+    std::map<std::string, VP_KERNEL_BINARY_ENTRY> m_vpNativeAdvKernelBinaryList;
+    std::map<DelayLoadedKernelType, DelayLoadedFunc> m_vpDelayLoadedNativeFunctionSet;
+
+    bool m_isRenderDisabled = false;
+
+    MEDIA_CLASS_DEFINE_END(vp__VpPlatformInterface)
 };
 
 }

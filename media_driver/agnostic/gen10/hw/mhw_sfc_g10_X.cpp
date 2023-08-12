@@ -28,6 +28,7 @@
 
 #include "mhw_sfc.h"
 #include "mhw_sfc_g10_X.h"
+#include "mos_os_cp_interface_specific.h"
 
 MOS_STATUS MhwSfcInterfaceG10::AddSfcState(
     PMOS_COMMAND_BUFFER            pCmdBuffer,
@@ -269,7 +270,7 @@ MOS_STATUS MhwSfcInterfaceG10::AddSfcState(
     cmd.DW3.PreAvsChromaDownsamplingCoSitingPositionHorizontalDirection = pSfcStateParams->dwChromaDownSamplingHorizontalCoef;
 
 
-    MHW_CHK_STATUS_RETURN(Mos_AddCommand(pCmdBuffer, &cmd, cmd.byteSize));
+    MHW_CHK_STATUS_RETURN(pOsInterface->pfnAddCommand(pCmdBuffer, &cmd, cmd.byteSize));
 
     return MOS_STATUS_SUCCESS;
 }

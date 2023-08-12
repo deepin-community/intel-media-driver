@@ -31,7 +31,6 @@
 #include "media_interfaces_codechal.h"
 #include "media_interfaces_mmd.h"
 #include "media_interfaces_cmhal.h"
-#include "media_interfaces_mosutil.h"
 #include "media_interfaces_vphal.h"
 #include "media_interfaces_renderhal.h"
 #include "media_interfaces_nv12top010.h"
@@ -100,6 +99,9 @@
 #endif
 #ifdef _AVC_ENCODE_VDENC_SUPPORTED
 #include "codechal_vdenc_avc_g9_skl.h"
+#endif
+#ifdef _VP8_ENCODE_SUPPORTED
+#include "codechal_encode_vp8_g9.h"
 #endif
 #include "codechal_encode_csc_ds_g9.h"
 
@@ -203,6 +205,9 @@ public:
 #ifdef _AVC_ENCODE_VDENC_SUPPORTED
     using AvcVdenc = CodechalVdencAvcStateG9Skl;
 #endif
+#ifdef _VP8_ENCODE_SUPPORTED
+    using Vp8 = CodechalEncodeVp8G9;
+#endif
 };
 
 class CodechalInterfacesG9Skl : public CodechalDevice
@@ -227,14 +232,6 @@ protected:
         CM_HAL_STATE *pCmState);
 };
 
-class MosUtilDeviceG9Skl : public MosUtilDevice
-{
-public:
-    using MosUtil = MediaUserSettingsMgr;
-
-    MOS_STATUS Initialize();
-};
-
 class VphalInterfacesG9Skl : public VphalDevice
 {
 public:
@@ -242,9 +239,9 @@ public:
 
     MOS_STATUS Initialize(
         PMOS_INTERFACE  osInterface,
-        PMOS_CONTEXT    osDriverContext,
         bool            bInitVphalState,
-        MOS_STATUS      *eStatus);
+        MOS_STATUS      *eStatus,
+        bool            clearViewMode = false);
 };
 
 class RenderHalInterfacesG9Skl : public RenderHalDevice

@@ -22,7 +22,7 @@
 #ifndef __VP_VEBOX_CMD_PACKET_G12_H__
 #define __VP_VEBOX_CMD_PACKET_G12_H__
 
-#include "vp_vebox_cmd_packet.h"
+#include "vp_vebox_cmd_packet_legacy.h"
 #include "vp_platform_interface_g12_tgllp.h"
 
 //!
@@ -58,7 +58,7 @@
 
 namespace vp {
 
-class VpVeboxCmdPacketG12 : virtual public VpVeboxCmdPacket
+class VpVeboxCmdPacketG12 : virtual public VpVeboxCmdPacketLegacy
 {
 public:
     VpVeboxCmdPacketG12(MediaTask * task, PVP_MHWINTERFACE hwInterface, PVpAllocator &allocator, VPMediaMemComp *mmc);
@@ -109,6 +109,7 @@ public:
         VEBOX_STAT_QUERY_TYPE QueryType,
         uint32_t*             pQuery) override;
 
+MEDIA_CLASS_DEFINE_END(vp__VpVeboxCmdPacketG12)
 };
 
 }

@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -33,6 +33,15 @@
 #include "codec_def_encode_hevc.h"
 #include "mhw_vdbox.h"
 #include "mhw_vdbox_cmdpar.h"
+
+#ifdef IGFX_HCP_INTERFACE_EXT_SUPPORT
+#include "mhw_vdbox_hcp_cmdpar_ext.h"
+#define __MHW_VDBOX_HCP_WRAPPER(STUFF)
+#define __MHW_VDBOX_HCP_WRAPPER_EXT(STUFF) STUFF
+#else
+#define __MHW_VDBOX_HCP_WRAPPER(STUFF) STUFF
+#define __MHW_VDBOX_HCP_WRAPPER_EXT(STUFF)
+#endif
 
 namespace mhw
 {
@@ -124,6 +133,7 @@ struct HcpBufferSizePar
     uint32_t                 dwPicWidth;
     uint32_t                 dwPicHeight;
     uint32_t                 dwMaxFrameSize;
+    uint32_t                 dwBufferSize;
 };
 
 struct HcpVdboxRowStorePar
@@ -137,10 +147,68 @@ struct HcpVdboxRowStorePar
     uint8_t  ucLCUSize;
 };
 
+struct HCPPakHWTileSizeRecord
+{
+    uint32_t Address_31_0;   //DW0
+    uint32_t Address_63_32;  //DW1
+    uint32_t Length;         //DW2 Bitstream length per tile; includes header len in first tile, and tail len in last tile
+    uint32_t TileSize;       //DW3 In Vp9, it is used for back annotation, In Hevc, it is the mmio register bytecountNoHeader
+    uint32_t AddressOffset;  //DW4 Cacheline offset
+
+    //DW5
+    uint32_t
+        ByteOffset : 6,  //[5:0] // Byte offset within cacheline
+        Res_95_70 : 26;  //[31:6]
+
+    uint32_t Hcp_Bs_SE_Bitcount_Tile;  //DW6 Bitstream size for syntax element per tile
+    uint32_t Hcp_Cabac_BinCnt_Tile;    //DW7 Bitstream size for syntax element per tile
+    uint32_t Res_DW8_31_0;             //DW8
+    uint32_t Hcp_Image_Status_Ctrl;    //DW9 Image status control per tile
+    uint32_t Hcp_Qp_Status_Count;      //DW10 Qp status count per tile
+    uint32_t Hcp_Slice_Count_Tile;     //DW11 Number of slices per tile
+    uint32_t Res_DW12_DW15[4];         //DW12-15 Reserved bits added so that QwordDisables are set correctly
+};
+
+enum CommandsNumberOfAddresses
+{
+    MI_BATCH_BUFFER_START_CMD_NUMBER_OF_ADDRESSES           = 1,  //  2 DW for  1 address field
+    MI_STORE_DATA_IMM_CMD_NUMBER_OF_ADDRESSES               = 1,  //  2 DW for  1 address field
+    MI_FLUSH_DW_CMD_NUMBER_OF_ADDRESSES                     = 1,  //  2 DW for  1 address field
+    MI_CONDITIONAL_BATCH_BUFFER_END_CMD_NUMBER_OF_ADDRESSES = 1,  //  2 DW for  1 address field
+    MI_STORE_REGISTER_MEM_CMD_NUMBER_OF_ADDRESSES           = 1,  //  2 DW for  1 address field
+    MI_COPY_MEM_MEM_CMD_NUMBER_OF_ADDRESSES                 = 4,  //  4 DW for  2 address fields
+    MI_SEMAPHORE_WAIT_CMD_NUMBER_OF_ADDRESSES               = 1,  //  2 DW for  1 address fields
+    MI_ATOMIC_CMD_NUMBER_OF_ADDRESSES                       = 1,  //  2 DW for  1 address field
+
+    MFX_WAIT_CMD_NUMBER_OF_ADDRESSES = 0,  //  0 DW for    address fields
+
+    HCP_PIPE_MODE_SELECT_CMD_NUMBER_OF_ADDRESSES          = 0,   //  0 DW for    address fields
+    HCP_SURFACE_STATE_CMD_NUMBER_OF_ADDRESSES             = 0,   //  0 DW for    address fields
+    HCP_PIPE_BUF_ADDR_STATE_CMD_NUMBER_OF_ADDRESSES       = 45,  //           45 address fields
+    HCP_IND_OBJ_BASE_ADDR_STATE_CMD_NUMBER_OF_ADDRESSES   = 11,  // 22 DW for 11 address field
+    HCP_QM_STATE_CMD_NUMBER_OF_ADDRESSES                  = 0,   //  0 DW for    address fields
+    HCP_FQM_STATE_CMD_NUMBER_OF_ADDRESSES                 = 0,   //  0 DW for    address fields
+    HCP_PIC_STATE_CMD_NUMBER_OF_ADDRESSES                 = 0,   //  0 DW for    address fields
+    HCP_REF_IDX_STATE_CMD_NUMBER_OF_ADDRESSES             = 0,   //  0 DW for    address fields
+    HCP_WEIGHTOFFSET_STATE_CMD_NUMBER_OF_ADDRESSES        = 0,   //  0 DW for    address fields
+    HCP_SLICE_STATE_CMD_NUMBER_OF_ADDRESSES               = 0,   //  0 DW for    address fields
+    HCP_PAK_INSERT_OBJECT_CMD_NUMBER_OF_ADDRESSES         = 0,   //  0 DW for    address fields
+    HCP_TILE_STATE_CMD_NUMBER_OF_ADDRESSES                = 0,   //  0 DW for    address fields
+    HCP_BSD_OBJECT_CMD_NUMBER_OF_ADDRESSES                = 0,   //  0 DW for    address fields
+    HCP_VP9_SEGMENT_STATE_CMD_NUMBER_OF_ADDRESSES         = 0,   //  0 DW for    address fields
+    HCP_VP9_PIC_STATE_CMD_NUMBER_OF_ADDRESSES             = 0,   //  0 DW for    address fields
+    HCP_TILE_CODING_COMMAND_NUMBER_OF_ADDRESSES           = 1,   //  0 DW for    address fields
+    HCP_PALETTE_INITIALIZER_STATE_CMD_NUMBER_OF_ADDRESSES = 0,   //  0 DW for    address fields
+
+    VDENC_PIPE_BUF_ADDR_STATE_CMD_NUMBER_OF_ADDRESSES = 12,  // 12 DW for 12 address fields
+    VD_PIPELINE_FLUSH_CMD_NUMBER_OF_ADDRESSES         = 0,   //  0 DW for  0 address fields
+};
+
 static constexpr uint32_t MAX_REF_FRAME_NUM = 15;
 
 struct _MHW_PAR_T(HCP_PIC_STATE)
 {
+    bool     bDecodeInUse                            = false;
     uint16_t framewidthinmincbminus1                 = 0;
     bool     transformSkipEnabled                    = false;
     uint16_t frameheightinmincbminus1                = 0;
@@ -148,12 +216,20 @@ struct _MHW_PAR_T(HCP_PIC_STATE)
     uint8_t  ctbsizeLcusize                          = 0;
     uint8_t  maxtusize                               = 0;
     uint8_t  mintusize                               = 0;
+    uint8_t  maxpcmsize                              = 0;
+    uint8_t  minpcmsize                              = 0;
     bool     sampleAdaptiveOffsetEnabled             = false;
+    bool     pcmEnabledFlag                          = false;
     bool     cuQpDeltaEnabledFlag                    = false;
     uint8_t  diffCuQpDeltaDepth                      = 0;
     bool     pcmLoopFilterDisableFlag                = false;
+    bool     constrainedIntraPredFlag                = false;
+    uint8_t  log2ParallelMergeLevelMinus2            = 0;
+    bool     signDataHidingFlag                      = false;
     bool     weightedPredFlag                        = false;
     bool     weightedBipredFlag                      = false;
+    bool     fieldpic                                = false;
+    bool     bottomfield                             = false;
     bool     ampEnabledFlag                          = false;
     bool     transquantBypassEnableFlag              = false;
     bool     strongIntraSmoothingEnableFlag          = false;
@@ -180,7 +256,9 @@ struct _MHW_PAR_T(HCP_PIC_STATE)
     uint32_t targetSliceSizeInBytes                  = 0;
     bool     tilesEnabledFlag                        = false;
     uint8_t  chromaSubsampling                       = 0;
+    uint8_t  log2Maxtransformskipsize                = 0;
     bool     loopFilterAcrossTilesEnabled            = false;
+    bool     entropyCodingSyncEnabled                = false;
     bool     intratucountbasedrdoqdisable            = false;
     uint16_t rdoqintratuthreshold                    = 0;
     bool     intraBoundaryFilteringDisabledFlag      = false;
@@ -197,6 +275,14 @@ struct _MHW_PAR_T(HCP_PIC_STATE)
     bool     temporalMvPredDisable                   = false;
     uint16_t minframesize                            = 0;
     uint8_t  minframesizeunits                       = 0;
+    uint8_t  ucRecNotFilteredID                      = 0;
+    bool     deblockingFilterOverrideEnabled         = false;
+    bool     ppsDeblockingFilterDisabled             = false;
+    bool     requestCRC                              = false;
+    uint8_t  bNotFirstPass                           = 0;
+    PCODEC_HEVC_EXT_PIC_PARAMS pHevcExtPicParams     = nullptr;
+    PCODEC_HEVC_SCC_PIC_PARAMS pHevcSccPicParams     = nullptr;
+    __MHW_VDBOX_HCP_WRAPPER_EXT(HCP_PIC_STATE_CMDPAR_EXT);
 };
 
 struct _MHW_PAR_T(HCP_SURFACE_STATE)
@@ -204,32 +290,36 @@ struct _MHW_PAR_T(HCP_SURFACE_STATE)
     uint8_t           surfaceStateId       = 0;
     uint32_t          surfacePitchMinus1   = 0;
     SURFACE_FORMAT    surfaceFormat        = SURFACE_FORMAT::SURFACE_FORMAT_PLANAR4208;
-    uint16_t          yOffsetForUCbInPixel = 0;
+    uint32_t          yOffsetForUCbInPixel = 0;
+    uint32_t          defaultAlphaValue    = 0;
     uint16_t          yOffsetForVCr        = 0;
     MOS_MEMCOMP_STATE mmcState             = MOS_MEMCOMP_DISABLED;
     uint8_t           mmcSkipMask          = 0;
     uint32_t          dwCompressionFormat  = 0;
+    uint8_t           refsMmcEnable        = 0;
+    uint8_t           refsMmcType          = 0;
 };
 
 struct _MHW_PAR_T(HCP_PIPE_MODE_SELECT)
 {
     std::function<MOS_STATUS(uint32_t *cmdData)> setProtectionSettings;
 
-    uint8_t codecStandardSelect          = 0;
-    bool    bAdvancedRateControlEnable   = false;
-    bool    bStreamOutEnabled            = false;
-    bool    bBRCEnabled                  = false;
-    bool    pakPiplnStrmoutEnabled       = false;
-    bool    bDeblockerStreamOutEnable    = false;
-    bool    bVdencEnabled                = false;
-    bool    bRdoqEnable                  = false;
-    bool    pakFrmLvlStrmoutEnable       = false;
-    bool    bTileBasedReplayMode         = false;
-    bool    bDynamicScalingEnabled       = false;
-    uint8_t codecSelect                  = 1;
-    uint8_t ucPhaseIndicator             = 0;
-    bool    bHEVCSeparateTileProgramming = false;
-    bool    prefetchDisable              = false;
+    uint8_t  codecStandardSelect                = 0;
+    bool     bAdvancedRateControlEnable         = false;
+    bool     bStreamOutEnabled                  = false;
+    bool     bBRCEnabled                        = false;
+    bool     pakPiplnStrmoutEnabled             = false;
+    bool     bDeblockerStreamOutEnable          = false;
+    bool     bVdencEnabled                      = false;
+    bool     bRdoqEnable                        = false;
+    bool     pakFrmLvlStrmoutEnable             = false;
+    bool     bTileBasedReplayMode               = false;
+    bool     bDynamicScalingEnabled             = false;
+    uint8_t  codecSelect                        = 1;
+    uint8_t  ucPhaseIndicator                   = 0;
+    bool     bHEVCSeparateTileProgramming       = false;
+    bool     prefetchDisable                    = false;
+    uint32_t mediaSoftResetCounterPer1000Clocks = 0;
 
     MHW_VDBOX_HCP_PIPE_WORK_MODE    pipeWorkMode    = MHW_VDBOX_HCP_PIPE_WORK_MODE_LEGACY;
     MHW_VDBOX_HCP_MULTI_ENGINE_MODE multiEngineMode = MHW_VDBOX_HCP_MULTI_ENGINE_MODE_FE_LEGACY;
@@ -264,7 +354,7 @@ struct _MHW_PAR_T(HCP_SLICE_STATE)
     bool     cabacInitFlag                                 = false;
     uint8_t  maxmergeidx                                   = 0;
     uint8_t  collocatedrefidx                              = 0;
-    uint16_t sliceheaderlength                             = 0;
+    uint32_t sliceheaderlength                             = 0;
     bool     cabaczerowordinsertionenable                  = false;
     bool     emulationbytesliceinsertenable                = false;
     bool     tailInsertionEnable                           = false;
@@ -278,12 +368,22 @@ struct _MHW_PAR_T(HCP_SLICE_STATE)
     uint8_t  transformskipNumnonzerocoeffsFactor1          = 0;
     bool     lastSliceInTile                               = false;
     bool     lastSliceInTileColumn                         = false;
-    uint8_t  roundinter                                    = 0;
-    uint8_t  roundintra                                    = 0;
+    uint32_t roundinter                                    = 0;
+    uint32_t roundintra                                    = 0;
+    bool     cuChromaQpOffsetEnable                        = false;
+    bool     bIsNotFirstTile                               = false;  //!< Not first tile in slice
+    uint32_t originalSliceStartCtbX                        = 0;
+    uint32_t originalSliceStartCtbY                        = 0;
+    uint32_t dependentSliceDueToTileSplit                  = 0;
+    uint32_t sliceActYQpOffset                             = 0;
+    uint32_t sliceActCbQpOffset                            = 0;
+    uint32_t sliceActCrQpOffset                            = 0;
+    uint32_t useIntegerMvFlag                              = 0;
 };
 
 struct _MHW_PAR_T(HCP_IND_OBJ_BASE_ADDR_STATE)
 {
+    bool          bDecodeInUse                 = 0;
     PMOS_RESOURCE presDataBuffer               = nullptr;
     uint32_t      dwDataSize                   = 0;
     uint32_t      dwDataOffset                 = 0;
@@ -332,30 +432,39 @@ struct _MHW_PAR_T(HCP_FQM_STATE)
 
 struct _MHW_PAR_T(HCP_BSD_OBJECT)
 {
+    uint32_t bsdDataLength      = 0;
+    uint32_t bsdDataStartOffset = 0;
 };
 
 struct _MHW_PAR_T(HCP_TILE_STATE)
 {
+    uint16_t *pTileColWidth        = nullptr;
+    uint16_t *pTileRowHeight       = nullptr;
+    uint8_t   numTileColumnsMinus1 = 0;
+    uint8_t   numTileRowsMinus1    = 0;
 };
 
 struct _MHW_PAR_T(HCP_REF_IDX_STATE)
 {
-    uint8_t ucList                                                             = 0;
-    uint8_t numRefIdxLRefpiclistnumActiveMinus1                                = 0;
-    uint8_t listEntryLxReferencePictureFrameIdRefaddr07[MAX_REF_FRAME_NUM + 1] = {};
-    uint8_t referencePictureTbValue[MAX_REF_FRAME_NUM + 1]                     = {};
-    bool    longtermreference[MAX_REF_FRAME_NUM + 1]                           = {};
-    bool    fieldPicFlag[MAX_REF_FRAME_NUM + 1]                                = {};
-    bool    bottomFieldFlag[MAX_REF_FRAME_NUM + 1]                             = {};
+    uint8_t  ucList                                                             = 0;
+    uint8_t  ucNumRefForList                                                    = 0;
+    uint8_t  numRefIdxLRefpiclistnumActiveMinus1                                = 0;
+    uint8_t  listEntryLxReferencePictureFrameIdRefaddr07[MAX_REF_FRAME_NUM + 1] = {};
+    uint32_t referencePictureTbValue[MAX_REF_FRAME_NUM + 1]                     = {};
+    bool     longtermreference[MAX_REF_FRAME_NUM + 1]                           = {};
+    bool     fieldPicFlag[MAX_REF_FRAME_NUM + 1]                                = {};
+    bool     bottomFieldFlag[MAX_REF_FRAME_NUM + 1]                             = {};
+    bool     bDummyReference                                                    = false;
+    bool     bDecodeInUse                                                       = false;
 };
 
 struct _MHW_PAR_T(HCP_WEIGHTOFFSET_STATE)
 {
     uint8_t ucList                  = 0;
     char    LumaWeights[2][15]      = {};
-    char    LumaOffsets[2][15]      = {};
+    int16_t LumaOffsets[2][15]      = {};
     char    ChromaWeights[2][15][2] = {};
-    char    ChromaOffsets[2][15][2] = {};
+    int16_t ChromaOffsets[2][15][2] = {};
 };
 
 struct _MHW_PAR_T(HCP_PIPE_BUF_ADDR_STATE)
@@ -537,10 +646,30 @@ struct _MHW_PAR_T(HCP_VP9_PIC_STATE)
     uint32_t bitOffsetForLfLevel               = 0;
     uint32_t vdencPakOnlyPass                  = 0;
     uint32_t bitOffsetForFirstPartitionSize    = 0;
+    uint32_t dWordLength                       = 0;
+    bool     bDecodeInUse                      = false;
 };
 
 struct _MHW_PAR_T(HCP_VP9_SEGMENT_STATE)
 {
+    uint32_t segmentId                         = 0;
+    uint32_t segmentSkipped                    = 0;
+    uint32_t segmentReference                  = 0;
+    uint32_t segmentReferenceEnabled           = 0;
+    uint32_t filterLevelRef0Mode0              = 0;
+    uint32_t filterLevelRef0Mode1              = 0;
+    uint32_t filterLevelRef1Mode0              = 0;
+    uint32_t filterLevelRef1Mode1              = 0;
+    uint32_t filterLevelRef2Mode0              = 0;
+    uint32_t filterLevelRef2Mode1              = 0;
+    uint32_t filterLevelRef3Mode0              = 0;
+    uint32_t filterLevelRef3Mode1              = 0;
+    uint32_t lumaDcQuantScaleDecodeModeOnly    = 0;
+    uint32_t lumaAcQuantScaleDecodeModeOnly    = 0;
+    uint32_t chromaDcQuantScaleDecodeModeOnly  = 0;
+    uint32_t chromaAcQuantScaleDecodeModeOnly  = 0;
+    uint32_t segmentQindexDeltaEncodeModeOnly  = 0;
+    uint32_t segmentLfLevelDeltaEncodeModeOnly = 0;
 };
 
 struct _MHW_PAR_T(HEVC_VP9_RDOQ_STATE)
@@ -577,6 +706,9 @@ struct _MHW_PAR_T(HCP_TILE_CODING)
 
 struct _MHW_PAR_T(HCP_PALETTE_INITIALIZER_STATE)
 {
+    uint8_t  predictorPaletteSize            = 0;
+    uint16_t predictorPaletteEntries[3][128] = {};
+    uint32_t hevcSccPaletteSize              = 0;
 };
 
 }  // namespace hcp

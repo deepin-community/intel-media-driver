@@ -30,7 +30,7 @@
 #define __VPHAL_RENDER_SFC_BASE_H__
 
 #include "mhw_sfc.h"
-#include "renderhal.h"
+#include "renderhal_legacy.h"
 #include "vphal.h"
 #include "vphal_render_common.h"
 #include "vphal_render_vebox_iecp.h"
@@ -195,6 +195,16 @@ public:
         PVPHAL_SURFACE              pSrc,
         PVPHAL_SURFACE              pRenderTarget,
         PCVPHAL_RENDER_PARAMS       pcRenderParams);
+
+    //!
+    //! \brief    check whether SFC Write have offset which may hit compresed write limitation
+    //! \details  check whether SFC Write have offset which may hit compresed write limitation
+    //! \param    [in] pRenderTarget
+    //!           Pointer to RenderTarget
+    //! \return   the output pipe mode
+    //!
+    virtual bool IsSFCUncompressedWriteNeeded(
+        PVPHAL_SURFACE              pRenderTarget);
 
     //!
     //! \brief    Check if SFC is feasible to generate output
@@ -601,6 +611,7 @@ protected:
 
     VPHAL_SFC_RENDER_DATA           m_renderData = {};                          //!< Transient Render data populated for every BLT call
 
+    MediaUserSettingSharedPtr m_userSettingPtr = nullptr;                       //!< usersettingInstance
 };
 #else
 // A dummy class that does nothing when SFC is not supported

@@ -27,8 +27,8 @@
 #ifndef __BITSTREAM_WRITER_H__
 #define __BITSTREAM_WRITER_H__
 
+#include "media_class_trace.h"
 #include <map>
-#include <assert.h>
 
 typedef unsigned char  mfxU8;
 typedef char           mfxI8;
@@ -48,7 +48,6 @@ typedef void * mfxThreadTask;
 typedef char   mfxChar;
 
 constexpr mfxU8  MAX_DPB_SIZE               = 15;
-constexpr mfxU8  IDX_INVALID                = 0xff;
 constexpr mfxU8  HW_SURF_ALIGN_W            = 16;
 constexpr mfxU8  HW_SURF_ALIGN_H            = 16;
 constexpr mfxU16 MAX_SLICES                 = 600;  // conforms to level 6 limits
@@ -131,6 +130,8 @@ public:
     virtual void PutBit(mfxU32 b)            = 0;
     virtual void PutUE(mfxU32 b)             = 0;
     virtual void PutSE(mfxI32 b)             = 0;
+
+MEDIA_CLASS_DEFINE_END(IBsWriter)
 };
 
 class BitstreamWriter
@@ -187,6 +188,8 @@ private:
     mfxU32                    m_BinCountsInNALunits;
     bool                      m_firstBitFlag;
     std::map<mfxU32, mfxU32> *m_pInfo = nullptr;
+
+MEDIA_CLASS_DEFINE_END(BitstreamWriter)
 };
 
 #endif

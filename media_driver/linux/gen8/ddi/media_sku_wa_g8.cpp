@@ -45,7 +45,8 @@ static struct LinuxCodecInfo bdwCodecInfo =
 
 static bool InitBdwMediaSku(struct GfxDeviceInfo *devInfo,
                              MediaFeatureTable *skuTable,
-                             struct LinuxDriverInfo *drvInfo)
+                             struct LinuxDriverInfo *drvInfo,
+                             MediaUserSettingSharedPtr userSettingPtr)
 {
     if ((devInfo == nullptr) || (skuTable == nullptr) || (drvInfo == nullptr))
     {
@@ -104,6 +105,8 @@ static bool InitBdwMediaSku(struct GfxDeviceInfo *devInfo,
     MEDIA_WR_SKU(skuTable, FtrSliceShutdownOverride, 1);
     MEDIA_WR_SKU(skuTable, FtrTileY, 1);
 
+    MEDIA_WR_SKU(skuTable, FtrUseSwSwizzling, 1);
+
     return true;
 }
 
@@ -126,6 +129,7 @@ static bool InitBdwMediaWa(struct GfxDeviceInfo *devInfo,
     MEDIA_WR_WA(waTable, WaEnableDscale, 1);
     MEDIA_WR_WA(waTable, Wa16KInputHeightNV12Planar420, 1);
     MEDIA_WR_WA(waTable, WaDisableCodecMmc, 1);
+    MEDIA_WR_WA(waTable, WaDisableSetObjectCapture, 0);
     return true;
 }
 

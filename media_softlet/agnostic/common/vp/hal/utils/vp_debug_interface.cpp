@@ -28,11 +28,9 @@
 #include "vp_debug_interface.h"
 #if USE_VP_DEBUG_TOOL
 #include "vp_debug_config_manager.h"
-#include "vphal.h"
 
 VpDebugInterface::VpDebugInterface()
 {
-    memset(&m_currPic, 0, sizeof(CODEC_PICTURE));
     memset(m_fileName, 0, sizeof(m_fileName));
     memset(m_path, 0, sizeof(m_path));
 }
@@ -60,6 +58,7 @@ MOS_STATUS VpDebugInterface::Initialize(PMOS_INTERFACE pOsInterface)
     VP_DEBUG_CHK_NULL_RETURN(pOsInterface);
     m_osInterface = pOsInterface;
 
+    m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
     //dump loctaion is vpdump
     MediaDebugInterface::SetOutputFilePath();
 
@@ -154,14 +153,14 @@ MOS_STATUS VpDebugInterface::DumpVpSurfaceArray(
                Location);
 }
 
-MOS_USER_FEATURE_VALUE_ID VpDebugInterface::SetOutputPathKey()
+std::string VpDebugInterface::SetOutputPathKey()
 {
     VP_FUNC_CALL();
 
-    return __VPHAL_DBG_SURF_DUMP_OUTFILE_KEY_NAME_ID;
+    return __VPHAL_DBG_SURF_DUMP_OUTFILE_KEY_NAME;
 }
 
-MOS_USER_FEATURE_VALUE_ID VpDebugInterface::InitDefaultOutput()
+std::string VpDebugInterface::InitDefaultOutput()
 {
     VP_FUNC_CALL();
 

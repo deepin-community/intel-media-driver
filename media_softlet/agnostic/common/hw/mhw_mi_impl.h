@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020, Intel Corporation
+* Copyright (c) 2020-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -39,6 +39,15 @@ namespace mhw
 {
 namespace mi
 {
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER0_LO_OFFSET_NODE_1_INIT  = 0x1C0600;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER0_HI_OFFSET_NODE_1_INIT  = 0x1C0604;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER4_LO_OFFSET_NODE_1_INIT  = 0x1C0620;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER4_HI_OFFSET_NODE_1_INIT  = 0x1C0624;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER11_LO_OFFSET_NODE_1_INIT = 0x1C0658;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER11_HI_OFFSET_NODE_1_INIT = 0x1C065C;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER12_LO_OFFSET_NODE_1_INIT = 0x1C0660;
+static constexpr uint32_t GENERAL_PURPOSE_REGISTER12_HI_OFFSET_NODE_1_INIT = 0x1C0664;
+
 template <typename cmd_t>
 class Impl : public Itf, public mhw::Impl
     {
@@ -155,28 +164,161 @@ public:
         return MOS_STATUS_SUCCESS;
     }
 
+    MOS_STATUS AddMiBatchBufferEndOnly(
+        PMOS_COMMAND_BUFFER cmdBuffer,
+        PMHW_BATCH_BUFFER   batchBuffer) override
+    {
+        MHW_FUNCTION_ENTER;
+
+        if (cmdBuffer == nullptr && batchBuffer == nullptr)
+        {
+            MHW_ASSERTMESSAGE("There was no valid buffer to add the HW command to.");
+            return MOS_STATUS_NULL_POINTER;
+        }
+
+        // This WA does not apply for video or other engines, render requirement only
+        bool isRender =
+            MOS_RCS_ENGINE_USED(this->m_osItf->pfnGetGpuContext(this->m_osItf));
+
+        // Mhw_CommonMi_AddMiBatchBufferEnd() is designed to handle both 1st level
+        // and 2nd level BB.  It inserts MI_BATCH_BUFFER_END in both cases.
+        // However, since the 2nd level BB always returens to the 1st level BB and
+        // no chained BB scenario in Media, Epilog is only needed in the 1st level BB.
+        // Therefre, here only the 1st level BB case needs an Epilog inserted.
+        if (cmdBuffer && cmdBuffer->is1stLvlBB)
+        {
+            MHW_MI_CHK_STATUS(m_cpInterface->AddEpilog(this->m_osItf, cmdBuffer));
+        }
+
+        auto &params = MHW_GETPAR_F(MI_BATCH_BUFFER_END)();
+        params       = {};
+        MHW_ADDCMD_F(MI_BATCH_BUFFER_END)
+        (cmdBuffer, batchBuffer);
+
+        if (!cmdBuffer)  // Don't need BB not nullptr chk b/c if both are nullptr it won't get this far
+        {
+#if (_DEBUG || _RELEASE_INTERNAL)
+            batchBuffer->iLastCurrent = batchBuffer->iCurrent;
+#endif
+        }
+
+        // Send End Marker command
+        if (this->m_osItf->pfnIsSetMarkerEnabled(this->m_osItf) && cmdBuffer && cmdBuffer->is1stLvlBB)
+        {
+            PMOS_RESOURCE resMarker = nullptr;
+            resMarker               = this->m_osItf->pfnGetMarkerResource(this->m_osItf);
+            MHW_MI_CHK_NULL(resMarker);
+
+            if (isRender)
+            {
+                // Send pipe_control to get the timestamp
+                auto &params            = MHW_GETPAR_F(PIPE_CONTROL)();
+                params                  = {};
+                params.presDest         = resMarker;
+                params.dwResourceOffset = sizeof(uint64_t);
+                params.dwPostSyncOp     = MHW_FLUSH_WRITE_TIMESTAMP_REG;
+                params.dwFlushMode      = MHW_FLUSH_WRITE_CACHE;
+                MHW_ADDCMD_F(PIPE_CONTROL)
+                (cmdBuffer, batchBuffer);
+            }
+            else
+            {
+                // Send flush_dw to get the timestamp
+                auto &params             = MHW_GETPAR_F(MI_FLUSH_DW)();
+                params                   = {};
+                params.pOsResource       = resMarker;
+                params.dwResourceOffset  = sizeof(uint64_t);
+                params.postSyncOperation = MHW_FLUSH_WRITE_TIMESTAMP_REG;
+                params.bQWordEnable      = 1;
+                MHW_ADDCMD_F(MI_FLUSH_DW)
+                (cmdBuffer, batchBuffer);
+            }
+
+            if (!this->m_osItf->apoMosEnabled)
+            {
+                MOS_SafeFreeMemory(resMarker);
+            }
+        }
+
+        return MOS_STATUS_SUCCESS;
+    }
+
+    MOS_STATUS AddBatchBufferEndInsertionFlag(MOS_COMMAND_BUFFER &constructedCmdBuf) override
+    {
+        MHW_FUNCTION_ENTER;
+
+        typename cmd_t::MI_BATCH_BUFFER_END_CMD cmd;
+
+        MHW_CHK_NULL_RETURN(constructedCmdBuf.pCmdPtr);
+        *((typename cmd_t::MI_BATCH_BUFFER_END_CMD *)(constructedCmdBuf.pCmdPtr)) = cmd;
+
+        return MOS_STATUS_SUCCESS;
+    }
+
     MHW_MI_MMIOREGISTERS* GetMmioRegisters() override
     {
         return &m_mmioRegisters;
     }
 
-    virtual MOS_STATUS SetCpInterface(MhwCpInterface* cpInterface)
+    virtual MOS_STATUS SetCpInterface(MhwCpInterface *cpInterface, std::shared_ptr<mhw::mi::Itf> m_miItf) override
     {
         m_cpInterface = cpInterface;
+        MHW_CHK_NULL_RETURN(m_cpInterface);
+        m_cpInterface->RegisterMiInterfaceNext(m_miItf);
         return MOS_STATUS_SUCCESS;
     }
+
+    virtual uint32_t GetMmioInterfaces(MHW_MMIO_REGISTER_OPCODE opCode) override = 0;
+
+    MOS_STATUS AddProtectedProlog(MOS_COMMAND_BUFFER *cmdBuffer) override
+    {
+        MHW_MI_CHK_NULL(cmdBuffer);
+
+        MHW_MI_CHK_STATUS(m_cpInterface->AddProlog(this->m_osItf, cmdBuffer));
+        MHW_MI_CHK_STATUS(m_cpInterface->AddCheckForEarlyExit(this->m_osItf, cmdBuffer));
+
+        return MOS_STATUS_SUCCESS;
+    }
+
+    MOS_STATUS AddVeboxMMIOPrologCmd(
+        PMOS_COMMAND_BUFFER cmdBuffer) override
+    {
+        MOS_STATUS eStatus          = MOS_STATUS_SUCCESS;
+        uint64_t   auxTableBaseAddr = 0;
+
+        MHW_CHK_NULL_RETURN(cmdBuffer);
+        MHW_CHK_NULL_RETURN(this->m_osItf);
+
+        auxTableBaseAddr = this->m_osItf->pfnGetAuxTableBaseAddr(this->m_osItf);
+
+        if (auxTableBaseAddr)
+        {
+            auto &par      = MHW_GETPAR_F(MI_LOAD_REGISTER_IMM)();
+            par            = {};
+            par.dwData     = (auxTableBaseAddr & 0xffffffff);
+            par.dwRegister = GetMmioInterfaces(mhw::mi::MHW_MMIO_VE0_AUX_TABLE_BASE_LOW);
+            MHW_ADDCMD_F(MI_LOAD_REGISTER_IMM)(cmdBuffer);
+
+            par.dwData     = ((auxTableBaseAddr >> 32) & 0xffffffff);
+            par.dwRegister = GetMmioInterfaces(mhw::mi::MHW_MMIO_VE0_AUX_TABLE_BASE_HIGH);
+            MHW_ADDCMD_F(MI_LOAD_REGISTER_IMM)(cmdBuffer);
+        }
+
+        return eStatus;
+    }
+
 protected:
     using base_t = Itf;
 
     MHW_MI_MMIOREGISTERS    m_mmioRegisters = {};
     MhwCpInterface          *m_cpInterface  = nullptr;
 
+public:
     Impl(PMOS_INTERFACE osItf) : mhw::Impl(osItf)
     {
         MHW_FUNCTION_ENTER;
     }
 
-public:
     _MHW_SETCMD_OVERRIDE_DECL(MI_SEMAPHORE_WAIT)
     {
         _MHW_SETCMD_CALLBASE(MI_SEMAPHORE_WAIT);
@@ -474,6 +616,60 @@ public:
         return MOS_STATUS_SUCCESS;
     }
 
+    _MHW_SETCMD_OVERRIDE_DECL(MI_COPY_MEM_MEM)
+    {
+        _MHW_SETCMD_CALLBASE(MI_COPY_MEM_MEM);
+
+        MHW_MI_CHK_NULL(this->m_currentCmdBuf);
+        MHW_MI_CHK_NULL(params.presSrc);
+        MHW_MI_CHK_NULL(params.presDst);
+
+        cmd.DW0.UseGlobalGttDestination = IsGlobalGttInUse();
+        cmd.DW0.UseGlobalGttSource      = IsGlobalGttInUse();
+
+        MHW_RESOURCE_PARAMS resourceParams = {};
+        resourceParams.presResource     = params.presDst;
+        resourceParams.dwOffset         = params.dwDstOffset;
+        resourceParams.pdwCmd           = cmd.DW1_2.Value;
+        resourceParams.dwLocationInCmd  = _MHW_CMD_DW_LOCATION(DW1_2.Value);
+        resourceParams.dwLsbNum         = MHW_COMMON_MI_GENERAL_SHIFT;
+        resourceParams.HwCommandType    = MOS_MI_COPY_MEM_MEM;
+        resourceParams.bIsWritable      = true;
+
+        MHW_MI_CHK_STATUS(AddResourceToCmd(
+            this->m_osItf,
+            this->m_currentCmdBuf,
+            &resourceParams));
+
+        resourceParams = {};
+        resourceParams.presResource     = params.presSrc;
+        resourceParams.dwOffset         = params.dwSrcOffset;
+        resourceParams.pdwCmd           = cmd.DW3_4.Value;
+        resourceParams.dwLocationInCmd  = _MHW_CMD_DW_LOCATION(DW3_4.Value);
+        resourceParams.dwLsbNum         = MHW_COMMON_MI_GENERAL_SHIFT;
+        resourceParams.HwCommandType    = MOS_MI_COPY_MEM_MEM;
+        resourceParams.bIsWritable      = false;
+
+        MHW_MI_CHK_STATUS(AddResourceToCmd(
+            this->m_osItf,
+            this->m_currentCmdBuf,
+            &resourceParams));
+
+        return MOS_STATUS_SUCCESS;
+    }
+
+    _MHW_SETCMD_OVERRIDE_DECL(MFX_WAIT)
+    {
+        _MHW_SETCMD_CALLBASE(MFX_WAIT);
+
+        cmd.DW0.MfxSyncControlFlag = params.iStallVdboxPipeline;
+
+        // set the protection bit based on CP status
+        MHW_MI_CHK_STATUS(m_cpInterface->SetProtectionSettingsForMfxWait(this->m_osItf, &cmd));
+
+        return MOS_STATUS_SUCCESS;
+    }
+MEDIA_CLASS_DEFINE_END(mhw__mi__Impl)
 };
 }  // namespace render
 }  // namespace mhw

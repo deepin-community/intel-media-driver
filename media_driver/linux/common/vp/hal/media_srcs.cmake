@@ -1,4 +1,4 @@
-# Copyright (c) 2017-2021, Intel Corporation
+# Copyright (c) 2017-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -21,13 +21,12 @@
 set(TMP_SOURCES_
     ${CMAKE_CURRENT_LIST_DIR}/vphal_common_specific.c
     ${CMAKE_CURRENT_LIST_DIR}/vphal_render_common_specific.c
-    ${CMAKE_CURRENT_LIST_DIR}/skuwa_dump_specific.c
 )
 
 set(TMP_HEADERS_ "")
 
-set(SOURCES_
-    ${SOURCES_}
+set(VP_SOURCES_
+    ${VP_SOURCES_}
     ${TMP_SOURCES_}
 )
 

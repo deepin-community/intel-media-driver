@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017, Intel Corporation
+* Copyright (c) 2017-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -163,7 +163,7 @@ int32_t HalCm_InitDumpCommandBuffer(PCM_HAL_STATE state)
     }
     if (userFeatureValueData.bData)
     {
-        eStatus = MOS_CreateDirectory(fileName);
+        eStatus = MosUtilities::MosCreateDirectory(fileName);
         if (eStatus != MOS_STATUS_SUCCESS)
         {
             MOS_OS_NORMALMESSAGE("Failed to create output directory. Status = %d", eStatus);
@@ -242,7 +242,7 @@ int32_t HalCm_DumpCommadBuffer(PCM_HAL_STATE state, PMOS_COMMAND_BUFFER cmdBuffe
     // write command buffer dwords.
     bytesWritten += HalCm_CopyHexDwordLine(outputBuffer, sizeToAllocate - bytesWritten,
                                           (uint32_t *)cmdBuffer->pCmdBase + offset, numberOfDwords);
-    MOS_OS_CHK_STATUS(MOS_WriteFileFromPtr((const char *)fileName, outputBuffer, bytesWritten));
+    MOS_OS_CHK_STATUS(MosUtilities::MosWriteFileFromPtr((const char *)fileName, outputBuffer, bytesWritten));
     commandBufferNumber++;
 
     //Record command buffer dump counter
@@ -301,7 +301,7 @@ int32_t HalCm_InitDumpCurbeData(PCM_HAL_STATE state)
     {
         GetLogFileLocation(HALCM_CURBE_DATA_OUTPUT_DIR, fileName,
                            state->osInterface->pOsContext);
-        eStatus = MOS_CreateDirectory(fileName);
+        eStatus = MosUtilities::MosCreateDirectory(fileName);
         if (eStatus != MOS_STATUS_SUCCESS)
         {
             MOS_OS_NORMALMESSAGE("Failed to create curbe data output directory. Status = %d", eStatus);
@@ -350,13 +350,14 @@ int32_t HalCm_DumpCurbeData(PCM_HAL_STATE state)
     // write curbe data dwords.
     if (state->dshEnabled)
     {
-        numberOfDwords = stateHeap->pCurMediaState->pDynamicState->Curbe.dwSize / sizeof(uint32_t);
+        PRENDERHAL_MEDIA_STATE_LEGACY pCurMediaStateLegacy = (PRENDERHAL_MEDIA_STATE_LEGACY)stateHeap->pCurMediaState;
+        numberOfDwords = pCurMediaStateLegacy->pDynamicState->Curbe.dwSize / sizeof(uint32_t);
         sizeToAllocate = numberOfDwords*SIZE_OF_DWORD_PLUS_ONE+2;
         outputBuffer = (char *)MOS_AllocAndZeroMemory(sizeToAllocate);
-        curbeData = (uint32_t *)MOS_AllocAndZeroMemory(stateHeap->pCurMediaState->pDynamicState->Curbe.dwSize);
-        stateHeap->pCurMediaState->pDynamicState->memoryBlock.ReadData(curbeData,
-            stateHeap->pCurMediaState->pDynamicState->Curbe.dwOffset,
-            stateHeap->pCurMediaState->pDynamicState->Curbe.dwSize);
+        curbeData = (uint32_t *)MOS_AllocAndZeroMemory(pCurMediaStateLegacy->pDynamicState->Curbe.dwSize);
+        pCurMediaStateLegacy->pDynamicState->memoryBlock.ReadData(curbeData,
+            pCurMediaStateLegacy->pDynamicState->Curbe.dwOffset,
+            pCurMediaStateLegacy->pDynamicState->Curbe.dwSize);
 
         bytesWritten += HalCm_CopyHexDwordLine(outputBuffer,
                           sizeToAllocate - bytesWritten,
@@ -374,7 +375,7 @@ int32_t HalCm_DumpCurbeData(PCM_HAL_STATE state)
                           numberOfDwords);
     }
 
-    MOS_OS_CHK_STATUS(MOS_WriteFileFromPtr((const char *)fileName, outputBuffer, bytesWritten));
+    MOS_OS_CHK_STATUS(MosUtilities::MosWriteFileFromPtr((const char *)fileName, outputBuffer, bytesWritten));
 
     curbeDataNumber++;
 
@@ -471,7 +472,7 @@ int32_t HalCm_InitDumpSurfaceState(PCM_HAL_STATE state)
     }
     if (userFeatureValueData.bData)
     {
-        eStatus = MOS_CreateDirectory(fileName);
+        eStatus = MosUtilities::MosCreateDirectory(fileName);
         if (eStatus != MOS_STATUS_SUCCESS)
         {
             MOS_OS_NORMALMESSAGE("Failed to create output directory. Status = %d", eStatus);
@@ -550,7 +551,7 @@ int32_t HalCm_DumpSurfaceState(PCM_HAL_STATE state,  int offsetSurfaceState, siz
     }
 
     //Write to file
-    MOS_OS_CHK_STATUS(MOS_WriteFileFromPtr((const char *)filename, surfaceoutputBuffer, 
+    MOS_OS_CHK_STATUS(MosUtilities::MosWriteFileFromPtr((const char *)filename, surfaceoutputBuffer, 
                       surfacebytesWritten));
 
     surfacestatedumpNumber++;
@@ -608,7 +609,7 @@ int32_t HalCm_InitDumpInterfaceDescriporData(PCM_HAL_STATE state)
     }
     if (userFeatureValueData.bData)
     {
-        eStatus = MOS_CreateDirectory(fileName);
+        eStatus = MosUtilities::MosCreateDirectory(fileName);
         if (eStatus != MOS_STATUS_SUCCESS)
         {
             MOS_OS_NORMALMESSAGE("Failed to create output directory. Status = %d", eStatus);
@@ -667,13 +668,14 @@ int32_t HalCm_DumpInterfaceDescriptorData(PCM_HAL_STATE state)
     // write interface descriptor data dwords.
     if (state->dshEnabled)
     {
-        numberOfDwords = stateHeap->pCurMediaState->pDynamicState->MediaID.dwSize / sizeof(uint32_t);
+        PRENDERHAL_MEDIA_STATE_LEGACY pCurMediaStateLegacy = (PRENDERHAL_MEDIA_STATE_LEGACY)stateHeap->pCurMediaState;
+        numberOfDwords = pCurMediaStateLegacy->pDynamicState->MediaID.dwSize / sizeof(uint32_t);
         sizeToAllocate = numberOfDwords * SIZE_OF_DWORD_PLUS_ONE + 2;
         outputBuffer = (char *)MOS_AllocAndZeroMemory(sizeToAllocate);
-        InterfaceDescriptorData = (uint32_t *)MOS_AllocAndZeroMemory(stateHeap->pCurMediaState->pDynamicState->MediaID.dwSize);
-        stateHeap->pCurMediaState->pDynamicState->memoryBlock.ReadData(InterfaceDescriptorData,
-            stateHeap->pCurMediaState->pDynamicState->MediaID.dwOffset,
-            stateHeap->pCurMediaState->pDynamicState->MediaID.dwSize);
+        InterfaceDescriptorData = (uint32_t *)MOS_AllocAndZeroMemory(pCurMediaStateLegacy->pDynamicState->MediaID.dwSize);
+        pCurMediaStateLegacy->pDynamicState->memoryBlock.ReadData(InterfaceDescriptorData,
+            pCurMediaStateLegacy->pDynamicState->MediaID.dwOffset,
+            pCurMediaStateLegacy->pDynamicState->MediaID.dwSize);
 
         bytesWritten += HalCm_CopyHexDwordLine(outputBuffer,
             sizeToAllocate - bytesWritten,
@@ -691,7 +693,7 @@ int32_t HalCm_DumpInterfaceDescriptorData(PCM_HAL_STATE state)
             numberOfDwords);
     }
 
-    MOS_OS_CHK_STATUS(MOS_WriteFileFromPtr((const char *)fileName, outputBuffer, bytesWritten));
+    MOS_OS_CHK_STATUS(MosUtilities::MosWriteFileFromPtr((const char *)fileName, outputBuffer, bytesWritten));
 
     IDDNumber++;
     if (!state->enableIDDumpTimeStamp)

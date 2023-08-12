@@ -27,11 +27,15 @@
 #ifndef __MOS_CONTEXT_NEXT_H__
 #define __MOS_CONTEXT_NEXT_H__
 
-#include "mos_os_next.h"
-#include "mos_cmdbufmgr_next.h" 
+#include "mos_os.h"
 #include "mos_gpucontextmgr_next.h"
+#if !EMUL
+#include "mos_cmdbufmgr_next.h" 
 #include "mos_decompression.h"
+#endif
 #include "mos_mediacopy.h"
+
+class MosOcaRTLogMgr;
 
 class OsContextNext
 {
@@ -40,6 +44,26 @@ protected:
     //! \brief Constructor for the OsContextNext
     //!
     OsContextNext(){};
+
+    //!
+    //! \brief    Interface for initializing NULL Hardware.
+    //! \details  Interface for initializing NULL Hardware.
+    //! \param    [in] osContext
+    //!           Pointer to OS context.
+    //! \param    [in] osDeviceContext
+    //!           Pointer to OS device context.
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //!
+    MOS_STATUS NullHwInit(MOS_CONTEXT_HANDLE osContext);
+
+    //!
+    //! \brief    Destroy NULL Hardware.
+    //! \details  Destroy NULL Hardware.
+    //! \return   MOS_STATUS
+    //!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+    //!
+    MOS_STATUS NullHwDestroy();
 
 public:
     //!
@@ -108,6 +132,19 @@ public:
     bool GetOsContextValid() { return m_osContextValid; };
 
     //!
+    //! \brief  Set Null Hw enabled flag
+    //! \param  [in] isNullHwEnabled
+    //!         Flag to indicate if Null Hw is enabled. 
+    //!
+    void SetNullHwIsEnabled(bool isNullHwEnabled) { m_nullHwIsEnabled = isNullHwEnabled; }
+
+    //!
+    //! \brief  Return Null Hw enabled flag
+    //! \return true if Null Hw is enabled, false if not enabled
+    //!
+    bool GetNullHwIsEnabled() { return m_nullHwIsEnabled; }
+
+    //!
     //! \brief  Get GPU context manager of the device
     //! \return GPU context manager
     //!
@@ -129,10 +166,12 @@ public:
     //! \brief  Get MosDecompression
     //! \return ptr to MosDecompression
     //!
+#if !EMUL
     MosDecompression *GetMosDecompression()
     {
         return m_mosDecompression;
     }
+#endif
 
     //!
     //! \brief  Get MosMediaCopy
@@ -190,6 +229,31 @@ public:
     //!
     bool IsAynchronous() { return m_aynchronousDevice; }
 
+    //!
+    //! \brief  Determine whether pooling resource is enabled
+    //! \return true if pooling resource is enabled, false otherwise
+    //!
+    bool IsPoolingResourceEnabled() { return m_resourcePooling; }
+
+    //!
+    //! \brief  Set oca rtlog resource
+    //! \return Set oca rtlog resource and return success
+    //!
+    MOS_STATUS SetRtLogRes(PMOS_RESOURCE ocaRTLogResource)
+    {
+        m_ocaRTLogResource = ocaRTLogResource;
+        return MOS_STATUS_SUCCESS;
+    }
+
+    //!
+    //! \brief  Get OcaRTLogResource
+    //! \return ptr to OcaRTLogResource
+    //!
+    PMOS_RESOURCE GetOcaRTLogResource()
+    {
+        return m_ocaRTLogResource;
+    }
+
 protected:
     //!
     //! \brief  Destory the OS ContextNext Object, internal function, called by cleanup
@@ -204,6 +268,7 @@ protected:
     CmdBufMgrNext                  *m_cmdBufMgr         = nullptr; //!> Cmd buffer manager of the device
     GMM_CLIENT_CONTEXT             *m_gmmClientContext  = nullptr; //!> GMM client context of the device
 
+    PMOS_RESOURCE                   m_ocaRTLogResource  = nullptr;
     uint32_t                        m_dumpframeNum = 0;             // For use when dump its compressed surface, override the frame number given from MediaVeboxDecompState
     char                            m_dumpLoc[MAX_PATH] = {0};       // For use when dump its compressed surface, to distinguish each loc's pre/post decomp
 
@@ -226,8 +291,8 @@ protected:
     //! \brief  Flag to mark whether the os context is valid
     bool                            m_osContextValid =  false;
 
-    //! \brief  Whether the current driver is of 64 bit
-    bool                            m_64bit = false;
+    //! \brief  Flag to mark whether Null Hw is enabled
+    bool                            m_nullHwIsEnabled = false;
 
     //! \brief  Whether or not need deallocation on exit
     bool                            m_deallocateOnExit = false;
@@ -251,12 +316,18 @@ protected:
     bool                            m_noGfxMemoryNeeded = false;
 
     //! \brief  the ptr to mos decompression module
+#if !EMUL
     MosDecompression                *m_mosDecompression = nullptr;
+#endif
 
     //! \brief the ptr to mos media copy module
     MosMediaCopy                    *m_mosMediaCopy = nullptr;
 
     //!< Indicate if this device is working in aync mode or normal mode
     bool                            m_aynchronousDevice = false;
+
+    //! \brief is pooled resource is supported
+    bool                            m_resourcePooling = false;
+MEDIA_CLASS_DEFINE_END(OsContextNext)
 };
 #endif // #ifndef __MOS_CONTEXTNext_NEXT_H__

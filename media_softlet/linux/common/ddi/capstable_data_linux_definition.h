@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,10 +28,7 @@
 #define __CAPSTABLE_DATA_LINUX_DEFINITION_H__
 
 #include "va/va.h"
-#include "media_libva_common.h"
-#include "media_libva_util.h"
-#include "media_libva.h"
-#include "media_libva_vp.h"
+#include "media_libva_util_next.h"
 
 #include "hwinfo_linux.h"
 #include "linux_system_info.h"
@@ -46,9 +43,8 @@
 struct VASurfaceAttribInfo
 {
     VASurfaceAttribType type1;
-    VAGenericValueType  type2;
     uint32_t            flags;
-    int32_t             value;
+    VAGenericValue      value;
 };
 
 //!
@@ -70,7 +66,35 @@ struct ComponentData
             uint32_t encryptType; //!< Decode entrypoint Type
             uint32_t processType; //!< Decode processing Type
         };
+        struct // Cp usage
+        {
+            uint32_t sessionMode;   //!< Session mode
+            uint32_t sessionType;   //!< Session type
+            uint32_t algorithm;     //!< Algorithm
+            uint32_t blockSize;     //!< Block size
+            uint32_t counterMode;   //!< Counter mode
+            uint32_t sampleType;    //!< Sample type
+            uint32_t usage;         //!< Usage
+        };
     } data;
+
+    ComponentData()
+    {
+        data.sessionMode = data.sessionType = data.algorithm = data.blockSize = data.counterMode = data.sampleType = data.usage = 0;
+    }
+    ComponentData(uint32_t rcMode, uint32_t feiFunction)
+    {
+        data.rcMode = rcMode; data.feiFunction = feiFunction;
+    }
+    ComponentData(uint32_t sessionMode, uint32_t sessionType, uint32_t algorithm, uint32_t blockSize, uint32_t counterMode, uint32_t sampleType, uint32_t usage)
+    {
+        data.sessionMode = sessionMode; data.sessionType = sessionType; data.algorithm = algorithm; data.blockSize = blockSize;
+        data.counterMode = counterMode; data.sampleType  = sampleType;  data.usage     = usage;
+    }
+    ComponentData(uint32_t sliceMode, uint32_t encryptType, uint32_t processType)
+    {
+        data.sliceMode = sliceMode; data.encryptType = encryptType; data.processType = processType;
+    }
 };
 
 typedef std::vector<VASurfaceAttribInfo>  ProfileSurfaceAttribInfo;
@@ -79,19 +103,19 @@ typedef std::vector<VAConfigAttrib>       AttribList;
 
 struct EntrypointData
 {
-    AttribList                *attribList;
-    ConfigDataList            *configDataList;
-    ProfileSurfaceAttribInfo  *surfaceAttrib;
+    const AttribList                *attribList;
+    const ConfigDataList            *configDataList;
+    const ProfileSurfaceAttribInfo  *surfaceAttrib;
 };
 
-typedef std::map<VAEntrypoint, EntrypointData*>   EntrypointMap;
-typedef std::map<VAProfile,    EntrypointMap*>    ProfileMap;
-typedef std::map<uint32_t,     VAImageFormat*>    ImgTable;
+typedef std::map<const VAEntrypoint, const EntrypointData*>   EntrypointMap;
+typedef std::map<const VAProfile,    const EntrypointMap*>    ProfileMap;
+typedef std::map<const uint32_t,     const VAImageFormat*>    ImgTable;
 
 struct CapsData
 {
-    ProfileMap   *profileMap;
-    ImgTable     *imgTbl;
+    const ProfileMap   *profileMap;
+    const ImgTable     *imgTbl;
 };
 
 #endif //__CAPSTABLE_DATA_LINUX_DEFINITION_H__

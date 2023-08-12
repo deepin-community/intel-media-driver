@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2020, Intel Corporation
+* Copyright (c) 2017-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -1515,8 +1515,8 @@ MOS_STATUS CodechalEncodeCscDs::CscKernel(
             CODECHAL_ENCODE_CHK_STATUS_RETURN(m_miInterface->AddMiSemaphoreWaitCmd(&cmdBuffer, &miSemaphoreWaitParams));
         }
 
-    HalOcaInterface::TraceMessage(cmdBuffer, *m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
-    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface->pOsContext, *m_miInterface, *m_renderInterface->GetMmioRegisters());
+    HalOcaInterface::TraceMessage(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
+    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *m_miInterface, *m_renderInterface->GetMmioRegisters());
     if (!m_encoder->m_computeContextEnabled)
     {
         MHW_WALKER_PARAMS walkerParams;
@@ -1829,8 +1829,8 @@ MOS_STATUS CodechalEncodeCscDs::DsKernel(
         walkerParams.GroupIdLoopSelect = m_groupId;
     }
 
-    HalOcaInterface::TraceMessage(cmdBuffer, *m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
-    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface->pOsContext, *m_miInterface, *m_renderInterface->GetMmioRegisters());
+    HalOcaInterface::TraceMessage(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
+    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *m_miInterface, *m_renderInterface->GetMmioRegisters());
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(m_renderInterface->AddMediaObjectWalkerCmd(&cmdBuffer, &walkerParams));
 
@@ -1868,14 +1868,12 @@ MOS_STATUS CodechalEncodeCscDs::RawSurfaceMediaCopy(MOS_FORMAT srcFormat)
 {
     CODECHAL_ENCODE_FUNCTION_ENTER;
 
-    PMOS_CONTEXT mos_context = nullptr;
-    CODECHAL_ENCODE_CHK_NULL_RETURN(m_osInterface);
-    m_osInterface->pfnGetMosContext(m_osInterface, &mos_context);
-
-    if (!m_pMosMediaCopy)
+    // Call m_hwInterface->CreateMediaCopy directly for legacy code
+    if (nullptr == m_mediaCopyBaseState)
     {
-        MOS_OS_CHK_NULL_RETURN(m_pMosMediaCopy = MOS_New(MosMediaCopy, mos_context));
+        m_mediaCopyBaseState = m_hwInterface->CreateMediaCopy(m_osInterface);
     }
+    CODECHAL_ENCODE_CHK_NULL_RETURN(m_mediaCopyBaseState);
 
     // Call raw surface Copy function
     CODECHAL_ENCODE_CHK_STATUS_RETURN(AllocateSurfaceCopy(srcFormat));
@@ -1883,18 +1881,10 @@ MOS_STATUS CodechalEncodeCscDs::RawSurfaceMediaCopy(MOS_FORMAT srcFormat)
     auto cscSurface = m_encoder->m_trackedBuf->GetCscSurface(CODEC_CURR_TRACKED_BUFFER);
 
     // Copy through VEBOX from Linear/TileY to TileY
-#ifdef LINUX
-    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_pMosMediaCopy->MediaCopy(
+    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_mediaCopyBaseState->SurfaceCopy(
         &m_rawSurfaceToEnc->OsResource,
         &cscSurface->OsResource,
         MCPY_METHOD_BALANCE));
-#else
-    CODECHAL_ENCODE_CHK_STATUS_RETURN(m_pMosMediaCopy->MediaCopy(
-        &m_rawSurfaceToEnc->OsResource,
-        &cscSurface->OsResource,
-        false,
-        MCPY_METHOD_BALANCE));
-#endif // LINUX
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(SetSurfacesToEncPak());
 
@@ -1983,5 +1973,5 @@ CodechalEncodeCscDs::~CodechalEncodeCscDs()
 {
     MOS_Delete(m_cscKernelState);
     MOS_Delete(m_sfcState);
-    MOS_Delete(m_pMosMediaCopy);
+    MOS_Delete(m_mediaCopyBaseState);
 }

@@ -44,7 +44,7 @@ public:
     //!
     //! \brief  Decode predication sub packet constructor
     //!
-    DecodeMarkerPkt(DecodePipeline *pipeline, CodechalHwInterface *hwInterface);
+    DecodeMarkerPkt(DecodePipeline *pipeline, CodechalHwInterfaceNext *hwInterface);
 
     //!
     //! \brief  Decode predication sub packet destructor
@@ -87,8 +87,10 @@ public:
         uint32_t &requestedPatchListSize) override;
 
 protected:
-    MhwMiInterface* m_miInterface = nullptr;
+    std::shared_ptr<mhw::mi::Itf> m_miItf  = nullptr;
     DecodeMarker* m_marker = nullptr;
+
+MEDIA_CLASS_DEFINE_END(decode__DecodeMarkerPkt)
 };
 
 }

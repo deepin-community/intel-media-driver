@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2021, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -170,6 +170,14 @@ MOS_STATUS VpFeatureManagerNext::RegisterFeatures()
     VP_PUBLIC_CHK_NULL_RETURN(p);
     m_featureHandler.insert(std::make_pair(FeatureTypeDi, p));
 
+    p = MOS_New(SwFilterLumakeyHandler, m_vpInterface, FeatureTypeLumakey);
+    VP_PUBLIC_CHK_NULL_RETURN(p);
+    m_featureHandler.insert(std::make_pair(FeatureTypeLumakey, p));
+
+    p = MOS_New(SwFilterBlendingHandler, m_vpInterface, FeatureTypeBlending);
+    VP_PUBLIC_CHK_NULL_RETURN(p);
+    m_featureHandler.insert(std::make_pair(FeatureTypeBlending, p));
+
     p = MOS_New(SwFilterColorFillHandler, m_vpInterface, FeatureTypeColorFill);
     VP_PUBLIC_CHK_NULL_RETURN(p);
     m_featureHandler.insert(std::make_pair(FeatureTypeColorFill, p));
@@ -177,6 +185,10 @@ MOS_STATUS VpFeatureManagerNext::RegisterFeatures()
     p = MOS_New(SwFilterAlphaHandler, m_vpInterface, FeatureTypeAlpha);
     VP_PUBLIC_CHK_NULL_RETURN(p);
     m_featureHandler.insert(std::make_pair(FeatureTypeAlpha, p));
+
+    p = MOS_New(SwFilterCgcHandler, m_vpInterface);
+    VP_PUBLIC_CHK_NULL_RETURN(p);
+    m_featureHandler.insert(std::make_pair(FeatureTypeCgc, p));
 
     m_isFeatureRegistered = true;
     return MOS_STATUS_SUCCESS;
@@ -190,8 +202,8 @@ MOS_STATUS VpFeatureManagerNext::UnregisterFeatures()
     {
         auto it = m_featureHandler.begin();
         SwFilterFeatureHandler* p = it->second;
-        m_featureHandler.erase(it);
         MOS_Delete(p);
+        m_featureHandler.erase(it);
     }
     m_isFeatureRegistered = false;
     return MOS_STATUS_SUCCESS;
@@ -206,7 +218,14 @@ VPFeatureManager::VPFeatureManager(
     MediaFeatureManager(),
     m_hwInterface(hwInterface)
 {
-
+    if (m_hwInterface && m_hwInterface->m_osInterface)
+    {
+        m_userSettingPtr = m_hwInterface->m_osInterface->pfnGetUserSettingInstance(m_hwInterface->m_osInterface);
+    }
+    if (m_hwInterface)
+    {
+        m_vpUserFeatureControl = m_hwInterface->m_userFeatureControl;
+    }
 }
 
 MOS_STATUS VPFeatureManager::CheckFeatures(void * params, bool &bApgFuncSupported)
@@ -214,24 +233,21 @@ MOS_STATUS VPFeatureManager::CheckFeatures(void * params, bool &bApgFuncSupporte
     VP_FUNC_CALL();
 
     VP_PUBLIC_CHK_NULL_RETURN(params);
+    VP_PUBLIC_CHK_NULL_RETURN(m_hwInterface);
+    VP_PUBLIC_CHK_NULL_RETURN(m_hwInterface->m_osInterface);
 
     PVP_PIPELINE_PARAMS pvpParams = (PVP_PIPELINE_PARAMS)params;
     bApgFuncSupported = false;
 
-    // APG only support single frame input/output
-    if (pvpParams->uSrcCount != 1 ||
-        pvpParams->uDstCount != 1)
+    // Color fill does not need to check src params.
+    if (0 == pvpParams->uSrcCount)
     {
+        bApgFuncSupported = true;
         return MOS_STATUS_SUCCESS;
     }
 
     VP_PUBLIC_CHK_NULL_RETURN(pvpParams->pSrc[0]);
     VP_PUBLIC_CHK_NULL_RETURN(pvpParams->pTarget[0]);
-
-    if (pvpParams->pSrc[0]->SurfType != SURF_IN_PRIMARY)
-    {
-        return MOS_STATUS_SUCCESS;
-    }
 
     // align rectangle of surface
     VP_PUBLIC_CHK_STATUS_RETURN(RectSurfaceAlignment(pvpParams->pSrc[0], pvpParams->pTarget[0]->Format));
@@ -246,82 +262,8 @@ MOS_STATUS VPFeatureManager::CheckFeatures(void * params, bool &bApgFuncSupporte
         return MOS_STATUS_SUCCESS;
     }
 
-    // WA: Force NV12 16K to render
-    if (pvpParams->pTarget[0]->Format == Format_NV12 && pvpParams->pTarget[0]->dwHeight > VPHAL_RNDR_16K_HEIGHT_LIMIT)
+    if (pvpParams->pConstriction)
     {
-        VPHAL_RENDER_NORMALMESSAGE("Disable VEBOX/SFC for NV12 16k resolution");
-        return MOS_STATUS_SUCCESS;
-    }
-
-    if (IsHdrNeeded(pvpParams->pSrc[0], pvpParams->pTarget[0]))
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    // Check whether VEBOX is available
-    // VTd doesn't support VEBOX
-    if (!MEDIA_IS_SKU(m_hwInterface->m_skuTable, FtrVERing))
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    // Check if the Surface size is greater than 64x16 which is the minimum Width and Height VEBOX can handle
-    if (pvpParams->pSrc[0]->dwWidth < MHW_VEBOX_MIN_WIDTH || pvpParams->pSrc[0]->dwHeight < MHW_VEBOX_MIN_HEIGHT)
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    if (pvpParams->pSrc[0]->pBlendingParams                 ||
-        pvpParams->pSrc[0]->pLumaKeyParams                  ||
-        pvpParams->pConstriction)
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    if (pvpParams->pSrc[0]->bInterlacedScaling && !IsSfcInterlacedScalingSupported())
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    // Disable HVS Denoise in APO path.
-    if (pvpParams->pSrc[0]->pDenoiseParams                       &&
-        pvpParams->pSrc[0]->pDenoiseParams->bEnableHVSDenoise)
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    if (Is2PassesCSCNeeded(pvpParams->pSrc[0], pvpParams->pTarget[0]))
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    // Temp removed RGB input with DN/DI/IECP case
-    if ((IS_RGB_FORMAT(pvpParams->pSrc[0]->Format)) &&
-        (pvpParams->pSrc[0]->pColorPipeParams))
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    if (!IsVeboxOutFeasible(pvpParams) &&
-        !IsSfcOutputFeasible(pvpParams))
-    {
-        return MOS_STATUS_SUCCESS;
-    }
-
-    bool bVeboxNeeded = IsVeboxSupported(pvpParams);
-    // If ScalingPreference == VPHAL_SCALING_PREFER_SFC_FOR_VEBOX, use SFC only when VEBOX is required
-    // For GEN12+, IEF has been removed from AVS sampler. Do not change the path if IEF is enabled.
-    if ((pvpParams->pSrc[0]->ScalingPreference == VPHAL_SCALING_PREFER_SFC_FOR_VEBOX) &&
-        (pvpParams->pSrc[0]->pIEFParams == nullptr || (pvpParams->pSrc[0]->pIEFParams && pvpParams->pSrc[0]->pIEFParams->bEnabled == false)) &&
-        (bVeboxNeeded == false))
-    {
-        VP_PUBLIC_NORMALMESSAGE("DDI choose to use SFC only for VEBOX, and since VEBOX is not required, change to Composition.");
-        return MOS_STATUS_SUCCESS;
-    }
-
-    if (pvpParams->pSrc[0]->ScalingPreference == VPHAL_SCALING_PREFER_COMP)
-    {
-        VP_PUBLIC_NORMALMESSAGE("DDI choose to use Composition, change to Composition.");
         return MOS_STATUS_SUCCESS;
     }
 
@@ -336,6 +278,25 @@ MOS_STATUS VPFeatureManager::CheckFeatures(void * params)
 
     bool bApgFuncSupported = false;
     return CheckFeatures(params, bApgFuncSupported);
+}
+
+bool VPFeatureManager::IsCroppingNeeded(
+    PVPHAL_SURFACE pSrc)
+{
+    VP_FUNC_CALL();
+
+    if (!pSrc)
+    {
+        return false;
+    }
+    bool bCropping = false;
+    // use comp for cropping
+    if (pSrc->rcSrc.left != 0 || pSrc->rcDst.left != 0 ||
+        pSrc->rcSrc.top != 0 || pSrc->rcDst.top != 0)
+    {
+        bCropping = true;
+    }
+    return bCropping;
 }
 
 bool VPFeatureManager::IsHdrNeeded(
@@ -440,30 +401,18 @@ bool VPFeatureManager::IsVeboxOutFeasible(
     VP_FUNC_CALL();
 
     bool    bRet = false;
-
-    // Vebox Comp Bypass is on by default
-    uint32_t dwCompBypassMode = VP_COMP_BYPASS_DISABLED;
+    bool disableVeboxOutput = false;
 
     VP_PUBLIC_CHK_NULL_NO_STATUS(params);
     VP_PUBLIC_CHK_NULL_NO_STATUS(params->pSrc[0]);
     VP_PUBLIC_CHK_NULL_NO_STATUS(params->pTarget[0]);
 
-    MOS_USER_FEATURE_VALUE_DATA UserFeatureData;
     // Read user feature key to get the Composition Bypass mode
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
-
     // Vebox Comp Bypass is on by default
-    UserFeatureData.u32Data = VP_COMP_BYPASS_ENABLED;
+    VP_PUBLIC_CHK_NULL_NO_STATUS(m_vpUserFeatureControl);
+    disableVeboxOutput  = m_vpUserFeatureControl->IsVeboxOutputDisabled();
 
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_BYPASS_COMPOSITION_ID,
-        &UserFeatureData,
-        m_hwInterface->m_osInterface->pOsContext));
-    dwCompBypassMode = UserFeatureData.u32Data;
-
-    if (dwCompBypassMode != VP_COMP_BYPASS_DISABLED                            &&
+    if (!disableVeboxOutput                                                    &&
         params->uDstCount ==1                                                  &&
         SAME_SIZE_RECT(params->pSrc[0]->rcSrc, params->pSrc[0]->rcDst)         &&
         RECT1_CONTAINS_RECT2(params->pSrc[0]->rcMaxSrc, params->pSrc[0]->rcSrc) &&
@@ -531,7 +480,7 @@ bool VPFeatureManager::IsVeboxRTFormatSupport(
 
     if ((nullptr == pSrcSurface) || (nullptr == pRTSurface))
     {
-        VPHAL_RENDER_ASSERTMESSAGE(" invalid surface");
+        VP_RENDER_ASSERTMESSAGE(" invalid surface");
         return false;
     }
 
@@ -567,8 +516,8 @@ bool VPFeatureManager::IsVeboxSupported(PVP_PIPELINE_PARAMS params)
 {
     VP_FUNC_CALL();
 
-    VPHAL_RENDER_CHK_NULL_NO_STATUS(params);
-    VPHAL_RENDER_CHK_NULL_NO_STATUS(params->pSrc[0]);
+    VP_RENDER_CHK_NULL_NO_STATUS(params);
+    VP_RENDER_CHK_NULL_NO_STATUS(params->pSrc[0]);
 
     if ((nullptr != params->pSrc[0]->pDenoiseParams && true == params->pSrc[0]->pDenoiseParams->bEnableLuma) ||
         (nullptr != params->pSrc[0]->pProcampParams && true == params->pSrc[0]->pProcampParams->bEnabled) ||
@@ -609,25 +558,17 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
     bool                        disableSFC = false;
     VP_POLICY_RULES             rules = {};
 
-    VPHAL_RENDER_CHK_NULL_NO_STATUS(params);
-    VPHAL_RENDER_CHK_NULL_NO_STATUS(params->pTarget[0]);
+    VP_RENDER_CHK_NULL_NO_STATUS(params);
+    VP_RENDER_CHK_NULL_NO_STATUS(params->pTarget[0]);
 
     if (MEDIA_IS_SKU(m_hwInterface->m_skuTable, FtrSFCPipe))
     {
         // Read user feature key to Disable SFC
-        MOS_USER_FEATURE_VALUE_DATA UserFeatureData;
-        MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-        MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-            nullptr,
-            __VPHAL_VEBOX_DISABLE_SFC_ID,
-            &UserFeatureData,
-            m_hwInterface->m_osInterface->pOsContext));
-
-        disableSFC = UserFeatureData.bData ? true : false;
-
+        VP_PUBLIC_CHK_NULL_NO_STATUS(m_vpUserFeatureControl);
+        disableSFC = m_vpUserFeatureControl->IsSfcDisabled();
         if (disableSFC)
         {
-            VPHAL_RENDER_NORMALMESSAGE("SFC is disabled.");
+            VP_RENDER_NORMALMESSAGE("SFC is disabled.");
             bRet = false;
             return bRet;
         }
@@ -636,14 +577,14 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
     // params->pSrc[0] == nullptr is valid for color fill case on SFC.
     if (params->pSrc[0] && !IsVeboxInputFormatSupport(params->pSrc[0]))
     {
-        VPHAL_RENDER_NORMALMESSAGE("The input format %d is not supported by vebox.", params->pSrc[0]->Format);
+        VP_RENDER_NORMALMESSAGE("The input format %d is not supported by vebox.", params->pSrc[0]->Format);
         bRet = false;
         return bRet;
     }
 
     if (params->pTarget[0] && !IsOutputFormatSupported(params->pTarget[0]))
     {
-        VPHAL_RENDER_NORMALMESSAGE("The output format %d is not supported by vebox.", params->pSrc[0]->Format);
+        VP_RENDER_NORMALMESSAGE("The output format %d is not supported by vebox.", params->pSrc[0]->Format);
         bRet = false;
         return bRet;
     }
@@ -721,7 +662,7 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
         OUT_OF_BOUNDS(params->pTarget[0]->dwWidth, dwTargetMinWidth, dwSfcMaxWidth) ||
         OUT_OF_BOUNDS(params->pTarget[0]->dwHeight, dwTargetMinHeight, dwSfcMaxHeight))
     {
-        VPHAL_RENDER_NORMALMESSAGE("Surface dimensions not supported by SFC Pipe");
+        VP_RENDER_NORMALMESSAGE("Surface dimensions not supported by SFC Pipe");
         bRet = false;
         return bRet;
     }
@@ -729,7 +670,7 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
     {
         if (params->pSrc[0]->Rotation != VPHAL_ROTATION_IDENTITY)
         {
-            VPHAL_RENDER_NORMALMESSAGE("Interlaced scaling cannot support rotate or mirror by SFC pipe.");
+            VP_RENDER_NORMALMESSAGE("Interlaced scaling cannot support rotate or mirror by SFC pipe.");
             bRet = false;
             return bRet;
         }
@@ -739,7 +680,7 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
             params->pSrc[0]->rcDst.left != 0 ||
             params->pSrc[0]->rcDst.top  != 0)
         {
-            VPHAL_RENDER_NORMALMESSAGE("Interlaced scaling cannot support offset by SFC pipe.");
+            VP_RENDER_NORMALMESSAGE("Interlaced scaling cannot support offset by SFC pipe.");
             bRet = false;
             return bRet;
         }
@@ -752,7 +693,7 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
     if ((params->pSrc[0]->Rotation > VPHAL_ROTATION_IDENTITY && params->pSrc[0]->Rotation != VPHAL_MIRROR_HORIZONTAL) &&
         params->pTarget[0]->TileType != MOS_TILE_Y)
     {
-        VPHAL_RENDER_NORMALMESSAGE("non TileY output mirror and rotation not supported by SFC Pipe.");
+        VP_RENDER_NORMALMESSAGE("non TileY output mirror and rotation not supported by SFC Pipe.");
         bRet = false;
         return bRet;
     }
@@ -794,7 +735,7 @@ bool VPFeatureManager::IsSfcOutputFeasible(PVP_PIPELINE_PARAMS params)
     if ((fScaleX < minRatio) || (fScaleX > maxRatio) ||
         (fScaleY < minRatio) || (fScaleY > maxRatio))
     {
-        VPHAL_RENDER_NORMALMESSAGE("Scaling factor not supported by SFC Pipe.");
+        VP_RENDER_NORMALMESSAGE("Scaling factor not supported by SFC Pipe.");
         bRet = false;
         return bRet;
     }
@@ -842,7 +783,7 @@ bool VPFeatureManager::IsRGBOutputFormatSupported(PVPHAL_SURFACE outSurface)
 {
     if (nullptr == outSurface)
     {
-        VPHAL_RENDER_ASSERTMESSAGE(" invalid outputsurface");
+        VP_RENDER_ASSERTMESSAGE(" invalid outputsurface");
         return false;
     }
 
@@ -860,7 +801,7 @@ bool VPFeatureManager::IsNV12P010OutputFormatSupported(PVPHAL_SURFACE outSurface
 {
     if (nullptr == outSurface)
     {
-        VPHAL_RENDER_ASSERTMESSAGE(" invalid outputsurface");
+        VP_RENDER_ASSERTMESSAGE(" invalid outputsurface");
         return false;
     }
 
@@ -882,7 +823,7 @@ bool VPFeatureManager::IsOutputFormatSupported(PVPHAL_SURFACE outSurface)
     VP_FUNC_CALL();
     if (nullptr == outSurface)
     {
-        VPHAL_RENDER_ASSERTMESSAGE(" invalid outputsurface");
+        VP_RENDER_ASSERTMESSAGE(" invalid outputsurface");
         return false;
     }
 
@@ -905,7 +846,7 @@ bool VPFeatureManager::IsOutputFormatSupported(PVPHAL_SURFACE outSurface)
     }
     else
     {
-        VPHAL_RENDER_NORMALMESSAGE("Unsupported Render Target Format '0x%08x' for SFC Pipe.", outSurface->Format);
+        VP_RENDER_NORMALMESSAGE("Unsupported Render Target Format '0x%08x' for SFC Pipe.", outSurface->Format);
         ret = false;
     }
 
@@ -992,10 +933,10 @@ MOS_STATUS VPFeatureManager::RectSurfaceAlignment(
 {
     VP_FUNC_CALL();
 
-    uint16_t   wWidthAlignUnit;
-    uint16_t   wHeightAlignUnit;
-    uint16_t   wWidthAlignUnitForDstRect;
-    uint16_t   wHeightAlignUnitForDstRect;
+    uint16_t   wWidthAlignUnit            = 0;
+    uint16_t   wHeightAlignUnit           = 0;
+    uint16_t   wWidthAlignUnitForDstRect  = 0;
+    uint16_t   wHeightAlignUnitForDstRect = 0;
     MOS_STATUS eStatus;
 
     eStatus = MOS_STATUS_SUCCESS;
@@ -1038,7 +979,7 @@ MOS_STATUS VPFeatureManager::RectSurfaceAlignment(
         (pSurface->dwWidth    == 0)                      ||
         (pSurface->dwHeight   == 0))
     {
-        VPHAL_RENDER_ASSERTMESSAGE("Surface Parameter is invalid.");
+        VP_RENDER_ASSERTMESSAGE("Surface Parameter is invalid.");
         eStatus = MOS_STATUS_INVALID_PARAMETER;
     }
 

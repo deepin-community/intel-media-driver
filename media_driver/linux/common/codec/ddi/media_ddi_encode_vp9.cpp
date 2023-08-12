@@ -245,7 +245,9 @@ VAStatus DdiEncodeVp9::EncodeInCodecHal(uint32_t numSlices)
             MOS_ZeroMemory(&(m_segParams->SegData[i]), sizeof(CODEC_VP9_ENCODE_SEG_PARAMS));
         }
     }
-    else if (!isSegParamsChanged)
+    else if (!isSegParamsChanged && 
+            vp9PicParam->PicFlags.fields.frame_type != CODEC_VP9_KEY_FRAME && 
+            vp9PicParam->PicFlags.fields.error_resilient_mode == 0)
     {
         /* segmentation is enabled, but segment parameters are not changed */
         vp9PicParam->PicFlags.fields.seg_update_data = 0;
@@ -337,7 +339,7 @@ VAStatus DdiEncodeVp9::ContextInitialize(CodechalSetting *codecHalSettings)
     codecHalSettings->lumaChromaDepth = CODECHAL_LUMA_CHROMA_DEPTH_8_BITS;
     if (m_is10Bit)
     {
-        codecHalSettings->lumaChromaDepth |= CODECHAL_LUMA_CHROMA_DEPTH_10_BITS;
+        codecHalSettings->lumaChromaDepth = CODECHAL_LUMA_CHROMA_DEPTH_10_BITS;
     }
 
     VAStatus vaStatus = VA_STATUS_SUCCESS;

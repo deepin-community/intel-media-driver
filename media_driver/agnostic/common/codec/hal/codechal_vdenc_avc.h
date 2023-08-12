@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2011-2020, Intel Corporation
+* Copyright (c) 2011-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -80,8 +80,6 @@
 #define CODECHAL_VDENC_AVC_NEG_MULT_PB                      -50
 #define CODECHAL_VDENC_AVC_POS_MULT_VBR                     100
 #define CODECHAL_VDENC_AVC_NEG_MULT_VBR                     -50
-
-#define CODECHAL_ENCODE_VDENC_BRC_CONST_BUFFER_NUM          (NUM_PIC_TYPES + 1) //!< For each frame type + 1 for ref B
 
 #define __CODEGEN_BITFIELD(l, h) (h) - (l) + 1
 //!
@@ -615,7 +613,7 @@ public:
     //! \return   bool
     //!           true if native ROI, otherwise false
     //!
-    bool ProcessRoiDeltaQp();
+    virtual bool ProcessRoiDeltaQp();
 
     //!
     //! \brief    Add store HUC_ERROR_STATUS register command in the command buffer
@@ -775,6 +773,32 @@ public:
     //!
     virtual MOS_STATUS ExecuteMeKernel();
 
+    virtual bool IsMBBRCControlEnabled();
+
+    MOS_STATUS SetCommonSliceState(
+        CODECHAL_ENCODE_AVC_PACK_SLC_HEADER_PARAMS &packSlcHeaderParams,
+        MHW_VDBOX_AVC_SLICE_STATE &                 sliceState);
+
+    MOS_STATUS SetSliceState(
+        CODECHAL_ENCODE_AVC_PACK_SLC_HEADER_PARAMS &packSlcHeaderParams,
+        MHW_VDBOX_AVC_SLICE_STATE &                 sliceState,
+        uint16_t                                    slcIdx);
+
+    //!
+    //! \brief    Get AVC VDenc frame level status extention
+    //!
+    //! \param    [in] cmdBuffer
+    //!           Point to MOS_COMMAND_BUFFER
+    //!           [in] StatusReportFeedbackNumber
+    //!           Status report number
+    //! \return   MOS_STATUS
+    //!           MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS GetAvcVdencFrameLevelStatusExt(uint32_t StatusReportFeedbackNumber, MOS_COMMAND_BUFFER *cmdBuffer)
+    {
+        return MOS_STATUS_SUCCESS;
+    };
+
 protected:
     // AvcGeneraicState functions
     //!
@@ -918,6 +942,8 @@ protected:
 
     virtual uint32_t GetBRCCostantDataSize() { return sizeof(AVCVdencBRCCostantData); }
 
+    virtual uint32_t GetVdencBRCImgStateBufferSize() { return MOS_ALIGN_CEIL(m_hwInterface->m_vdencBrcImgStateBufferSize, CODECHAL_PAGE_SIZE); }
+
     virtual MOS_STATUS FillHucConstData(uint8_t *data, uint8_t picType);
 
     //!
@@ -936,6 +962,27 @@ protected:
         PMOS_RESOURCE       presMetadataBuffer,
         PMOS_RESOURCE       presSliceSizeStreamoutBuffer,
         PMOS_COMMAND_BUFFER cmdBuffer) override;
+
+    virtual MOS_STATUS AddVdencBrcImgBuffer(
+        PMOS_RESOURCE             vdencBrcImgBuffer,
+        PMHW_VDBOX_AVC_IMG_PARAMS params);
+
+    //!
+    //! \brief    Report Slice Size to MetaData buffer
+    //! \details  Report Slice Size to MetaData buffer.
+    //! \param    [in] presMetadataBuffer
+    //!               Pointer to allocated HW MetaData buffer
+    //!           [in] cmdBuffer
+    //!               Pointer to primary cmd buffer
+    //!           [in] slcCount
+    //!               Current slice count
+    //! \return   MOS_STATUS
+    //!           MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS ReportSliceSizeMetaData(
+        PMOS_RESOURCE presMetadataBuffer,
+        PMOS_COMMAND_BUFFER cmdBuffer,
+        uint32_t slcCount);
 
     //!
     //! \brief    Add MI_STORE commands in the command buffer to update DMEM from other HW output buffer if needed
@@ -960,11 +1007,11 @@ protected:
 protected:
     bool                                        m_vdencSinglePassEnable = false;   //!< Enable VDEnc single pass
 
-    MOS_RESOURCE                                m_vdencIntraRowStoreScratchBuffer; //!< Handle of intra row store surface
-    MOS_RESOURCE                                m_pakStatsBuffer;                  //!< Handle of PAK status buffer
-    MOS_RESOURCE                                m_pakStatsBufferFull;              //!< Handle of PAK status buffer include PerMB and frame level.
-    MOS_RESOURCE                                m_vdencStatsBuffer;                //!< Handle of VDEnc status buffer
-    MOS_RESOURCE                                m_vdencTlbMmioBuffer;              //!< VDEnc TLB MMIO buffer
+    MOS_RESOURCE                                m_vdencIntraRowStoreScratchBuffer;                         //!< Handle of intra row store surface
+    MOS_RESOURCE                                m_pakStatsBuffer;                                          //!< Handle of PAK status buffer
+    MOS_RESOURCE                                m_pakStatsBufferFull[CODECHAL_ENCODE_RECYCLED_BUFFER_NUM]; //!< Handle of PAK status buffer include PerMB and frame level.
+    MOS_RESOURCE                                m_vdencStatsBuffer;                                        //!< Handle of VDEnc status buffer
+    MOS_RESOURCE                                m_vdencTlbMmioBuffer;                                      //!< VDEnc TLB MMIO buffer
 
     uint32_t                                    m_mmioMfxLra0Override = 0;         //!< Override Register MFX_LRA_0
     uint32_t                                    m_mmioMfxLra1Override = 0;         //!< Override Register MFX_LRA_1
@@ -1150,6 +1197,8 @@ protected:
     virtual MOS_STATUS DumpEncodeImgStats(
         PMOS_COMMAND_BUFFER        cmdbuffer);
 
+    virtual uint32_t GetPakVDEncPassDumpSize();
+
     virtual MOS_STATUS DumpSeqParFile() override;
     virtual MOS_STATUS DumpFrameParFile() override;
 
@@ -1311,7 +1360,7 @@ MOS_STATUS CodechalVdencAvcState::SetDmemHuCBrcInitResetImpl(CODECHAL_VDENC_AVC_
     hucVDEncBrcInitDmem->INIT_InitQPIP = (uint8_t)initQP;
 
     // MBBRC control
-    if (m_mbBrcEnabled || m_avcPicParam->bNativeROI)
+    if (IsMBBRCControlEnabled())
     {
         hucVDEncBrcInitDmem->INIT_MbQpCtrl_U8 = 1;
         MOS_SecureMemcpy(hucVDEncBrcInitDmem->INIT_DistQPDelta_I8, 4 * sizeof(int8_t), (void*)BRC_INIT_DistQPDelta_I8, 4 * sizeof(int8_t));

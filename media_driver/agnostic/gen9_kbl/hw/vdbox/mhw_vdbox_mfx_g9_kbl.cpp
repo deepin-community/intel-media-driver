@@ -24,8 +24,8 @@
 //! \brief    Defines functions for constructing Vdbox MFX commands on G9 KBL
 //!
 
+#include "mos_os_cp_interface_specific.h"
 #include "mhw_vdbox_mfx_g9_kbl.h"
-
 
 MOS_STATUS MhwVdboxMfxInterfaceG9Kbl::AddMfxPipeBufAddrCmd(
     PMOS_COMMAND_BUFFER cmdBuffer,
@@ -35,6 +35,7 @@ MOS_STATUS MhwVdboxMfxInterfaceG9Kbl::AddMfxPipeBufAddrCmd(
 
     MHW_FUNCTION_ENTER;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(cmdBuffer);
     MHW_MI_CHK_NULL(params);
 
@@ -373,7 +374,7 @@ MOS_STATUS MhwVdboxMfxInterfaceG9Kbl::AddMfxPipeBufAddrCmd(
             &resourceParams));
     }
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, sizeof(cmd)));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, sizeof(cmd)));
 
     return eStatus;
 }

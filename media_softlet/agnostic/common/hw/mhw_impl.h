@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,6 +30,7 @@
 
 #include "mhw_itf.h"
 #include "mhw_utilities.h"
+#include "media_class_trace.h"
 
 //   [Macro Prefixes]                 |   [Macro Suffixes]
 //   No Prefix: for external use      |   _T   : type
@@ -110,6 +111,41 @@ namespace mhw
 class Impl
 {
 protected:
+#if !_MEDIA_RESERVED
+    template <typename T, typename = void>
+    struct HasExtSettings : std::false_type
+    {
+    };
+
+    template <typename T>
+    struct HasExtSettings<
+        T,
+        decltype(static_cast<T *>(nullptr)->extSettings, void())>
+        : std::true_type
+    {
+    };
+
+    template <
+        typename P,
+        typename std::enable_if<HasExtSettings<P>::value, bool>::type = true>
+    MOS_STATUS ApplyExtSettings(const P &params, uint32_t *cmd)
+    {
+        for (const auto &func : params.extSettings)
+        {
+            MHW_CHK_STATUS_RETURN(func(cmd));
+        }
+        return MOS_STATUS_SUCCESS;
+    }
+
+    template <
+        typename P,
+        typename std::enable_if<!HasExtSettings<P>::value, bool>::type = true>
+    MOS_STATUS ApplyExtSettings(const P &, uint32_t *)
+    {
+        return MOS_STATUS_SUCCESS;
+    }
+#endif  // !_MEDIA_RESERVED
+
     static int32_t Clip3(int32_t x, int32_t y, int32_t z)
     {
         int32_t ret = 0;
@@ -174,7 +210,8 @@ protected:
 
         MHW_CHK_NULL_NO_STATUS_RETURN(osItf);
 
-        m_osItf = osItf;
+        m_osItf          = osItf;
+        m_userSettingPtr = osItf->pfnGetUserSettingInstance(osItf);
         if (m_osItf->bUsesGfxAddress)
         {
             AddResourceToCmd = Mhw_AddResourceToCmd_GfxAddress;
@@ -183,24 +220,11 @@ protected:
         {
             AddResourceToCmd = Mhw_AddResourceToCmd_PatchList;
         }
-
-    #if MHW_HWCMDPARSER_ENABLED
-        mhw::HwcmdParser::InitInstance(osItf);
-
-        m_hwcmdParser = mhw::HwcmdParser::GetInstance();
-        MHW_CHK_NULL_NO_STATUS_RETURN(m_hwcmdParser);
-
-        m_parseFieldsLayout = m_hwcmdParser->ParseFieldsLayoutEn();
-    #endif
     }
 
     virtual ~Impl()
     {
         MHW_FUNCTION_ENTER;
-
-    #if MHW_HWCMDPARSER_ENABLED
-        mhw::HwcmdParser::DestroyInstance();
-    #endif
     }
 
     template <typename Cmd, typename CmdSetting>
@@ -218,28 +242,32 @@ protected:
 
         // call MHW cmd parser
     #if MHW_HWCMDPARSER_ENABLED
-        this->m_hwcmdParser->ParseCmd(this->m_currentCmdName,
-            reinterpret_cast<uint32_t *>(&cmd),
-            sizeof(cmd) / sizeof(uint32_t));
+        auto instance = mhw::HwcmdParser::GetInstance();
+        if (instance)
+        {
+            instance->ParseCmd(this->m_currentCmdName,
+                reinterpret_cast<uint32_t *>(&cmd),
+                sizeof(cmd) / sizeof(uint32_t));
+        }
     #endif
 
         // add cmd to cmd buffer
-        return Mhw_AddCommandCmdOrBB(cmdBuf, batchBuf, &cmd, sizeof(cmd));
+        return Mhw_AddCommandCmdOrBB(m_osItf, cmdBuf, batchBuf, &cmd, sizeof(cmd));
     }
 
 protected:
     MOS_STATUS(*AddResourceToCmd)
     (PMOS_INTERFACE osItf, PMOS_COMMAND_BUFFER cmdBuf, PMHW_RESOURCE_PARAMS params) = nullptr;
 
-    PMOS_INTERFACE      m_osItf           = nullptr;
-    PMOS_COMMAND_BUFFER m_currentCmdBuf   = nullptr;
-    PMHW_BATCH_BUFFER   m_currentBatchBuf = nullptr;
+    PMOS_INTERFACE              m_osItf           = nullptr;
+    MediaUserSettingSharedPtr   m_userSettingPtr  = nullptr;
+    PMOS_COMMAND_BUFFER         m_currentCmdBuf   = nullptr;
+    PMHW_BATCH_BUFFER           m_currentBatchBuf = nullptr;
 
 #if MHW_HWCMDPARSER_ENABLED
-    std::string                  m_currentCmdName;
-    std::shared_ptr<HwcmdParser> m_hwcmdParser       = nullptr;
-    bool                         m_parseFieldsLayout = false;
+    std::string m_currentCmdName;
 #endif  // MHW_HWCMDPARSER_ENABLED
+MEDIA_CLASS_DEFINE_END(mhw__Impl)
 };
 }  // namespace mhw
 

@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017, Intel Corporation
+* Copyright (c) 2017-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -44,6 +44,7 @@
 #include "cm_surface_vme.h"
 #include "cm_surface_sampler.h"
 #include "cm_surface_sampler8x8.h"
+#include "mos_os_cp_interface_specific.h"
 
 namespace CMRT_UMD
 {
@@ -869,7 +870,7 @@ int32_t CmTaskInternal::VtuneSetFlushTime()
         return CM_SUCCESS;
     }
 
-    MOS_QueryPerformanceCounter((uint64_t*)&m_taskProfilingInfo.flushTime.QuadPart);
+    MosUtilities::MosQueryPerformanceCounter((uint64_t*)&m_taskProfilingInfo.flushTime.QuadPart);
     return CM_SUCCESS;
 }
 
@@ -895,7 +896,7 @@ int32_t CmTaskInternal::VtuneInitProfilingInfo(const CmThreadSpaceRT *perTaskThr
     m_taskProfilingInfo.kernelCount = m_kernelCount;
     m_taskProfilingInfo.threadID    = CmGetCurThreadId(); // Get Thread ID
 
-    MOS_QueryPerformanceCounter((uint64_t*)&m_taskProfilingInfo.enqueueTime.QuadPart); // Get Enqueue Time
+    MosUtilities::MosQueryPerformanceCounter((uint64_t*)&m_taskProfilingInfo.enqueueTime.QuadPart); // Get Enqueue Time
 
     //  Currently, the Kernel/ThreadSpace/ThreadGroupSpace could not be deleted before task finished.
     m_taskProfilingInfo.kernelNames = MOS_NewArray(char, (CM_MAX_KERNEL_NAME_SIZE_IN_BYTE * m_kernelCount));
@@ -996,7 +997,7 @@ int32_t CmTaskInternal::VtuneInitProfilingInfo(const CmThreadGroupSpace *perTask
 
     m_taskProfilingInfo.threadID    = CmGetCurThreadId(); // Get Thread ID
 
-    MOS_QueryPerformanceCounter((uint64_t*)&m_taskProfilingInfo.enqueueTime.QuadPart); // Get Enqueue Time
+    MosUtilities::MosQueryPerformanceCounter((uint64_t*)&m_taskProfilingInfo.enqueueTime.QuadPart); // Get Enqueue Time
 
     m_taskProfilingInfo.kernelNames = MOS_NewArray(char, (CM_MAX_KERNEL_NAME_SIZE_IN_BYTE * m_kernelCount));
     CM_CHK_NULL_GOTOFINISH_CMERROR(m_taskProfilingInfo.kernelNames);

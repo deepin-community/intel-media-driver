@@ -179,6 +179,37 @@ public:
 
     virtual GMM_RESOURCE_FORMAT ConvertMediaFmtToGmmFmt(DDI_MEDIA_FORMAT format) override;
 
+    //! \brief Get surface drm modifier
+    //!
+    //! \param    [in] mediaSurface
+    //!           Pointer to the media surface
+    //! \param    [out] modifier
+    //!           reference of the modifier
+    //!
+    //! \return   VAStatus
+    //!           VA_STATUS_SUCCESS if success
+    //!
+    virtual VAStatus GetSurfaceModifier(DDI_MEDIA_SURFACE* mediaSurface, uint64_t &modifier) override;
+
+    //! \brief Set tile format according to external surface's modifier
+    //!
+    //! \param    [in] mediaSurface
+    //!           Pointer to the media surface
+    //! \param    [out] tileformat
+    //!           Reference to the tileformat
+    //! \param    [out] bMemCompEnable
+    //!           Reference to the memory compress flag
+    //! \param    [out] bMemCompRC
+    //!           Reference to the memory compress rate control
+    //!
+    //! \return   VAStatus
+    //!           VA_STATUS_SUCCESS if success
+    //!
+    virtual VAStatus SetExternalSurfaceTileFormat(DDI_MEDIA_SURFACE* mediaSurface,
+                                                            uint32_t &tileformat,
+                                                            bool &bMemCompEnable,
+                                                            bool &bMemCompRC) override;
+
 protected:
     static const uint32_t m_maxHevcEncWidth =
         CODEC_16K_MAX_PIC_WIDTH; //!< maxinum width for HEVC encode
@@ -300,6 +331,23 @@ protected:
             VADisplayAttribute *attribList,
             int32_t numAttribs) override;
 
-
+    //!
+    //! \brief    Check if the give profile is HEVC SCC
+    //!
+    //! \param    [in] profile
+    //!           Specify the VAProfile
+    //!
+    //! \return   True if the profile is a HEVC SCC profile
+    //!           False if the profile isn't a HEVC profile
+    //!
+    bool IsHevcSccProfile(VAProfile profile)
+    {
+        return (
+            (profile == VAProfileHEVCSccMain)    ||
+            (profile == VAProfileHEVCSccMain10)  ||
+            (profile == VAProfileHEVCSccMain444) ||
+            (profile == VAProfileHEVCSccMain444_10)
+           );
+    }
 };
 #endif

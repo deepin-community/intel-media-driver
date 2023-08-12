@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -51,13 +51,19 @@ enum KRN_ARG_KIND
     // compiler-defined kind
     ARG_KIND_GENERAL = 0x0,
     ARG_KIND_SAMPLER = 0x1,
-
+    ARG_KIND_VME_INDEX = 0x6,
     ARG_KIND_SURFACE = 0x8, //basic surface value
     // using 3 LSB to classify surface further
     ARG_KIND_SURFACE_2D = 0x9,
     ARG_KIND_SURFACE_1D = 0xa,
     ARG_KIND_SURFACE_SAMPLER8X8_AVS = 0xb,
-    ARG_KIND_SURFACE_SAMPLER = 0xc
+    ARG_KIND_SURFACE_SAMPLER = 0xc,
+    ARG_KIND_IMPLICT_LOCALSIZE      = 0xe,
+    ARG_KIND_IMPLICT_GROUPSIZE      = 0xf,
+    ARG_KIND_IMPLICIT_LOCALID       = 0x10,
+    ARG_KIND_GENERAL_DEPVEC         = 0x20,
+    ARG_KIND_SURFACE_2D_SCOREBOARD  = 0x2A,
+    ARG_KIND_GENERAL_DEPCNT         = 0x30
 };
 
 struct KRN_ARG
@@ -78,6 +84,27 @@ enum KERNEL_SUBMISSION_MODE
     MULTI_KERNELS_WITH_MULTI_MEDIA_STATES = 0,
     MULTI_KERNELS_WITH_ONE_MEDIA_STATE
 };
+
+enum KERNEL_BINDINGTABLE_MODE
+{
+    MULTI_KERNELS_WITH_MULTI_BINDINGTABLES = 0,
+    MULTI_KERNELS_WITH_ONE_BINDINGTABLE
+};
+
+typedef struct _VP_RENDER_CACHE_CNTL
+{
+    // Input
+    bool                        bDnDi;
+    bool                        bLace;
+    bool                        bCompositing;
+    bool                        bHdr;
+
+    // Output
+    VPHAL_DNDI_CACHE_CNTL        DnDi;
+    VPHAL_LACE_CACHE_CNTL        Lace;
+    VPHAL_COMPOSITE_CACHE_CNTL   Composite;
+    VPHAL_HDR_CACHE_CNTL         Hdr;
+} VP_RENDER_CACHE_CNTL, *PVP_RENDER_CACHE_CNTL;
 
 }
 #endif // !__VP_SFC_COMMON_H__

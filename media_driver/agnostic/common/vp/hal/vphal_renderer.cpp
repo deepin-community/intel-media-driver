@@ -25,7 +25,7 @@
 //! \details  The top renderer is responsible for coordinating the sequence of calls to low level renderers, e.g. DNDI or Comp
 //!
 #include "vphal_renderer.h"
-#include "vphal_debug.h"
+#include "vp_debug.h"
 #include "vpkrnheader.h"
 #include "vphal_render_composite.h"
 
@@ -1006,6 +1006,11 @@ void VphalRenderer::UpdateReport(
         m_reporting->GetFeatures().rtCompressible = true;
         m_reporting->GetFeatures().rtCompressMode = (uint8_t)(pRenderParams->pTarget[0]->CompressionMode);
     }
+
+    m_reporting->GetFeatures().rtCacheSetting = (uint8_t)(pRenderParams->pTarget[0]->CacheSetting);
+#if (_DEBUG || _RELEASE_INTERNAL)
+    m_reporting->GetFeatures().rtOldCacheSetting = (uint8_t)(m_pRenderHal->oldCacheSettingForTargetSurface);
+#endif
 }
 
 //!
@@ -1230,7 +1235,7 @@ MOS_STATUS VphalRenderer::UpdateRenderGpuContext(MOS_GPU_CONTEXT currentGpuConte
     MOS_STATUS              eStatus = MOS_STATUS_SUCCESS;
     MOS_GPU_CONTEXT         renderGpuContext;
     MOS_GPU_NODE            renderGpuNode;
-    MOS_GPUCTX_CREATOPTIONS createOption;
+    MOS_GPUCTX_CREATOPTIONS_ENHANCED createOption = {};
     PVPHAL_VEBOX_STATE      pVeboxState = nullptr;
     int                     i           = 0;
 
@@ -1387,6 +1392,7 @@ MOS_STATUS VphalRenderer::Initialize(
     //---------------------------------------
     m_isApoEnabled     = isApoEnabled;
     m_renderGpuContext = m_pOsInterface->pfnGetGpuContext(m_pOsInterface);
+    m_clearVideoViewMode = pSettings->clearVideoViewMode;
 
     Align16State.pPerfData   = &PerfData;
     Fast1toNState.pPerfData  = &PerfData;
@@ -1396,6 +1402,14 @@ MOS_STATUS VphalRenderer::Initialize(
     // We MUST NOT create a writable global memory since it can cause issues
     // in multi-device cases (multiple threads operating on the memory)
     // NOTE: KDLL will release the allocated memory.
+    // NOTE: Need to check kernel binary pointer and bin size firstly,
+    // Because calling malloc(0) will usually returns a valid pointer, and any usage of this pointer excluding free memory is undefined in C/C++.
+    if(pcKernelBin == nullptr || dwKernelBinSize == 0)
+    {
+        eStatus = MOS_STATUS_NULL_POINTER;
+        VPHAL_RENDER_ASSERTMESSAGE("Could not allocate KDLL state with no kernel binary");
+        goto finish;
+    }
     pKernelBin = MOS_AllocMemory(dwKernelBinSize);
     VPHAL_RENDER_CHK_NULL(pKernelBin);
     MOS_SecureMemcpy(pKernelBin,
@@ -1448,39 +1462,42 @@ MOS_STATUS VphalRenderer::Initialize(
         }
     }
 
-    VeboxExecState[0].Mode               = VEBOX_EXEC_MODE_0;
-    VeboxExecState[0].bDIOutputPair01    = true;
-    VeboxExecState[0].bSpeculativeCopy   = false;
-    VeboxExecState[0].bEnable            = (pSettings->veboxParallelExecution == VEBOX_EXECUTION_OVERRIDE_ENABLE);
-    VeboxExecState[1]                    = VeboxExecState[0];
-
-    // Initialize VEBOX renderer
-    VPHAL_RENDER_CHK_STATUS(pRender[VPHAL_RENDER_ID_VEBOX]->Initialize(
-           pSettings,
-           pKernelDllState));
-
-    VPHAL_RENDER_CHK_STATUS(pRender[VPHAL_RENDER_ID_VEBOX2]->Initialize(
-           pSettings,
-           pKernelDllState));
-
     // Initialize Compositing renderer
     VPHAL_RENDER_CHK_STATUS(pRender[VPHAL_RENDER_ID_COMPOSITE]->Initialize(
         pSettings,
         pKernelDllState));
 
-    // Initialize 16 Alignment Interface and renderer
-    VpHal_16AlignInitInterface(&Align16State, m_pRenderHal);
-    VPHAL_RENDER_CHK_STATUS(Align16State.pfnInitialize(
-           &Align16State,
-           pSettings,
-           pKernelDllState))
+    if (!m_clearVideoViewMode)
+    {
+        VeboxExecState[0].Mode             = VEBOX_EXEC_MODE_0;
+        VeboxExecState[0].bDIOutputPair01  = true;
+        VeboxExecState[0].bSpeculativeCopy = false;
+        VeboxExecState[0].bEnable          = (pSettings->veboxParallelExecution == VEBOX_EXECUTION_OVERRIDE_ENABLE);
+        VeboxExecState[1]                  = VeboxExecState[0];
 
-    // Initialize fast 1to N Interface and render
-    VpHal_Fast1toNInitInterface(&Fast1toNState, m_pRenderHal);
-    VPHAL_RENDER_CHK_STATUS(Fast1toNState.pfnInitialize(
-           &Fast1toNState,
-           pSettings,
-           pKernelDllState))
+        // Initialize VEBOX renderer
+        VPHAL_RENDER_CHK_STATUS(pRender[VPHAL_RENDER_ID_VEBOX]->Initialize(
+            pSettings,
+            pKernelDllState));
+
+        VPHAL_RENDER_CHK_STATUS(pRender[VPHAL_RENDER_ID_VEBOX2]->Initialize(
+            pSettings,
+            pKernelDllState));
+
+        // Initialize 16 Alignment Interface and renderer
+        VpHal_16AlignInitInterface(&Align16State, m_pRenderHal);
+        VPHAL_RENDER_CHK_STATUS(Align16State.pfnInitialize(
+            &Align16State,
+            pSettings,
+            pKernelDllState))
+
+        // Initialize fast 1to N Interface and render
+        VpHal_Fast1toNInitInterface(&Fast1toNState, m_pRenderHal);
+        VPHAL_RENDER_CHK_STATUS(Fast1toNState.pfnInitialize(
+            &Fast1toNState,
+            pSettings,
+            pKernelDllState))
+    }
 
     eStatus = AllocateDebugDumper();
     if (eStatus != MOS_STATUS_SUCCESS)
@@ -1499,7 +1516,7 @@ MOS_STATUS VphalRenderer::Initialize(
     }
 
     // Initialize Hdr renderer
-    if (MEDIA_IS_SKU(m_pSkuTable, FtrHDR) && pHdrState)
+    if (MEDIA_IS_SKU(m_pSkuTable, FtrHDR) && pHdrState && !m_clearVideoViewMode)
     {
         VPHAL_RENDER_CHK_STATUS(pHdrState->pfnInitialize(
             pHdrState,
@@ -1508,7 +1525,6 @@ MOS_STATUS VphalRenderer::Initialize(
     }
 
     eStatus = MOS_STATUS_SUCCESS;
-
 finish:
     if (eStatus != MOS_STATUS_SUCCESS)
     {
@@ -1757,7 +1773,7 @@ VphalRenderer::VphalRenderer(
     m_statusTable(nullptr),
     maxSrcRect(),
     pHdrState(nullptr),
-    m_pRenderHal(pRenderHal),
+    m_pRenderHal((PRENDERHAL_INTERFACE_LEGACY)pRenderHal),
     m_pOsInterface(pRenderHal ? pRenderHal->pOsInterface : nullptr),
     m_pSkuTable(nullptr),
     m_pWaTable(nullptr),
@@ -1772,23 +1788,23 @@ VphalRenderer::VphalRenderer(
     m_renderGpuContext(MOS_GPU_CONTEXT_INVALID_HANDLE)
 {
     MOS_STATUS                          eStatus;
-    MOS_USER_FEATURE_VALUE_DATA         UserFeatureData;
+    uint32_t ssdControl = 0;
 
     VPHAL_RENDER_CHK_NULL(m_pRenderHal);
     VPHAL_RENDER_CHK_NULL(m_pOsInterface);
+    m_userSettingPtr = m_pOsInterface->pfnGetUserSettingInstance(m_pOsInterface);
 
     MOS_ZeroMemory(&pRender, sizeof(pRender));
 
     // Read Slice Shutdown (SSD Control) User Feature Key once during initialization
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    eStatus = MOS_UserFeature_ReadValue_ID(
-            nullptr,
-            __VPHAL_RNDR_SSD_CONTROL_ID,
-            &UserFeatureData,
-            m_pOsInterface->pOsContext);
+    eStatus = ReadUserSetting(
+            m_userSettingPtr,
+            ssdControl,
+            __VPHAL_RNDR_SSD_CONTROL,
+            MediaUserSetting::Group::Sequence);
     if (eStatus == MOS_STATUS_SUCCESS)
     {
-        uiSsdControl = UserFeatureData.u32Data;
+        uiSsdControl = ssdControl;
     }
 
     // Do not fail if User feature keys is not present

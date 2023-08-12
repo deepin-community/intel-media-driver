@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2018, Intel Corporation
+* Copyright (c) 2017-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -298,7 +298,7 @@ MOS_STATUS OsContextSpecific::CreateIPC()
             break;
         }
 
-        MOS_Sleep(1); //wait and retry
+        MosUtilities::MosSleep(1);  //wait and retry
     }
 
     LockSemaphore(m_semId);
@@ -431,7 +431,7 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
         m_cmdBufMgr     = static_cast<CmdBufMgr *>(pOsDriverContext->m_cmdBufMgr);
         m_fd            = pOsDriverContext->fd;
         MOS_SecureMemcpy(&m_perfData, sizeof(PERF_DATA), pOsDriverContext->pPerfData, sizeof(PERF_DATA));
-        mos_bufmgr_gem_enable_reuse(pOsDriverContext->bufmgr);
+        mos_bufmgr_enable_reuse(pOsDriverContext->bufmgr);
         m_pGmmClientContext = pOsDriverContext->pGmmClientContext;
         m_auxTableMgr = pOsDriverContext->m_auxTableMgr;
     
@@ -448,7 +448,7 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
             MOS_ZeroMemory(&skuTable, sizeof(skuTable));
             MOS_ZeroMemory(&waTable, sizeof(waTable));
             MOS_ZeroMemory(&gtSystemInfo, sizeof(gtSystemInfo));
-            eStatus = HWInfo_GetGfxInfo(pOsDriverContext->fd, pOsDriverContext->bufmgr, &platformInfo, &skuTable, &waTable, &gtSystemInfo);
+            eStatus = HWInfo_GetGfxInfo(pOsDriverContext->fd, pOsDriverContext->bufmgr, &platformInfo, &skuTable, &waTable, &gtSystemInfo, pOsDriverContext->m_userSettingPtr);
             if (eStatus != MOS_STATUS_SUCCESS)
             {
                 MOS_OS_ASSERTMESSAGE("Fatal error - unsuccesfull Sku/Wa/GtSystemInfo initialization");
@@ -462,10 +462,10 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
             m_skuTable = skuTable;
             m_waTable  = waTable;
     
-            pOsDriverContext->SkuTable       = skuTable;
-            pOsDriverContext->WaTable        = waTable;
-            pOsDriverContext->gtSystemInfo   = gtSystemInfo;
-            pOsDriverContext->platform       = platformInfo;
+            pOsDriverContext->m_skuTable       = skuTable;
+            pOsDriverContext->m_waTable        = waTable;
+            pOsDriverContext->m_gtSystemInfo   = gtSystemInfo;
+            pOsDriverContext->m_platform       = platformInfo;
     
             MOS_OS_NORMALMESSAGE("DeviceID was created DeviceID = %d, platform product %d", iDeviceId, platformInfo.eProductFamily);
         }
@@ -473,11 +473,11 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
         {
             // pOsDriverContext's parameters were passed by CmCreateDevice.
             // Get SkuTable/WaTable/systemInfo/platform from OSDriver directly.
-            MOS_SecureMemcpy(&m_platformInfo, sizeof(PLATFORM), &(pOsDriverContext->platform), sizeof(PLATFORM));
-            MOS_SecureMemcpy(&m_gtSystemInfo, sizeof(MEDIA_SYSTEM_INFO), &(pOsDriverContext->gtSystemInfo), sizeof(MEDIA_SYSTEM_INFO));
+            MOS_SecureMemcpy(&m_platformInfo, sizeof(PLATFORM), &(pOsDriverContext->m_platform), sizeof(PLATFORM));
+            MOS_SecureMemcpy(&m_gtSystemInfo, sizeof(MEDIA_SYSTEM_INFO), &(pOsDriverContext->m_gtSystemInfo), sizeof(MEDIA_SYSTEM_INFO));
     
-            m_skuTable = pOsDriverContext->SkuTable;
-            m_waTable  = pOsDriverContext->WaTable;
+            m_skuTable = pOsDriverContext->m_skuTable;
+            m_waTable  = pOsDriverContext->m_waTable;
         }
 
         m_use64BitRelocs = true;
@@ -488,11 +488,11 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
                           &eStatus, sizeof(eStatus), nullptr, 0);
         if (!Mos_Solo_IsEnabled(nullptr) && MEDIA_IS_SKU(&m_skuTable,FtrContextBasedScheduling))
         {
-            m_intelContext = mos_gem_context_create_ext(pOsDriverContext->bufmgr,0);
+            m_intelContext = mos_context_create_ext(pOsDriverContext->bufmgr,0, pOsDriverContext->m_protectedGEMContext);
             if (m_intelContext)
             {
-                m_intelContext->vm = mos_gem_vm_create(pOsDriverContext->bufmgr);
-                if (m_intelContext->vm == nullptr)
+                m_intelContext->vm_id = mos_vm_create(pOsDriverContext->bufmgr);
+                if (m_intelContext->vm_id == INVALID_VM)
                 {
                     MOS_OS_ASSERTMESSAGE("Failed to create vm.\n");
                     return MOS_STATUS_UNKNOWN;
@@ -501,10 +501,10 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
         }
         else //use legacy context create ioctl for pre-gen11 platforms
         {
-           m_intelContext = mos_gem_context_create(pOsDriverContext->bufmgr);
+           m_intelContext = mos_context_create(pOsDriverContext->bufmgr);
            if (m_intelContext)
            {
-               m_intelContext->vm = nullptr;
+               m_intelContext->vm_id = INVALID_VM;
            }
         }
         MOS_TraceEventExt(EVENT_GPU_CONTEXT_CREATE, EVENT_TYPE_END,
@@ -572,11 +572,7 @@ MOS_STATUS OsContextSpecific::Init(PMOS_CONTEXT pOsDriverContext)
         m_usesGfxAddress            = false;
     
         m_inlineCodecStatusUpdate   = true;
-    
-    #if MOS_COMMAND_BUFFER_DUMP_SUPPORTED
-        CommandBufferDumpInit(pOsDriverContext);
-    #endif
-    
+
         SetOsContextValid(true);
     }
     return eStatus;
@@ -622,13 +618,14 @@ void OsContextSpecific::Destroy()
         m_waTable.reset();
         MOS_TraceEventExt(EVENT_GPU_CONTEXT_DESTROY, EVENT_TYPE_START,
                           &m_intelContext, sizeof(void *), nullptr, 0);
-        if (m_intelContext && m_intelContext->vm)
+        if (m_intelContext && m_intelContext->vm_id != INVALID_VM)
         {
-            mos_gem_vm_destroy(m_intelContext->bufmgr, m_intelContext->vm);
+            mos_vm_destroy(m_intelContext->bufmgr, m_intelContext->vm_id);
+            m_intelContext->vm_id = INVALID_VM;
         }
         if (m_intelContext)
         {
-            mos_gem_context_destroy(m_intelContext);
+            mos_context_destroy(m_intelContext);
         }
         MOS_TraceEventExt(EVENT_GPU_CONTEXT_DESTROY, EVENT_TYPE_END,
                           nullptr, 0, nullptr, 0);

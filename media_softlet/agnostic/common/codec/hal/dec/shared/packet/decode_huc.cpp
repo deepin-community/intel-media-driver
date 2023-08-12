@@ -36,7 +36,7 @@
 namespace decode
 {
 
-DecodeHucBasic::DecodeHucBasic(MediaPipeline *pipeline, MediaTask *task, CodechalHwInterface *hwInterface)
+DecodeHucBasic::DecodeHucBasic(MediaPipeline *pipeline, MediaTask *task, CodechalHwInterfaceNext*hwInterface)
     : CmdPacket(task)
 {
     m_pipeline = dynamic_cast<DecodePipeline *>(pipeline);
@@ -51,9 +51,10 @@ DecodeHucBasic::DecodeHucBasic(MediaPipeline *pipeline, MediaTask *task, Codecha
     {
         m_hwInterface    = hwInterface;
         m_osInterface    = hwInterface->GetOsInterface();
-        m_hucInterface   = hwInterface->GetHucInterface();
-        m_miInterface    = hwInterface->GetMiInterface();
-        m_vdencInterface = hwInterface->GetVdencInterface();
+        m_miItf          = std::static_pointer_cast<mhw::mi::Itf>(hwInterface->GetMiInterfaceNext());
+        m_vdencItf       = std::static_pointer_cast<mhw::vdbox::vdenc::Itf>(m_hwInterface->GetVdencInterfaceNext());
+        m_hucItf         = std::static_pointer_cast<mhw::vdbox::huc::Itf>(m_hwInterface->GetHucInterfaceNext());
+       
     }
 }
 
@@ -66,10 +67,9 @@ MOS_STATUS DecodeHucBasic::Init()
     DECODE_CHK_NULL(m_pipeline);
     DECODE_CHK_NULL(m_featureManager);
     DECODE_CHK_NULL(m_osInterface);
-    DECODE_CHK_NULL(m_hucInterface);
-    DECODE_CHK_NULL(m_miInterface);
-    DECODE_CHK_NULL(m_vdencInterface);
-
+    DECODE_CHK_NULL(m_hucItf);
+    DECODE_CHK_NULL(m_miItf);
+    DECODE_CHK_NULL(m_vdencItf);
     m_basicFeature = dynamic_cast<DecodeBasicFeature*>(m_featureManager->GetFeature(FeatureIDs::basicFeature));
     DECODE_CHK_NULL(m_basicFeature);
 
@@ -126,26 +126,28 @@ MOS_STATUS DecodeHucBasic::StoreHucStatusRegister(MOS_COMMAND_BUFFER& cmdBuffer)
 
     MOS_RESOURCE* osResource;
     uint32_t     offset;
+    {
+        DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatusMask, osResource, offset));
 
-    DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatusMask, osResource, offset));
+        // Write HUC_STATUS mask
+        auto &par            = m_miItf->GETPAR_MI_STORE_DATA_IMM();
+        par                  = {};
+        par.pOsResource      = osResource;
+        par.dwResourceOffset = offset;
+        par.dwValue          = m_hucStatusMask;
+        DECODE_CHK_STATUS(m_miItf->ADDCMD_MI_STORE_DATA_IMM(&cmdBuffer));
+    }
+    {
+        DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatusReg, osResource, offset));
 
-    // Write HUC_STATUS mask
-    MHW_MI_STORE_DATA_PARAMS storeDataParams;
-    MOS_ZeroMemory(&storeDataParams, sizeof(storeDataParams));
-    storeDataParams.pOsResource = osResource;
-    storeDataParams.dwResourceOffset = offset;
-    storeDataParams.dwValue = m_hucStatusMask;
-    DECODE_CHK_STATUS(m_miInterface->AddMiStoreDataImmCmd(&cmdBuffer, &storeDataParams));
-
-    DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatusReg, osResource, offset));
-
-    // Store HUC_STATUS register
-    MHW_MI_STORE_REGISTER_MEM_PARAMS storeRegParams;
-    MOS_ZeroMemory(&storeRegParams, sizeof(storeRegParams));
-    storeRegParams.presStoreBuffer = osResource;
-    storeRegParams.dwOffset = offset;
-    storeRegParams.dwRegister = m_hucInterface->GetMmioRegisters(MHW_VDBOX_NODE_1)->hucStatusRegOffset;
-    DECODE_CHK_STATUS(m_miInterface->AddMiStoreRegisterMemCmd(&cmdBuffer, &storeRegParams));
+        // Store HUC_STATUS register
+        auto &par           = m_miItf->GETPAR_MI_STORE_REGISTER_MEM();
+        par                 = {};
+        par.presStoreBuffer = osResource;
+        par.dwOffset        = offset;
+        par.dwRegister      = m_hucItf->GetMmioRegisters(MHW_VDBOX_NODE_1)->hucStatusRegOffset;
+        DECODE_CHK_STATUS(m_miItf->ADDCMD_MI_STORE_REGISTER_MEM(&cmdBuffer));
+    }
 
     return MOS_STATUS_SUCCESS;
 }
@@ -159,27 +161,27 @@ MOS_STATUS DecodeHucBasic::StoreHucStatus2Register(MOS_COMMAND_BUFFER& cmdBuffer
 
     MOS_RESOURCE* osResource;
     uint32_t     offset;
+    {
+        DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatus2Mask, osResource, offset));
 
-    DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatus2Mask, osResource, offset));
-
-    // Write HUC_STATUS2 mask
-    MHW_MI_STORE_DATA_PARAMS storeDataParams;
-    MOS_ZeroMemory(&storeDataParams, sizeof(storeDataParams));
-    storeDataParams.pOsResource = osResource;
-    storeDataParams.dwResourceOffset = offset;
-    storeDataParams.dwValue = m_hucStatus2Mask;
-    DECODE_CHK_STATUS(m_miInterface->AddMiStoreDataImmCmd(&cmdBuffer, &storeDataParams));
-
-    DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatus2Reg, osResource, offset));
-
-    // Store HUC_STATUS2 register
-    MHW_MI_STORE_REGISTER_MEM_PARAMS storeRegParams;
-    MOS_ZeroMemory(&storeRegParams, sizeof(storeRegParams));
-    storeRegParams.presStoreBuffer = osResource;
-    storeRegParams.dwOffset = offset;
-    storeRegParams.dwRegister = m_hucInterface->GetMmioRegisters(MHW_VDBOX_NODE_1)->hucStatus2RegOffset;
-    DECODE_CHK_STATUS(m_miInterface->AddMiStoreRegisterMemCmd(&cmdBuffer, &storeRegParams));
-
+        // Write HUC_STATUS2 mask
+        auto &par = m_miItf->GETPAR_MI_STORE_DATA_IMM();
+        par                              = {};
+        par.pOsResource                  = osResource;
+        par.dwResourceOffset             = offset;
+        par.dwValue                      = m_hucStatus2Mask;
+        DECODE_CHK_STATUS(m_miItf->ADDCMD_MI_STORE_DATA_IMM(&cmdBuffer));  
+    }
+    {
+        DECODE_CHK_STATUS(m_statusReport->GetAddress(decode::DecodeStatusReportType::HucErrorStatus2Reg, osResource, offset));
+        // Store HUC_STATUS2 register
+        auto &par = m_miItf->GETPAR_MI_STORE_REGISTER_MEM();
+        par                            = {};
+        par.presStoreBuffer            = osResource;
+        par.dwOffset                   = offset;
+        par.dwRegister                 = m_hucItf->GetMmioRegisters(MHW_VDBOX_NODE_1)->hucStatus2RegOffset;
+        DECODE_CHK_STATUS(m_miItf->ADDCMD_MI_STORE_REGISTER_MEM(&cmdBuffer));
+    }
     return MOS_STATUS_SUCCESS;
 }
 
@@ -207,14 +209,14 @@ MOS_STATUS DecodeHucBasic::AddForceWakeup(MOS_COMMAND_BUFFER& cmdBuffer, bool mf
 {
     DECODE_FUNC_CALL();
 
-    MHW_MI_FORCE_WAKEUP_PARAMS forceWakeupParams;
-    MOS_ZeroMemory(&forceWakeupParams, sizeof(MHW_MI_FORCE_WAKEUP_PARAMS));
-    forceWakeupParams.bMFXPowerWellControl      = mfxWakeup;
-    forceWakeupParams.bMFXPowerWellControlMask  = true;
-    forceWakeupParams.bHEVCPowerWellControl     = hcpWakeup;
-    forceWakeupParams.bHEVCPowerWellControlMask = true;
+    auto &par = m_miItf->GETPAR_MI_FORCE_WAKEUP();
+    par       = {};
+    par.bMFXPowerWellControl                    = mfxWakeup;
+    par.bMFXPowerWellControlMask                = true;
+    par.bHEVCPowerWellControl                   = hcpWakeup;
+    par.bHEVCPowerWellControlMask               = true;
 
-    DECODE_CHK_STATUS(m_miInterface->AddMiForceWakeupCmd(&cmdBuffer, &forceWakeupParams));
+    DECODE_CHK_STATUS(m_miItf->ADDCMD_MI_FORCE_WAKEUP(&cmdBuffer));
 
     return MOS_STATUS_SUCCESS;
 }
@@ -238,11 +240,11 @@ MOS_STATUS DecodeHucBasic::SendPrologCmds(MOS_COMMAND_BUFFER& cmdBuffer)
     MHW_GENERIC_PROLOG_PARAMS  genericPrologParams;
     MOS_ZeroMemory(&genericPrologParams, sizeof(genericPrologParams));
     genericPrologParams.pOsInterface = m_osInterface;
-    genericPrologParams.pvMiInterface = m_miInterface;
+    genericPrologParams.pvMiInterface = nullptr;
 #ifdef _MMC_SUPPORTED
     genericPrologParams.bMmcEnabled = isMmcEnabled;
 #endif
-    DECODE_CHK_STATUS(Mhw_SendGenericPrologCmd(&cmdBuffer, &genericPrologParams));
+    DECODE_CHK_STATUS(Mhw_SendGenericPrologCmdNext(&cmdBuffer, &genericPrologParams, m_miItf));
 
     subPacket = m_pipeline->GetSubPacket(DecodePacketId(m_pipeline, predicationSubPacketId));
     DecodePredicationPkt *predicationPacket = dynamic_cast<DecodePredicationPkt*>(subPacket);
@@ -254,9 +256,9 @@ MOS_STATUS DecodeHucBasic::SendPrologCmds(MOS_COMMAND_BUFFER& cmdBuffer)
 
 MOS_STATUS DecodeHucBasic::MemoryFlush(MOS_COMMAND_BUFFER &cmdBuffer)
 {
-    MHW_MI_FLUSH_DW_PARAMS flushDwParams;
-    MOS_ZeroMemory(&flushDwParams, sizeof(flushDwParams));
-    DECODE_CHK_STATUS(m_miInterface->AddMiFlushDwCmd(&cmdBuffer, &flushDwParams));
+    auto &par = m_miItf->GETPAR_MI_FLUSH_DW();
+    par       = {};
+    DECODE_CHK_STATUS(m_miItf->ADDCMD_MI_FLUSH_DW(&cmdBuffer));
     return MOS_STATUS_SUCCESS;
 }
 

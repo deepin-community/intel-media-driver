@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2020, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,7 +30,7 @@
 
 #include "media_pipeline.h"
 
-#include "codechal_hw.h"
+#include "codec_hw_next.h"
 #include "codechal_debug.h"
 #include "codec_def_decode.h"
 #include "decode_allocator.h"
@@ -41,6 +41,7 @@
 #include "decode_cp_bitstream.h"
 #include "decode_mem_compression.h"
 #include "decode_downsampling_feature.h"
+#include "codechal_oca_debug.h"
 
 namespace decode {
 
@@ -71,10 +72,13 @@ public:
     //!         Pointer to CodechalDebugInterface
     //!
     DecodePipeline(
-        CodechalHwInterface *   hwInterface,
+        CodechalHwInterfaceNext *hwInterface,
         CodechalDebugInterface *debugInterface);
 
-    virtual ~DecodePipeline() { };
+    virtual ~DecodePipeline()
+    {
+        MOS_Delete(m_pCodechalOcaDumper);
+    };
 
     //!
     //! \brief  Prepare interal parameters, should be invoked for each frame
@@ -132,7 +136,7 @@ public:
     //! \return CodechalHwInterface *
     //!         pointer of m_hwInterface
     //!
-    CodechalHwInterface *GetHwInterface() const { return m_hwInterface; }
+    CodechalHwInterfaceNext *GetHwInterface() const { return m_hwInterface; }
 
     //!
     //! \brief    Help function to get pipe number
@@ -287,6 +291,12 @@ public:
     //! \return decode context
     //!
     MOS_GPU_CONTEXT GetDecodeContext() { return m_decodeContext; }
+
+    //!
+    //! \brief  Get decode context handle
+    //! \return decode context handle
+    //!
+    GPU_CONTEXT_HANDLE GetDecodeContextHandle() { return m_decodeContextHandle; }
     
     //!
     //! \brief  Indicates whether current process pipe is first process pipe of current frame
@@ -294,6 +304,20 @@ public:
     //!         true for first process pipe, false for other process pipe
     //!
     bool IsFirstProcessPipe(const DecodePipelineParams &pipelineParams);
+
+    //!
+    //! \brief    Gets oca dump interface.
+    //! \return   CodechalOcaDumper
+    //!           return oca debug interface
+    //!
+    CodechalOcaDumper *GetCodechalOcaDumper() { return m_pCodechalOcaDumper; }
+
+    //!
+    //! \brief    Set decode short/long format during runtime.
+    //! \return   MOS_STATUS
+    //!           MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS SetDecodeFormat(bool isShortFormat ){ return MOS_STATUS_UNIMPLEMENTED; };
 
 protected:
     //!
@@ -356,7 +380,7 @@ protected:
     //! \return MOS_STATUS
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
-    MOS_STATUS CreatePostSubPipeLines(DecodeSubPipelineManager &subPipelineManager);
+    virtual MOS_STATUS CreatePostSubPipeLines(DecodeSubPipelineManager &subPipelineManager);
 
     //!
     //! \brief  Create sub packets
@@ -368,12 +392,36 @@ protected:
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
     virtual MOS_STATUS CreateSubPackets(DecodeSubPacketManager& subPacketManager, CodechalSetting &codecSettings);
-
+    //!
+    //! \brief  Declare Regkeys in the scope of decode
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    virtual MOS_STATUS InitUserSetting(MediaUserSettingSharedPtr userSettingPtr) override;
 
 #if USE_CODECHAL_DEBUG_TOOL
 #ifdef _DECODE_PROCESSING_SUPPORTED
     MOS_STATUS DumpDownSamplingParams(DecodeDownSamplingFeature &downSamplingParams);
 #endif
+
+    //!
+    //! \brief  Dump Bitstream
+    //! \param  [in] pBitstream
+    //!         Bitstream Resource
+    //! \param  [in] size
+    //!         Bitstream Size
+    //! \param  [in] offset
+    //!         Bitstream Offset 
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS DumpBitstream(PMOS_RESOURCE pBitstream, uint32_t size, uint32_t offset);
+
+    //!
+    //! \brief  Add delay for dump render targets
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS DelayForDumpOutput();
 
     //!
     //! \brief  Dump render targets
@@ -426,7 +474,7 @@ protected:
     MOS_STATUS StatusCheck();
 #endif
 
-private:
+protected:
     //!
     //! \brief  Create sub pipeline manager
     //! \param  [in] codecSettings
@@ -445,10 +493,10 @@ private:
     //!
     MOS_STATUS CreateSubPacketManager(CodechalSetting* codecSettings);
 
-protected:
     friend class DecodeSubPipelineManager;
 
-    CodechalHwInterface*    m_hwInterface    = nullptr; //!< Codechal HwInterface
+    CodechalHwInterfaceNext *m_hwInterface        = nullptr;  //!< Codechal HwInterface
+    CodechalOcaDumper      *m_pCodechalOcaDumper = nullptr;
     CodechalDebugInterface* m_debugInterface = nullptr; //!< Debug Interface
     MediaTask *             m_task           = nullptr; //!< Command task
 
@@ -469,10 +517,16 @@ protected:
     bool                    m_singleTaskPhaseSupported = true; //!< Indicates whether sumbit packets in single phase
 
     MOS_GPU_CONTEXT         m_decodeContext = MOS_GPU_CONTEXT_INVALID_HANDLE;    //!< decode context inuse
+    GPU_CONTEXT_HANDLE      m_decodeContextHandle = MOS_GPU_CONTEXT_INVALID_HANDLE;    //!< handle of decode context inuse
 
 #if (_DEBUG || _RELEASE_INTERNAL)
     uint32_t                m_statusCheckCount = 0;     //!< count for status check
+    uint32_t                m_delayMiliseconds = 0;     //!< miliseconds delay after each frame
 #endif
+
+    PMOS_SURFACE            m_tempOutputSurf = nullptr;
+
+MEDIA_CLASS_DEFINE_END(decode__DecodePipeline)
 };
 
 }//decode

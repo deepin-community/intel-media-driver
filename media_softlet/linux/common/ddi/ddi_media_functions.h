@@ -27,9 +27,19 @@
 #ifndef __DDI_MEDIA_FUNCTIONS_H__
 #define __DDI_MEDIA_FUNCTIONS_H__
 
+#include <stdint.h>
+#include <va/va_version.h>
 #include <va/va.h>
 #include <va/va_backend.h>
 #include "media_factory.h"
+#include "media_class_trace.h"
+
+#define DDI_VP_NUM_INPUT_COLOR_STD          6                 /* Number of supported input color formats */
+#define DDI_VP_NUM_OUT_COLOR_STD            6                 /* Number of supported output color formats*/
+#define DDI_CODEC_NUM_FWD_REF               0                 /* Number of forward references */
+#define DDI_CODEC_NUM_BK_REF                0                 /* Number of backward references */
+typedef struct DDI_MEDIA_CONTEXT *PDDI_MEDIA_CONTEXT;
+typedef struct _DDI_MEDIA_SURFACE DDI_MEDIA_SURFACE;
 
 class DdiMediaFunctions
 {
@@ -116,6 +126,61 @@ public:
         uint32_t          elementsNum,
         void              *data,
         VABufferID        *bufId
+    );
+
+    //!
+    //! \brief  Map data store of the buffer into the client's address space
+    //!         vaCreateBuffer() needs to be called with "data" set to nullptr before
+    //!         calling vaMapBuffer()
+    //!
+    //! \param  [in] mediaCtx
+    //!         Pointer to media context
+    //! \param  [in] bufId
+    //!         VA buffer ID
+    //! \param  [out] buf
+    //!         Pointer to buffer
+    //! \param  [in] flag
+    //!         Flag
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus MapBufferInternal(
+        DDI_MEDIA_CONTEXT   *mediaCtx,
+        VABufferID          bufId,
+        void                **buf,
+        uint32_t            flag
+    );
+
+    //! \brief  Unmap buffer
+    //!
+    //! \param  [in] mediaCtx
+    //!         Pointer to media context
+    //! \param  [in] bufId
+    //!         VA buffer ID
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus UnmapBuffer (
+        DDI_MEDIA_CONTEXT   *mediaCtx,
+        VABufferID          bufId
+    );
+
+    //!
+    //! \brief  Destroy buffer
+    //!
+    //! \param  [in] mediaCtx
+    //!         Pointer to media context
+    //! \param  [in] bufId
+    //!         VA buffer ID
+    //!
+    //! \return     VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus DestroyBuffer(
+        DDI_MEDIA_CONTEXT  *mediaCtx,
+        VABufferID         bufId
     );
 
     //!
@@ -371,6 +436,131 @@ public:
     );
 
 #endif
+
+    //!
+    //! \brief   Status check after SyncSurface2
+    //!
+    //! \param   [in] mediaCtx
+    //!          Pointer to media driver context
+    //! \param   [in] surface
+    //!          DDI MEDIA SURFACE
+    //! \param   [in] VASurfaceID
+    //!          surface id
+    //!
+    //! \return  VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus StatusCheck(
+        PDDI_MEDIA_CONTEXT mediaCtx,
+        DDI_MEDIA_SURFACE  *surface,
+        VASurfaceID        surfaceId
+    );
+
+    //!
+    //! \brief   Query Surface Error
+    //!
+    //! \param   [in] ctx
+    //!          Pointer to VA driver context
+    //! \param   [in] renderTarget
+    //!          VASurfaceID
+    //! \param   [in] errorStatus
+    //!          error Status
+    //! \param   [in] errorInfo
+    //!          error info
+    //!
+    //! \return  VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus QuerySurfaceError(
+        VADriverContextP ctx,
+        VASurfaceID      renderTarget,
+        VAStatus         errorStatus,
+        void             **errorInfo
+    );
+
+    //! \brief  Ddi codec put surface linux hardware
+    //!
+    //! \param  ctx
+    //!     Pointer to VA driver context
+    //! \param  surface
+    //!     VA surface ID
+    //! \param  draw
+    //!     Drawable of window system
+    //! \param  srcx
+    //!     Source X of the region
+    //! \param  srcy
+    //!     Source Y of the region
+    //! \param  srcw
+    //!     Source W of the region
+    //! \param  srch
+    //!     Source H of the region
+    //! \param  destx
+    //!     Destination X
+    //! \param  desty
+    //!     Destination Y
+    //! \param  destw
+    //!     Destination W
+    //! \param  desth
+    //!     Destination H
+    //! \param  cliprects
+    //!     Client-supplied clip list
+    //! \param  numberCliprects
+    //!     Number of clip rects in the clip list
+    //! \param  flags
+    //!     De-interlacing flags
+    //!
+    //! \return     VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus PutSurface(
+        VADriverContextP ctx,
+        VASurfaceID      surface,
+        void             *draw,             /* Drawable of window system */
+        int16_t          srcx,
+        int16_t          srcy,
+        uint16_t         srcw,
+        uint16_t         srch,
+        int16_t          destx,
+        int16_t          desty,
+        uint16_t         destw,
+        uint16_t         desth,
+        VARectangle      *cliprects,        /* client supplied clip list */
+        uint32_t         numberCliprects,  /* number of clip rects in the clip list */
+        uint32_t         flags             /* de-interlacing flags */
+    );
+    
+    //! \brief  Ddi process pipeline
+    //!
+    //! \param  pVaDrvCtx
+    //!     Pointer to VA driver context
+    //! \param  ctxID
+    //!     VA context ID
+    //! \param  srcSurface
+    //!     VA src surface ID
+    //! \param  srcRect
+    //!     VA src rect
+    //! \param  dstSurface
+    //!     VA dst surface ID
+    //! \param  dstRect
+    //!     VA dst rect
+    //!
+    //! \return     VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual VAStatus ProcessPipeline(
+        VADriverContextP    vaDrvCtx,
+        VAContextID         ctxID,
+        VASurfaceID         srcSurface,
+        VARectangle         *srcRect,
+        VASurfaceID         dstSurface,
+        VARectangle         *dstRect
+    );
+
+protected:
+    static const VAProcColorStandardType   m_vpInputColorStd[DDI_VP_NUM_INPUT_COLOR_STD];
+    static const VAProcColorStandardType   m_vpOutputColorStd[DDI_VP_NUM_OUT_COLOR_STD];
+
+MEDIA_CLASS_DEFINE_END(DdiMediaFunctions)
 };
 
 enum CompType

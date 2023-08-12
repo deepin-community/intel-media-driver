@@ -71,6 +71,7 @@ public:
     SwFilter *GetSwFilter(FeatureType type);
     MOS_STATUS AddSwFilterOrdered(SwFilter *swFilter, bool useNewSwFilterSet);
     MOS_STATUS AddSwFilterUnordered(SwFilter *swFilter);
+    MOS_STATUS AddFeatureGraphRTLog();
     bool IsEmpty()
     {
         bool ret = false;
@@ -106,6 +107,8 @@ public:
 private:
     std::vector<SwFilterSet *> m_OrderedFilters;    // For features in featureRule
     SwFilterSet m_UnorderedFilters;                 // For features not in featureRule
+
+MEDIA_CLASS_DEFINE_END(vp__SwFilterSubPipe)
 };
 
 enum SwFilterPipeType
@@ -134,7 +137,7 @@ public:
     MOS_STATUS ConfigFeaturesToPipe(VP_PIPELINE_PARAMS &params, FeatureRule &featureRule, bool isInputPipe);
     MOS_STATUS ConfigFeatures(VP_PIPELINE_PARAMS &params, FeatureRule &featureRule);
     MOS_STATUS ConfigFeatures(VEBOX_SFC_PARAMS &params);
-    MOS_STATUS UpdateFeatures(bool isInputPipe, uint32_t pipeIndex);
+    MOS_STATUS UpdateFeatures(bool isInputPipe, uint32_t pipeIndex, VP_EXECUTE_CAPS *caps = nullptr);
 
     SwFilterPipeType GetSwFilterPipeType()
     {
@@ -155,18 +158,31 @@ public:
     VP_SURFACE *GetFutureSurface(uint32_t index);
     MOS_STATUS SetPastSurface(uint32_t index, VP_SURFACE *surf);
     MOS_STATUS SetFutureSurface(uint32_t index, VP_SURFACE *surf);
+    // Destroy the surface but not remove the related layer. Just keep the surface
+    // pointer being nullptr. Update() need be called later to remove the unused layers.
+    MOS_STATUS DestroySurface(bool isInputSurface, uint32_t index);
+    // Remove the surface but not remove the related layer. Just keep the surface
+    // pointer being nullptr. Update() need be called later to remove the unused layers.
     VP_SURFACE *RemoveSurface(bool isInputSurface, uint32_t index);
     VP_SURFACE *RemovePastSurface(uint32_t index);
     VP_SURFACE *RemoveFutureSurface(uint32_t index);
     MOS_STATUS AddSurface(VP_SURFACE *&surf, bool isInputSurface, uint32_t index);
-    MOS_STATUS Update();
+    MOS_STATUS Update(VP_EXECUTE_CAPS *caps = nullptr);
     uint32_t GetSurfaceCount(bool isInputSurface);
+    MOS_STATUS  AddRTLog();
+    MOS_STATUS  AddFeatureGraphRTLog(bool isInputPipe, uint32_t pipeIndex);
+    bool IsAllInputPipeEmpty();
     bool IsAllInputPipeSurfaceFeatureEmpty();
     bool IsAllInputPipeSurfaceFeatureEmpty(std::vector<int> &layerIndexes);
 
     VP_SURFACE_SETTING &GetSurfacesSetting()
     {
         return m_surfacesSetting;
+    }
+
+    VpInterface &GetVpInterface()
+    {
+        return m_vpInterface;
     }
 
     MOS_STATUS SetSecureProcessFlag(bool secureProcessed)
@@ -221,6 +237,11 @@ public:
         m_linkedLayerIndex[index] = linkedIndex;
     }
 
+    void SetExePipeFlag(bool isExePipe)
+    {
+        m_isExePipe = isExePipe;
+    }
+
 protected:
     MOS_STATUS CleanFeaturesFromPipe(bool isInputPipe, uint32_t index);
     MOS_STATUS CleanFeaturesFromPipe(bool isInputPipe);
@@ -244,6 +265,9 @@ protected:
     bool                                m_isFeatureRegistered = false;
     SwFilterPipeType                    m_swFilterPipeType = SwFilterPipeTypeInvalid;
     bool                                m_processedSecurePrepared = false;
+    bool                                m_isExePipe = false;
+
+MEDIA_CLASS_DEFINE_END(vp__SwFilterPipe)
 };
 
 

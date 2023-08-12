@@ -35,7 +35,7 @@ namespace decode
     class Av1DecodePicPktG12 : public Av1DecodePicPkt_G12_Base
     {
     public:
-        Av1DecodePicPktG12(Av1Pipeline *pipeline, CodechalHwInterface *hwInterface)
+        Av1DecodePicPktG12(Av1PipelineG12_Base *pipeline, CodechalHwInterface *hwInterface)
             : Av1DecodePicPkt_G12_Base(pipeline, hwInterface)
         {
         }
@@ -73,6 +73,7 @@ namespace decode
         //!           MOS_STATUS_SUCCESS if success, else fail reason
         //!
         MOS_STATUS CalculatePictureStateCommandSize();
+    MEDIA_CLASS_DEFINE_END(decode__Av1DecodePicPktG12)
     };
 }  // namespace decode
 #endif

@@ -24,6 +24,7 @@
 //! \brief    Defines functions for constructing Vdbox HCP commands on G9 BXT platform
 //!
 
+#include "mos_os_cp_interface_specific.h"
 #include "mhw_vdbox_hcp_g9_bxt.h"
 #include "mhw_mi_hwcmd_g9_X.h"
 #include "mhw_vdbox_vdenc_hwcmd_g9_bxt.h"
@@ -504,7 +505,7 @@ MOS_STATUS MhwVdboxHcpInterfaceG9Bxt::AddHcpVp9PicStateCmd(
         cmd.DW9.AltrefFrameHieghtInPixelsMinus1 = altRefFrameHeight - 1;
     }
 
-    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, &cmd, cmd.byteSize));
+    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, &cmd, cmd.byteSize));
 
     return eStatus;
 }
@@ -570,7 +571,7 @@ MOS_STATUS MhwVdboxHcpInterfaceG9Bxt::AddHcpVp9SegmentStateCmd(
         segData = &cmd;
     }
 
-    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, segData, cmd.byteSize));
+    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, segData, cmd.byteSize));
 
     return eStatus;
 }

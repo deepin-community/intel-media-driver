@@ -449,8 +449,10 @@ protected:
     uint32_t                    m_sliceCtrlBufNum;      //!<Slice control Buffer Number
     uint32_t                    m_decProcessingType;    //!<Decode Processing type
     CodechalSetting             *m_codechalSettings = nullptr;    //!<Codechal Settings
+    bool                        m_decodeErrorFlag = false;  //!<Indicate has decode error in current GOP
 
 #ifdef _DECODE_PROCESSING_SUPPORTED
+    bool                          m_requireInputRegion = false;
     VAProcPipelineParameterBuffer *m_procBuf = nullptr; //!< Process parameters for vp sfc input
 #endif
 };

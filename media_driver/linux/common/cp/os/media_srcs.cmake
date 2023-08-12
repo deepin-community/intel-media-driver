@@ -1,4 +1,4 @@
-# Copyright (c) 2017, Intel Corporation
+# Copyright (c) 2017-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -21,17 +21,15 @@
 set(TMP_SOURCES_
     ${CMAKE_CURRENT_LIST_DIR}/mos_os_cp_interface_specific.cpp
 )
-set(TMP_HEADERS_
-    ${CMAKE_CURRENT_LIST_DIR}/mos_os_cp_interface_specific.h
-)
 
 set(SOURCES_
     ${SOURCES_}
     ${TMP_SOURCES_}
 )
-set(HEADERS_
-    ${HEADERS_}
-    ${TMP_HEADERS_}
+
+set(COMMON_CP_DIRECTORIES_
+    ${COMMON_CP_DIRECTORIES_}
+    ${CMAKE_CURRENT_LIST_DIR}
 )
 
 media_add_curr_to_include_path()

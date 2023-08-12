@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2013-2017, Intel Corporation
+* Copyright (c) 2013-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -35,8 +35,12 @@
 #define BASIC_TYPES_DEFINED 1
 #define BOOL_DEF            1  
 
-#include <stdio.h>       // FILE
-#include <stdint.h>
+#include <cstdio>       // FILE
+#include <cstdint>
+#include <string>
+#include <map>
+#include <algorithm>
+#include <memory>
 #include "mos_defs_specific.h"
 
 //!
@@ -54,11 +58,11 @@
 //! \brief Macros for enabling / disabling development features in MOS
 //!
 
-//! MediaSolo is only supported for non-production builds
-#if ((_DEBUG || _RELEASE_INTERNAL ) && !defined(ANDROID) && _MEDIA_SOLO_SUPPORTED)
-#define MOS_MEDIASOLO_SUPPORTED 1
+//! Event Trace Logging a debug feature so should not be enabled in release builds
+#if (_DEBUG || _RELEASE_INTERNAL)
+#define MOS_EVENT_TRACE_DUMP_SUPPORTED 1
 #else
-#define MOS_MEDIASOLO_SUPPORTED 0
+#define MOS_EVENT_TRACE_DUMP_SUPPORTED 0
 #endif
 
 //! Command buffer dumps are a debug feature so should not be enabled in release builds
@@ -289,7 +293,9 @@ using MOS_CONTEXT_HANDLE = void *;
 //! \def MOS_UNUSED(param)
 //! Fix compiling warning for unused parameter
 //!
+#ifndef MOS_UNUSED
 #define MOS_UNUSED(param) (void)(param)
+#endif
 
 #define MOS_BITFIELD_VALUE(_x, _bits)         ((_x) & ((1 << (_bits)) - 1))
 
@@ -338,7 +344,8 @@ typedef enum _MOS_STATUS
     MOS_STATUS_UNINITIALIZED                     = 31,
     MOS_STATUS_GPU_CONTEXT_ERROR                 = 32,
     MOS_STATUS_STILL_DRAWING                     = 33,
-    MOS_STATUS_UNKNOWN                           = 34
+    MOS_STATUS_USER_FEATURE_READ_FAILED          = 34,
+    MOS_STATUS_UNKNOWN                           = 35
 } MOS_STATUS;
 
 //!
@@ -487,10 +494,45 @@ enum MOS_MEMCOMP_STATE
 typedef enum MOS_MEMCOMP_STATE *PMOS_MEMCOMP_STATE;
 typedef uint32_t               GPU_CONTEXT_HANDLE;
 
+//!
+//! \brief Enum for OS component
+//!
+enum MOS_COMPONENT
+{
+    COMPONENT_UNKNOWN = 0,
+    COMPONENT_LibVA,
+    COMPONENT_EMULATION,
+    COMPONENT_CM,
+    COMPONENT_Encode,
+    COMPONENT_Decode,
+    COMPONENT_VPCommon,
+    COMPONENT_VPreP,
+    COMPONENT_CP,
+    COMPONENT_MEMDECOMP,
+    COMPONENT_MCPY,
+    COMPONENT_OCA,
+};
+C_ASSERT(COMPONENT_OCA == 11);  // When adding, update assert
+
 #define MOS_MAX_ENGINE_INSTANCE_PER_CLASS   8
 #define MOS_BUF_NAME_LENGTH 64
 
 #define MOS_INVALID_HANDLE 0
 #define MOS_DUMMY_FENCE (uint64_t)(-1)
 
+
+namespace MediaUserSetting {
+    class MediaUserSetting;
+    class Value;
+};
+
+using MediaUserSettingSharedPtr = std::shared_ptr<MediaUserSetting::MediaUserSetting>;
+
+const unsigned int BITS_PER_BYTE = 8;
+
+class OsContextNext;
+typedef OsContextNext    OsDeviceContext;
+typedef OsDeviceContext *MOS_DEVICE_HANDLE;
+
+struct MOS_CONTEXT_INTERFACE;
 #endif // __MOS_DEFS_H__

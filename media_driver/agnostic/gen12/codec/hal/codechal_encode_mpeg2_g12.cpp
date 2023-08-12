@@ -32,7 +32,7 @@
 #include "igcodeckrn_g12.h"
 #include "codeckrnheader.h"
 
-struct KernelHeader
+struct KernelHeaderMpegG12
 {
     uint32_t m_kernelCount;
 
@@ -1020,11 +1020,11 @@ CodechalEncodeMpeg2G12::CodechalEncodeMpeg2G12(
 {
     CODECHAL_ENCODE_FUNCTION_ENTER;
 
-    CODECHAL_ENCODE_ASSERT(m_osInterface);
+    CODECHAL_ENCODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
     m_kuidCommon = IDR_CODEC_HME_DS_SCOREBOARD_KERNEL;
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, false, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, false, true);
 
     pfnGetKernelHeaderAndSize = GetKernelHeaderAndSize;
 
@@ -1142,7 +1142,7 @@ MOS_STATUS CodechalEncodeMpeg2G12::GetKernelHeaderAndSize(
     CODECHAL_ENCODE_CHK_NULL_RETURN(krnHeader);
     CODECHAL_ENCODE_CHK_NULL_RETURN(krnSize);
 
-    auto kernelHeaderTable = (KernelHeader *)binary;
+    auto kernelHeaderTable = (KernelHeaderMpegG12 *)binary;
     PCODECHAL_KERNEL_HEADER currKrnHeader;
 
     if (operation == ENC_BRC)

@@ -26,9 +26,9 @@
 #include "codechal_utilities.h"
 #include "decode_av1_packet_g12_base.h"
 #include "decode_status_report_defs.h"
-#include "decode_predication_packet.h"
+#include "decode_predication_packet_g12.h"
 #include "mhw_vdbox_vdenc_g12_X.h"
-#include "decode_marker_packet.h"
+#include "decode_marker_packet_g12.h"
 
 namespace decode {
 
@@ -44,7 +44,7 @@ MOS_STATUS Av1DecodePkt_G12_Base::Init()
 
     DECODE_CHK_STATUS(CmdPacket::Init());
 
-    m_av1BasicFeature = dynamic_cast<Av1BasicFeature*>(m_featureManager->GetFeature(FeatureIDs::basicFeature));
+    m_av1BasicFeature = dynamic_cast<Av1BasicFeatureG12*>(m_featureManager->GetFeature(FeatureIDs::basicFeature));
     DECODE_CHK_NULL(m_av1BasicFeature);
 
     m_allocator = m_av1Pipeline->GetDecodeAllocator();
@@ -109,12 +109,36 @@ MOS_STATUS Av1DecodePkt_G12_Base::AddForceWakeup(MOS_COMMAND_BUFFER& cmdBuffer)
     DECODE_FUNC_CALL();
 
     MHW_MI_FORCE_WAKEUP_PARAMS forceWakeupParams;
-    MOS_ZeroMemory(&forceWakeupParams, sizeof(MHW_MI_FORCE_WAKEUP_PARAMS));
-    forceWakeupParams.bMFXPowerWellControl = false;
-    forceWakeupParams.bMFXPowerWellControlMask = true;
-    forceWakeupParams.bHEVCPowerWellControl = true;
-    forceWakeupParams.bHEVCPowerWellControlMask = true;
+    if (MEDIA_IS_WA(m_av1Pipeline->GetWaTable(), Wa_14016153635))
+    {
+        MOS_ZeroMemory(&forceWakeupParams, sizeof(MHW_MI_FORCE_WAKEUP_PARAMS));
+        forceWakeupParams.bMFXPowerWellControl      = true;
+        forceWakeupParams.bMFXPowerWellControlMask  = true;
+        forceWakeupParams.bHEVCPowerWellControl     = false;
+        forceWakeupParams.bHEVCPowerWellControlMask = true;
+        DECODE_CHK_STATUS(m_miInterface->AddMiForceWakeupCmd(&cmdBuffer, &forceWakeupParams)); 
+        forceWakeupParams.bMFXPowerWellControl      = true;
+        forceWakeupParams.bMFXPowerWellControlMask  = true;
+        forceWakeupParams.bHEVCPowerWellControl     = true;
+        forceWakeupParams.bHEVCPowerWellControlMask = true;
+        DECODE_CHK_STATUS(m_miInterface->AddMiForceWakeupCmd(&cmdBuffer, &forceWakeupParams));
+        forceWakeupParams.bMFXPowerWellControl      = false;
+        forceWakeupParams.bMFXPowerWellControlMask  = true;
+        forceWakeupParams.bHEVCPowerWellControl     = true;
+        forceWakeupParams.bHEVCPowerWellControlMask = true;
+        DECODE_CHK_STATUS(m_miInterface->AddMiForceWakeupCmd(&cmdBuffer, &forceWakeupParams));
+    }
+    else
+    {
+        MOS_ZeroMemory(&forceWakeupParams, sizeof(MHW_MI_FORCE_WAKEUP_PARAMS));
+        forceWakeupParams.bMFXPowerWellControl      = false;
+        forceWakeupParams.bMFXPowerWellControlMask  = true;
+        forceWakeupParams.bHEVCPowerWellControl     = true;
+        forceWakeupParams.bHEVCPowerWellControlMask = true;
 
+        DECODE_CHK_STATUS(m_miInterface->AddMiForceWakeupCmd(&cmdBuffer, &forceWakeupParams));
+    }
+ 
     DECODE_CHK_STATUS(m_miInterface->AddMiForceWakeupCmd(&cmdBuffer, &forceWakeupParams));
 
     return MOS_STATUS_SUCCESS;
@@ -123,7 +147,7 @@ MOS_STATUS Av1DecodePkt_G12_Base::AddForceWakeup(MOS_COMMAND_BUFFER& cmdBuffer)
 MOS_STATUS Av1DecodePkt_G12_Base::SendPrologWithFrameTracking(MOS_COMMAND_BUFFER& cmdBuffer, bool frameTrackingRequested)
 {
     DecodeSubPacket* subPacket = m_av1Pipeline->GetSubPacket(DecodePacketId(m_av1Pipeline, markerSubPacketId));
-    DecodeMarkerPkt *makerPacket = dynamic_cast<DecodeMarkerPkt*>(subPacket);
+    DecodeMarkerPktG12 *makerPacket = dynamic_cast<DecodeMarkerPktG12*>(subPacket);
     DECODE_CHK_NULL(makerPacket);
     DECODE_CHK_STATUS(makerPacket->Execute(cmdBuffer));
 
@@ -148,7 +172,7 @@ MOS_STATUS Av1DecodePkt_G12_Base::SendPrologWithFrameTracking(MOS_COMMAND_BUFFER
     DECODE_CHK_STATUS(Mhw_SendGenericPrologCmd(&cmdBuffer, &genericPrologParams));
 
     subPacket = m_av1Pipeline->GetSubPacket(DecodePacketId(m_av1Pipeline, predicationSubPacketId));
-    DecodePredicationPkt *predicationPacket = dynamic_cast<DecodePredicationPkt*>(subPacket);
+    DecodePredicationPktG12 *predicationPacket = dynamic_cast<DecodePredicationPktG12 *>(subPacket);
     DECODE_CHK_NULL(predicationPacket);
     DECODE_CHK_STATUS(predicationPacket->Execute(cmdBuffer));
 
@@ -255,6 +279,7 @@ MOS_STATUS Av1DecodePkt_G12_Base::StartStatusReport(uint32_t srType, MOS_COMMAND
 
     MediaPacket::StartStatusReport(srType, cmdBuffer);
 
+    SetPerfTag(CODECHAL_DECODE_MODE_AV1VLD, m_av1BasicFeature->m_pictureCodingType);
     MediaPerfProfiler* perfProfiler = MediaPerfProfiler::Instance();
     DECODE_CHK_NULL(perfProfiler);
     DECODE_CHK_STATUS(perfProfiler->AddPerfCollectStartCmd(
@@ -269,8 +294,6 @@ MOS_STATUS Av1DecodePkt_G12_Base::EndStatusReport(uint32_t srType, MOS_COMMAND_B
     DECODE_CHK_NULL(cmdBuffer);
     DECODE_CHK_STATUS(ReadAvpStatus( m_statusReport, *cmdBuffer));
     DECODE_CHK_STATUS(MediaPacket::EndStatusReport(srType, cmdBuffer));
-
-    SetPerfTag(CODECHAL_DECODE_MODE_AV1VLD, m_av1BasicFeature->m_pictureCodingType);
 
     MediaPerfProfiler* perfProfiler = MediaPerfProfiler::Instance();
     DECODE_CHK_NULL(perfProfiler);

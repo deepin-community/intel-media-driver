@@ -24,15 +24,15 @@
 
 VpPipelineG12Adapter::VpPipelineG12Adapter(
     PMOS_INTERFACE              pOsInterface,
-    PMOS_CONTEXT                pOsDriverContext,
     vp::VpPlatformInterface     &vpPlatformInterface,
     MOS_STATUS                  &eStatus) :
-    VphalStateG12Tgllp(pOsInterface, pOsDriverContext, &eStatus),
-    VpPipelineAdapter(vpPlatformInterface, eStatus)
+    VphalStateG12Tgllp(pOsInterface, &eStatus),
+    VpPipelineAdapterLegacy(vpPlatformInterface, eStatus)
 {
     if (MOS_FAILED(eStatus))
     {
         MOS_OS_ASSERTMESSAGE("VpPipelineG12Adapter construct failed due to base class returned failure: eStatus = %d.", eStatus);
+        MT_ERR1(MT_VP_HAL_PIPELINE, MT_ERROR_CODE, eStatus);
         return;
     }
 }
@@ -50,7 +50,7 @@ MOS_STATUS VpPipelineG12Adapter::Render(PCVPHAL_RENDER_PARAMS pcRenderParams)
 {
     VP_FUNC_CALL();
 
-    MOS_STATUS eStatus = VpPipelineAdapter::Render(pcRenderParams);
+    MOS_STATUS eStatus = VpPipelineAdapterLegacy::Render(pcRenderParams);
 
     if (eStatus == MOS_STATUS_SUCCESS)
     {
@@ -70,6 +70,7 @@ MOS_STATUS VpPipelineG12Adapter::Allocate(
     MOS_STATUS status = VphalStateG12Tgllp::Allocate(pVpHalSettings);
     if (MOS_FAILED(status))
     {
+        MT_ERR1(MT_VP_HAL_PIPELINE, MT_ERROR_CODE, status);
         return status;
     }
 
@@ -77,6 +78,7 @@ MOS_STATUS VpPipelineG12Adapter::Allocate(
     status                         = VphalStateG12Tgllp::GetVpMhwInterface(vpMhwinterface);
     if (MOS_FAILED(status))
     {
+        MT_ERR1(MT_VP_HAL_PIPELINE, MT_ERROR_CODE, status);
         return status;
     }
     return Init(pVpHalSettings, vpMhwinterface);
@@ -109,5 +111,5 @@ MOS_STATUS VpPipelineG12Adapter::Execute(PVP_PIPELINE_PARAMS params)
 {
     VP_FUNC_CALL();
 
-    return VpPipelineAdapter::Execute(params, this->m_renderHal);
+    return VpPipelineAdapterLegacy::Execute(params, this->m_renderHal);
 }

@@ -32,22 +32,20 @@
 namespace decode
 {
 
-DecodeDownSamplingPkt::DecodeDownSamplingPkt(DecodePipeline *pipeline, CodechalHwInterface *hwInterface)
+DecodeDownSamplingPkt::DecodeDownSamplingPkt(DecodePipeline *pipeline, CodechalHwInterfaceNext *hwInterface)
     : DecodeSubPacket(pipeline, hwInterface)
-{}
+{
+    MOS_ZeroMemory(&m_sfcParams, sizeof(m_sfcParams));
+    m_hwInterface = hwInterface;
+}
 
 DecodeDownSamplingPkt::~DecodeDownSamplingPkt()
 {
-    MOS_Delete(m_sfcInterface);
 }
 
 MOS_STATUS DecodeDownSamplingPkt::Init()
 {
     DECODE_CHK_NULL(m_pipeline);
-    DECODE_CHK_NULL(m_hwInterface);
-
-    m_miInterface = m_hwInterface->GetMiInterface();
-    DECODE_CHK_NULL(m_miInterface);
 
     MediaFeatureManager *featureManager = m_pipeline->GetFeatureManager();
     DECODE_CHK_NULL(featureManager);
@@ -81,7 +79,7 @@ MOS_STATUS DecodeDownSamplingPkt::Execute(MOS_COMMAND_BUFFER& cmdBuffer)
 
     if (m_sfcInterface == nullptr)
     {
-        m_sfcInterface = MOS_New(MediaSfcInterface, m_hwInterface->GetOsInterface(), m_pipeline->GetMmcState());
+        m_sfcInterface = m_hwInterface->GetMediaSfcInterface();
         DECODE_CHK_NULL(m_sfcInterface);
 
         MEDIA_SFC_INTERFACE_MODE mode;

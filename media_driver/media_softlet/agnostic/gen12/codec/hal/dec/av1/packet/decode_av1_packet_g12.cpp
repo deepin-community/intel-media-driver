@@ -25,8 +25,8 @@
 //!
 #include "decode_av1_packet_g12.h"
 #include "decode_utils.h"
-#include "decode_av1_pipeline.h"
-#include "decode_av1_basic_feature.h"
+#include "decode_av1_pipeline_g12_base.h"
+#include "decode_av1_basic_feature_g12.h"
 #include "decode_status_report_defs.h"
 #include "mos_solo_generic.h"
 #include "decode_status_report_defs.h"
@@ -50,7 +50,12 @@ namespace decode
         m_isLastTileInPartialFrm = (tileIdx == int16_t(m_av1BasicFeature->m_tileCoding.m_lastTileId)) ? 1 : 0;
         m_isFirstTileInPartialFrm = (tileIdx == int16_t(m_av1BasicFeature->m_tileCoding.m_lastTileId
             - m_av1BasicFeature->m_tileCoding.m_numTiles + 1)) ? 1 : 0;
-
+        // For tile missing scenario and duplicate tile scenario
+        if (m_av1BasicFeature->m_tileCoding.m_hasTileMissing || m_av1BasicFeature->m_tileCoding.m_hasDuplicateTile)
+        {
+            m_isFirstTileInPartialFrm = (tileIdx == int16_t(m_av1BasicFeature->m_tileCoding.m_lastTileId
+                - m_av1BasicFeature->m_tileCoding.m_totalTileNum + 1)) ? 1 : 0;
+        }
         // For frame based submission mode, these cmds only need to be programed once per frame, otherwise need program per tile.
         if (m_isFirstTileInPartialFrm || m_av1Pipeline->TileBasedDecodingInuse() ||
             (m_av1PicParams->m_picInfoFlags.m_fields.m_largeScaleTile))
@@ -138,8 +143,9 @@ namespace decode
                 {
                     ResourceAutoLock resLock(m_allocator, &m_batchBuf->OsResource);
                     uint8_t *batchBufBase = (uint8_t *)resLock.LockResourceForWrite();
+                    DECODE_CHK_NULL(batchBufBase);
                     DECODE_CHK_STATUS(InitPicLevelCmdBuffer(*m_batchBuf, batchBufBase));
-                    HalOcaInterface::OnSubLevelBBStart(cmdBuffer, *m_osInterface->pOsContext, &m_batchBuf->OsResource, 0, true, 0);
+                    HalOcaInterface::OnSubLevelBBStart(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, &m_batchBuf->OsResource, 0, true, 0);
                     m_picCmdBuffer.cmdBuf1stLvl = &cmdBuffer;
                     DECODE_CHK_STATUS(m_picturePkt->Execute(m_picCmdBuffer));
                     DECODE_CHK_STATUS(m_miInterface->AddMiBatchBufferEnd(&m_picCmdBuffer, nullptr));
@@ -196,13 +202,13 @@ namespace decode
             0x00000050, 0x0000003d, 0x718a0001, 0x00000000,
             0x00000004, 0x77800000, 0x00100030
         };
-
-        Mos_AddCommand(&cmdBuffer, section1, sizeof(section1));
+        DECODE_CHK_NULL(m_osInterface);
+        m_osInterface->pfnAddCommand(&cmdBuffer, section1, sizeof(section1));
 
         DECODE_CHK_STATUS(m_picturePkt->UpdatePipeBufAddrForDummyWL(cmdBuffer));
         DECODE_CHK_STATUS(m_picturePkt->UpdateIndObjAddrForDummyWL(cmdBuffer));
 
-        Mos_AddCommand(&cmdBuffer, section2, sizeof(section2));
+        m_osInterface->pfnAddCommand(&cmdBuffer, section2, sizeof(section2));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -236,6 +242,7 @@ namespace decode
             DECODE_CHK_STATUS(UpdateStatusReport(statusReportGlobalCount, &cmdBuffer));
         }
 
+#ifdef _MMC_SUPPORTED
         CODECHAL_DEBUG_TOOL(
             if (m_mmcState) {
                 if (m_av1BasicFeature->m_filmGrainEnabled)
@@ -247,6 +254,7 @@ namespace decode
                     m_mmcState->UpdateUserFeatureKey(&(m_av1BasicFeature->m_destSurface));
                 }
             })
+#endif
 
         if (m_isLastTileInPartialFrm || m_av1Pipeline->TileBasedDecodingInuse())
         {

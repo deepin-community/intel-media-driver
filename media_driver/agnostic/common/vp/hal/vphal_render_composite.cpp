@@ -1,5 +1,5 @@
-/*
-* Copyright (c) 2016-2021, Intel Corporation
+﻿/*
+* Copyright (c) 2016-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,6 +29,7 @@
 #include "vphal_renderer.h"         // for VpHal_RenderAllocateBB
 #include "vphal_render_common.h"    // for VPHAL_RENDER_CACHE_CNTL
 #include "vphal_render_ief.h"
+#include "vp_hal_ddi_utils.h"
 #include "renderhal_platform_interface.h"
 
 // Compositing surface binding table index
@@ -1392,6 +1393,81 @@ finish:
     return Temp_ColorSpace;
 }
 
+MOS_STATUS CompositeState::IntermediateAllocation(PVPHAL_SURFACE &pIntermediate,
+    PMOS_INTERFACE                   pOsInterface,
+    uint32_t                         dwTempWidth,
+    uint32_t                         dwTempHeight,
+    PVPHAL_SURFACE                   pTarget)
+{
+    MOS_RESOURCE            OsResource  = {};
+    MOS_ALLOC_GFXRES_PARAMS AllocParams = {};
+    VPHAL_GET_SURFACE_INFO  Info        = {};
+    // Allocate/Reallocate temporary output
+    if (dwTempWidth > pIntermediate->dwWidth ||
+        dwTempHeight > pIntermediate->dwHeight)
+    {
+        // Get max values
+        dwTempWidth  = MOS_MAX(dwTempWidth, pIntermediate->dwWidth);
+        dwTempHeight = MOS_MAX(dwTempHeight, pIntermediate->dwHeight);
+
+        // Allocate buffer in fixed increments
+        dwTempWidth  = MOS_ALIGN_CEIL(dwTempWidth, VPHAL_BUFFER_SIZE_INCREMENT);
+        dwTempHeight = MOS_ALIGN_CEIL(dwTempHeight, VPHAL_BUFFER_SIZE_INCREMENT);
+
+        MOS_ZeroMemory(&AllocParams, sizeof(MOS_ALLOC_GFXRES_PARAMS));
+        MOS_ZeroMemory(&OsResource, sizeof(MOS_RESOURCE));
+
+        AllocParams.Type         = MOS_GFXRES_2D;
+        AllocParams.TileType     = MOS_TILE_Y;
+        AllocParams.dwWidth      = dwTempWidth;
+        AllocParams.dwHeight     = dwTempHeight;
+        AllocParams.Format       = Format_A8R8G8B8;
+        AllocParams.ResUsageType = MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_WRITE_RENDER;
+
+        pOsInterface->pfnAllocateResource(
+            pOsInterface,
+            &AllocParams,
+            &OsResource);
+
+        // Get Allocation index of source for rendering
+        pOsInterface->pfnRegisterResource(
+            pOsInterface,
+            &OsResource,
+            false,
+            true);
+
+        if (!Mos_ResourceIsNull(&OsResource))
+        {
+            // Deallocate old resource
+            pOsInterface->pfnFreeResource(pOsInterface,
+                &pIntermediate->OsResource);
+
+            // Set new resource
+            pIntermediate->OsResource = OsResource;
+
+            // Get resource info (width, height, pitch, tiling, etc)
+            MOS_ZeroMemory(&Info, sizeof(VPHAL_GET_SURFACE_INFO));
+
+            VpHal_GetSurfaceInfo(
+                pOsInterface,
+                &Info,
+                pIntermediate);
+        }
+    }
+
+    // Set output parameters
+    pIntermediate->SurfType      = SURF_IN_PRIMARY;
+    pIntermediate->SampleType    = SAMPLE_PROGRESSIVE;
+    pIntermediate->ColorSpace    = pTarget->ColorSpace;
+    pIntermediate->ExtendedGamut = pTarget->ExtendedGamut;
+    pIntermediate->rcSrc         = pTarget->rcSrc;
+    pIntermediate->rcDst         = pTarget->rcDst;
+    pIntermediate->ScalingMode   = VPHAL_SCALING_BILINEAR;
+    pIntermediate->bIEF          = false;
+
+    return MOS_STATUS_SUCCESS;
+}
+
 //!
 //! \brief    Prepare phases for composite and allocate intermediate buffer for rendering
 //! \param    [in] pcRenderParams
@@ -1410,15 +1486,16 @@ bool CompositeState::PreparePhases(
 {
     PMOS_INTERFACE          pOsInterface;
     VPHAL_COMPOSITE_PARAMS  Composite;
-    MOS_RESOURCE            OsResource;
+    MOS_RESOURCE            OsResource = {};
     uint32_t                dwTempWidth;    // Temporary surface width
     uint32_t                dwTempHeight;   // Temporary surface height
     PVPHAL_SURFACE          pTarget;
     PVPHAL_SURFACE          pIntermediate;
     int32_t                 i;
     bool                    bMultiplePhases;
-    MOS_ALLOC_GFXRES_PARAMS AllocParams;
-    VPHAL_GET_SURFACE_INFO  Info;
+    MOS_ALLOC_GFXRES_PARAMS AllocParams = {};
+    VPHAL_GET_SURFACE_INFO  Info = {};
+    MOS_STATUS  eStatus = MOS_STATUS_SUCCESS;
 
     pTarget = pcRenderParams->pTarget[0];
 
@@ -1437,6 +1514,7 @@ bool CompositeState::PreparePhases(
     {
         // Reset multiple phase support
         bMultiplePhases = false;
+        bool                    disableAvsSampler = false;
 
         // Temporary surface has the same size as render target
         dwTempWidth  = pTarget->dwWidth;
@@ -1444,9 +1522,78 @@ bool CompositeState::PreparePhases(
 
         // Check if multiple phases by building filter for first phase
         ResetCompParams(&Composite);
+
+        if (IsDisableAVSSampler(iSources, 0 < pTarget->rcDst.top))
+        {
+            VPHAL_RENDER_ASSERTMESSAGE("Disable AVS sampler for TargetTopY!");
+            Composite.nAVS    = 0;
+            disableAvsSampler = true;
+        }
+
         for (i = 0; i < iSources; i++)
         {
-            if (!AddCompLayer(&Composite, ppSources[i]))
+
+            if (disableAvsSampler && VPHAL_SCALING_AVS == ppSources[i]->ScalingMode)
+            {
+                VPHAL_RENDER_ASSERTMESSAGE("Force to 3D sampler for layer %d.", i);
+                ppSources[i]->ScalingMode = VPHAL_SCALING_BILINEAR;
+            }
+
+            // Decompression RGB10 RC input for multi input cases cases
+            if ((ppSources[i]->CompressionMode == MOS_MMC_RC) &&
+                (MEDIA_IS_SKU(m_pSkuTable, FtrLocalMemory)    &&
+                !MEDIA_IS_SKU(m_pSkuTable, FtrFlatPhysCCS)))
+            {
+                bool bAllocated = false;
+                //Use auxiliary surface to sync with decompression
+                eStatus = VpHal_ReAllocateSurface(
+                    m_pOsInterface,
+                    &m_AuxiliarySyncSurface,
+                    "AuxiliarySyncSurface",
+                    Format_Buffer,
+                    MOS_GFXRES_BUFFER,
+                    MOS_TILE_LINEAR,
+                    32,
+                    1,
+                    false,
+                    MOS_MMC_DISABLED,
+                    &bAllocated);
+
+                if (eStatus != MOS_STATUS_SUCCESS)
+                {
+                    VPHAL_RENDER_ASSERTMESSAGE("Additional AuxiliarySyncSurface  for sync create fail");
+                }
+
+                eStatus = m_pOsInterface->pfnSetDecompSyncRes(m_pOsInterface, &m_AuxiliarySyncSurface.OsResource);
+
+                if (eStatus != MOS_STATUS_SUCCESS)
+                {
+                    VPHAL_RENDER_ASSERTMESSAGE("Set Decomp sync resource fail");
+                }
+
+                eStatus = m_pOsInterface->pfnDecompResource(m_pOsInterface, &ppSources[i]->OsResource);
+
+                if (eStatus != MOS_STATUS_SUCCESS)
+                {
+                    VPHAL_RENDER_ASSERTMESSAGE("Additional decompression for RC failed.");
+                }
+
+                eStatus = m_pOsInterface->pfnSetDecompSyncRes(m_pOsInterface, nullptr);
+
+                if (eStatus != MOS_STATUS_SUCCESS)
+                {
+                    VPHAL_RENDER_ASSERTMESSAGE("Set Decomp sync resource fail");
+                }
+
+                eStatus = m_pOsInterface->pfnRegisterResource(m_pOsInterface, &m_AuxiliarySyncSurface.OsResource, true, true);
+
+                if (eStatus != MOS_STATUS_SUCCESS)
+                {
+                    VPHAL_RENDER_ASSERTMESSAGE("register resources for sync failed.");
+                }
+            }
+
+            if (!AddCompLayer(&Composite, ppSources[i], disableAvsSampler))
             {
                 bMultiplePhases = true;
                 break;
@@ -1465,69 +1612,21 @@ bool CompositeState::PreparePhases(
     {
         pOsInterface  = m_pOsInterface;
         pIntermediate = &m_Intermediate;
-
+        PVPHAL_SURFACE &p = pIntermediate;
         // Allocate/Reallocate temporary output
-        if (dwTempWidth  > pIntermediate->dwWidth ||
-            dwTempHeight > pIntermediate->dwHeight)
-        {
-            // Get max values
-            dwTempWidth  = MOS_MAX(dwTempWidth , pIntermediate->dwWidth);
-            dwTempHeight = MOS_MAX(dwTempHeight, pIntermediate->dwHeight);
+        IntermediateAllocation(p,
+            pOsInterface,
+            dwTempWidth,
+            dwTempHeight,
+            pTarget);
 
-            // Allocate buffer in fixed increments
-            dwTempWidth  = MOS_ALIGN_CEIL(dwTempWidth , VPHAL_BUFFER_SIZE_INCREMENT);
-            dwTempHeight = MOS_ALIGN_CEIL(dwTempHeight, VPHAL_BUFFER_SIZE_INCREMENT);
-
-            MOS_ZeroMemory(&AllocParams, sizeof(MOS_ALLOC_GFXRES_PARAMS));
-            MOS_ZeroMemory(&OsResource, sizeof(MOS_RESOURCE));
-
-            AllocParams.Type     = MOS_GFXRES_2D;
-            AllocParams.TileType = MOS_TILE_Y;
-            AllocParams.dwWidth  = dwTempWidth;
-            AllocParams.dwHeight = dwTempHeight;
-            AllocParams.Format   = Format_A8R8G8B8;
-            AllocParams.ResUsageType = MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_WRITE_RENDER;
-
-            pOsInterface->pfnAllocateResource(
-                pOsInterface,
-                &AllocParams,
-                &OsResource);
-
-            // Get Allocation index of source for rendering
-            pOsInterface->pfnRegisterResource(
-                pOsInterface,
-                &OsResource,
-                false,
-                true);
-
-            if (!Mos_ResourceIsNull(&OsResource))
-            {
-                // Deallocate old resource
-                pOsInterface->pfnFreeResource(pOsInterface,
-                                              &pIntermediate->OsResource);
-
-                // Set new resource
-                pIntermediate->OsResource = OsResource;
-
-                // Get resource info (width, height, pitch, tiling, etc)
-                MOS_ZeroMemory(&Info, sizeof(VPHAL_GET_SURFACE_INFO));
-
-                VpHal_GetSurfaceInfo(
-                    pOsInterface,
-                    &Info,
-                    pIntermediate);
-            }
-        }
-
-        // Set output parameters
-        pIntermediate->SurfType          = SURF_IN_PRIMARY;
-        pIntermediate->SampleType        = SAMPLE_PROGRESSIVE;
-        pIntermediate->ColorSpace        = pTarget->ColorSpace;
-        pIntermediate->ExtendedGamut     = pTarget->ExtendedGamut;
-        pIntermediate->rcSrc             = pTarget->rcSrc;
-        pIntermediate->rcDst             = pTarget->rcDst;
-        pIntermediate->ScalingMode       = VPHAL_SCALING_BILINEAR;
-        pIntermediate->bIEF              = false;
+        pIntermediate = &m_Intermediate1;
+        // Allocate/Reallocate temporary output
+        IntermediateAllocation(p,
+            pOsInterface,
+            dwTempWidth,
+            dwTempHeight,
+            pTarget);
 
         pIntermediate = &m_Intermediate2;
 
@@ -1615,6 +1714,19 @@ void CompositeState::ResetCompParams(
 }
 
 //!
+//! \brief    Get intermediate surface output
+//! \param    pOutput
+//!           [in] Pointer to Intermediate Output Surface
+//! \return   PVPHAL_SURFACE
+//!           Return the chose output
+//!
+MOS_STATUS CompositeState::GetIntermediateOutput(PVPHAL_SURFACE &output)
+{
+    output = &m_Intermediate;
+    return MOS_STATUS_SUCCESS;
+}
+
+//!
 //! \brief    Adds a source layer for composite
 //! \param    [in,out] pComposite
 //!           Pointer to Composite parameters
@@ -1625,7 +1737,8 @@ void CompositeState::ResetCompParams(
 //!
 bool CompositeState::AddCompLayer(
     PVPHAL_COMPOSITE_PARAMS     pComposite,
-    PVPHAL_SURFACE              pSource)
+    PVPHAL_SURFACE              pSource,
+    bool                        bDisableAvsSampler = false)
 {
     bool                bResult;
     PVPHAL_SURFACE      pPrevSource;
@@ -1734,9 +1847,16 @@ bool CompositeState::AddCompLayer(
         }
         else
         {
-            // switch to AVS if AVS sampler is not used, decrease the count of comp phase
-            scalingMode = VPHAL_SCALING_AVS;
-            pComposite->nAVS--;
+            if (bDisableAvsSampler && (pComposite->nSampler & VPHAL_COMP_SAMPLER_BILINEAR))
+            {
+                scalingMode = VPHAL_SCALING_BILINEAR;
+            }
+            else
+            {
+                // switch to AVS if AVS sampler is not used, decrease the count of comp phase
+                scalingMode = VPHAL_SCALING_AVS;
+                pComposite->nAVS--;
+            }
         }
     }
     else if (!IS_PL3_FORMAT(pSource->Format))
@@ -1754,9 +1874,16 @@ bool CompositeState::AddCompLayer(
         }
         else
         {
-            // switch to AVS if AVS sampler is not used, decrease the count of comp phase
-            scalingMode = VPHAL_SCALING_AVS;
-            pComposite->nAVS--;
+            if (bDisableAvsSampler && (pComposite->nSampler & VPHAL_COMP_SAMPLER_NEAREST))
+            {
+                scalingMode = VPHAL_SCALING_NEAREST;
+            }
+            else
+            {
+                // switch to AVS if AVS sampler is not used, decrease the count of comp phase
+                scalingMode = VPHAL_SCALING_AVS;
+                pComposite->nAVS--;
+            }
         }
     }
 
@@ -1865,9 +1992,16 @@ MOS_STATUS CompositeState::RenderMultiPhase(
 
     for (index = 0, phase = 0; (!bLastPhase); phase++)
     {
+        bool                   disableAvsSampler = false;
         VPHAL_COMPOSITE_PARAMS  CompositeParams;
         // Prepare compositing structure
         ResetCompParams(&CompositeParams);
+
+        if (IsDisableAVSSampler(iSources, 0 < pOutput->rcDst.top))
+        {
+            VPHAL_RENDER_ASSERTMESSAGE("Disable AVS sampler for TargetTopY!");
+            disableAvsSampler = true;
+        }
 
 //        VPHAL_DBG_STATE_DUMPPER_SET_CURRENT_PHASE(phase);
 
@@ -1902,6 +2036,7 @@ MOS_STATUS CompositeState::RenderMultiPhase(
                 if (!m_bApplyTwoLayersCompOptimize || (iSources != 2) || (ppSources[1]->Rotation == VPHAL_ROTATION_IDENTITY))
                 {
                     pSrc = pOutput;
+                    GetIntermediateOutput(pOutput);  // this is the virtual function to use the pingpang buffer for corruption fix on some platforms.
                 }
                 else
                 {
@@ -1934,7 +2069,13 @@ MOS_STATUS CompositeState::RenderMultiPhase(
             // Add layer to the compositing - breaks at end of phase
             pSrc->iLayerID = i;
 
-            if (!AddCompLayer(&CompositeParams, pSrc))
+            if (disableAvsSampler && VPHAL_SCALING_AVS == pSrc->ScalingMode)
+            {
+                VPHAL_RENDER_ASSERTMESSAGE("Force to 3D sampler for layer %d.", pSrc->iLayerID);
+                pSrc->ScalingMode = VPHAL_SCALING_BILINEAR;
+            }
+
+            if (!AddCompLayer(&CompositeParams, pSrc, disableAvsSampler))
             {
                 bLastPhase = false;
                 index--;
@@ -2055,7 +2196,7 @@ MOS_STATUS CompositeState::RenderMultiPhase(
                 pSrc = ppSources[index];
                 index++;
                 pSrc->iLayerID = 0;
-                AddCompLayer(&CompositeParams, pSrc);
+                AddCompLayer(&CompositeParams, pSrc, disableAvsSampler);
 
                 // using pTarget as a temp resource
                 if (pSrc->pBlendingParams)
@@ -2234,6 +2375,9 @@ MOS_STATUS CompositeState::Render(
             &Info,
             pSrc));
 
+        //Need to decompress input surface, only if input surface is interlaced and in the RC compression Mode
+        VPHAL_RENDER_CHK_STATUS(DecompressInterlacedSurf(pSrc));
+
         // Ensure the input is ready to be read
         pOsInterface->pfnSyncOnResource(
             pOsInterface,
@@ -2320,6 +2464,9 @@ MOS_STATUS CompositeState::Render(
         goto finish;
     }
     pRenderHal->eufusionBypass = pRenderHal->eufusionBypass || ((iSources > 1) ? 1:0);
+
+    VPHAL_RENDER_NORMALMESSAGE("eufusionBypass = %d", pRenderHal->eufusionBypass ? 1 : 0);
+
     // Determine cspace for compositing
     ColorSpace = PrepareCSC(pcRenderParams,
                             pSources,
@@ -2342,11 +2489,13 @@ MOS_STATUS CompositeState::Render(
         if (KernelDll_IsCspace(ColorSpace, CSpace_RGB))
         {
             pOutput->Format = Format_A8R8G8B8;
+            m_Intermediate1.Format = Format_A8R8G8B8;
             m_Intermediate2.Format = Format_A8R8G8B8;
         }
         else
         {
             pOutput->Format = Format_AYUV;
+            m_Intermediate1.Format = Format_AYUV;
             m_Intermediate2.Format = Format_AYUV;
         }
     }
@@ -2676,6 +2825,44 @@ static MOS_STATUS GetBindingIndex(
 }
 
 //!
+//! \brief    Update SamplerStateParams associated with a surface state for composite
+//! \param    [in] pSamplerStateParams
+//!           Pointer to SamplerStateParams
+//! \param    [in] pEntry
+//!           Pointer to Surface state
+//! \param    [in] pRenderData
+//!           Pointer to RenderData
+//! \param    [in] uLayerNum
+//!           Layer total number
+//! \param    [in] SamplerFilterMode
+//!           SamplerFilterMode to be set
+//! \param    [out] pSamplerIndex
+//!           Pointer to Sampler Index
+//! \param    [out] pSurface
+//!           point to Surface
+//! \return   MOS_STATUS
+//!           Return MOS_STATUS_SUCCESS if successful, otherwise MOS_STATUS_UNKNOWN
+//!
+MOS_STATUS CompositeState::SetSamplerFilterMode(
+    PMHW_SAMPLER_STATE_PARAM&       pSamplerStateParams,
+    PRENDERHAL_SURFACE_STATE_ENTRY  pEntry,
+    PVPHAL_RENDERING_DATA_COMPOSITE pRenderData,
+    uint32_t                        uLayerNum,
+    MHW_SAMPLER_FILTER_MODE         SamplerFilterMode,
+    int32_t*                        pSamplerIndex,
+    PVPHAL_SURFACE                  pSource)
+{
+    VPHAL_RENDER_CHK_NULL_RETURN(pSamplerStateParams);
+    MOS_UNUSED(pEntry);
+    MOS_UNUSED(pRenderData);
+    MOS_UNUSED(pSamplerIndex);
+    MOS_UNUSED(pSource);
+
+    pSamplerStateParams->Unorm.SamplerFilterMode = SamplerFilterMode;
+    return MOS_STATUS_SUCCESS;
+}
+
+//!
 //! \brief    Get Sampler Index associated with a surface state for composite
 //! \param    [in] pSurface
 //!           point to input Surface
@@ -2764,7 +2951,7 @@ void CompositeState::SetSurfaceParams(
         pSource->bIEF        = false;
 
         // Set flags for RT
-        pSurfaceParams->bRenderTarget    = true;
+        pSurfaceParams->isOutput    = true;
         pSurfaceParams->bWidthInDword_Y  = true;
         pSurfaceParams->bWidthInDword_UV = true;
         pSurfaceParams->Boundary         = RENDERHAL_SS_BOUNDARY_DSTRECT;
@@ -2772,7 +2959,7 @@ void CompositeState::SetSurfaceParams(
     // other surfaces
     else
     {
-        pSurfaceParams->bRenderTarget    = false;
+        pSurfaceParams->isOutput    = false;
         pSurfaceParams->bWidthInDword_Y  = false;
         pSurfaceParams->bWidthInDword_UV = false;
         pSurfaceParams->Boundary         = RENDERHAL_SS_BOUNDARY_SRCRECT;
@@ -2818,6 +3005,54 @@ void CompositeState::SetSurfaceParams(
         pSurfaceParams->Type,
         pSurfaceParams->bAVS,
         pSurfaceParams->b2PlaneNV12NeededByKernel);
+}
+
+//!
+//! \brief    Decompress the Surface
+//! \details  Decompress the interlaced Surface which is in the RC compression mode
+//! \param    [in,out] pSource
+//!           Pointer to Source Surface
+//! \return   MOS_STATUS
+//!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
+//!
+MOS_STATUS CompositeState::DecompressInterlacedSurf(PVPHAL_SURFACE pSource)
+{
+    VPHAL_RENDER_CHK_NULL_RETURN(pSource);
+
+    // Interlaced surface in the compression mode needs to decompress
+    if (pSource->CompressionMode == MOS_MMC_RC                             &&
+        (pSource->SampleType == SAMPLE_INTERLEAVED_EVEN_FIRST_TOP_FIELD    ||
+         pSource->SampleType == SAMPLE_INTERLEAVED_EVEN_FIRST_BOTTOM_FIELD ||
+         pSource->SampleType == SAMPLE_INTERLEAVED_ODD_FIRST_TOP_FIELD     ||
+         pSource->SampleType == SAMPLE_INTERLEAVED_ODD_FIRST_BOTTOM_FIELD))
+    {
+        VPHAL_RENDER_CHK_NULL_RETURN(m_pOsInterface);
+        bool bAllocated = false;
+
+        //Use auxiliary surface to sync with decompression
+        VPHAL_RENDER_CHK_STATUS_RETURN(VpHal_ReAllocateSurface(
+            m_pOsInterface,
+            &m_AuxiliarySyncSurface,
+            "AuxiliarySyncSurface",
+            Format_Buffer,
+            MOS_GFXRES_BUFFER,
+            MOS_TILE_LINEAR,
+            32,
+            1,
+            false,
+            MOS_MMC_DISABLED,
+            &bAllocated));
+      
+        VPHAL_RENDER_CHK_STATUS_RETURN(m_pOsInterface->pfnSetDecompSyncRes(m_pOsInterface, &m_AuxiliarySyncSurface.OsResource));
+        VPHAL_RENDER_CHK_STATUS_RETURN(m_pOsInterface->pfnDecompResource(m_pOsInterface, &pSource->OsResource));
+        VPHAL_RENDER_CHK_STATUS_RETURN(m_pOsInterface->pfnSetDecompSyncRes(m_pOsInterface, nullptr));
+        VPHAL_RENDER_CHK_STATUS_RETURN(m_pOsInterface->pfnRegisterResource(m_pOsInterface, &m_AuxiliarySyncSurface.OsResource, true, true));
+
+        pSource->bIsCompressed     = false;
+        pSource->CompressionMode   = MOS_MMC_DISABLED;
+        pSource->CompressionFormat = 0;
+    }
+    return MOS_STATUS_SUCCESS;
 }
 
 //!
@@ -3052,6 +3287,7 @@ int32_t CompositeState::SetLayer(
     uint32_t    dwDestRectWidth, dwDestRectHeight;  // Target rectangle Width Height
     float       fOffsetY, fOffsetX;                 // x,y Sr offset
     float       fShiftX , fShiftY;                  // x,y Dst shift + Sampler BOB adj
+    float       oriShiftX, oriShiftY;               // Used to check whether all entries of one layer share same shift.
     float       fDiScaleY;                          // BOB scaling factor for Y
     float       fScaleX, fScaleY;                   // x,y scaling factor
     float       fStepX , fStepY;                    // x,y scaling steps
@@ -3092,6 +3328,8 @@ int32_t CompositeState::SetLayer(
     fOffsetY = 0;
     fShiftX  = 0;
     fShiftY  = 0;
+    oriShiftX = 0.0f;
+    oriShiftY = 0.0f;
 
     // Initialize States
     pRenderHal   = m_pRenderHal;
@@ -3447,7 +3685,17 @@ int32_t CompositeState::SetLayer(
             {
                 fShiftX  = 0.0f;
                 fShiftY  = 0.0f;
-                pSamplerStateParams->Unorm.SamplerFilterMode = MHW_SAMPLER_FILTER_NEAREST;
+                eStatus  = SetSamplerFilterMode(pSamplerStateParams,
+                                                pSurfaceEntries[i],
+                                                pRenderingData,
+                                                pCompParams->uSourceCount,
+                                                MHW_SAMPLER_FILTER_NEAREST,
+                                                &iSamplerID,
+                                                pSource);
+                if (MOS_FAILED(eStatus))
+                {
+                    continue;
+                }
             }
             else
             {
@@ -3465,8 +3713,32 @@ int32_t CompositeState::SetLayer(
                     fShiftY = VPHAL_HW_LINEAR_SHIFT;
                 }
 
-                pSamplerStateParams->Unorm.SamplerFilterMode = MHW_SAMPLER_FILTER_BILINEAR;
+                eStatus     = SetSamplerFilterMode(pSamplerStateParams,
+                                                   pSurfaceEntries[i],
+                                                   pRenderingData,
+                                                   pCompParams->uSourceCount,
+                                                   MHW_SAMPLER_FILTER_BILINEAR,
+                                                   &iSamplerID,
+                                                   pSource);
+                if (MOS_FAILED(eStatus))
+                {
+                    continue;
+                }
             }
+
+            if (MHW_SAMPLER_FILTER_BILINEAR == pSamplerStateParams->Unorm.SamplerFilterMode &&
+                VPHAL_SCALING_BILINEAR != pSource->ScalingMode ||
+                MHW_SAMPLER_FILTER_NEAREST == pSamplerStateParams->Unorm.SamplerFilterMode &&
+                VPHAL_SCALING_NEAREST != pSource->ScalingMode)
+            {
+                VPHAL_RENDER_NORMALMESSAGE("Legacy Check: scaling mode and samplerFilterMode are not aligned.");
+            }
+
+            if (i != 0 && (oriShiftX != fShiftX || oriShiftY != fShiftY))
+            {
+                VPHAL_RENDER_NORMALMESSAGE("Legacy Check: fShiftX/fShiftY of entry %d is not same as previous entry.", i);
+            }
+
             pSamplerStateParams->Unorm.AddressU = MHW_GFX3DSTATE_TEXCOORDMODE_CLAMP;
             pSamplerStateParams->Unorm.AddressV = MHW_GFX3DSTATE_TEXCOORDMODE_CLAMP;
             pSamplerStateParams->Unorm.AddressW = MHW_GFX3DSTATE_TEXCOORDMODE_CLAMP;
@@ -3497,6 +3769,9 @@ int32_t CompositeState::SetLayer(
             {
                 pSamplerStateParams->Unorm.SamplerFilterMode = MHW_SAMPLER_FILTER_NEAREST;
             }
+
+            VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer %d, layerOrigin %d, entry %d, format %d, scalingMode %d, samplerType %d, samplerFilterMode %d, samplerIndex %d, yuvPlane %d",
+                iLayer, iLayer, i, pSource->Format, pSource->ScalingMode, SamplerType, pSamplerStateParams->Unorm.SamplerFilterMode, iSamplerID, pSurfaceEntries[i]->YUVPlane);
         }
         else if (SamplerType == MHW_SAMPLER_TYPE_AVS)
         {
@@ -3512,7 +3787,18 @@ int32_t CompositeState::SetLayer(
 
             // Set HDC Direct Write Flag
             pSamplerStateParams->Avs.bHdcDwEnable = pRenderingData->bHdcDwEnable;
+
+            VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer %d, entry %d, format %d, scalingMode %d, samplerType %d",
+                iLayer, i, pSource->Format, pSource->ScalingMode, SamplerType);
         }
+        else
+        {
+            VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer %d, entry %d, format %d, scalingMode %d, samplerType %d",
+                iLayer, i, pSource->Format, pSource->ScalingMode, SamplerType);
+        }
+
+        oriShiftX = fShiftX;
+        oriShiftY = fShiftY;
 
         pSamplerStateParams->bInUse        = true;
 
@@ -3842,6 +4128,12 @@ int32_t CompositeState::SetLayer(
         fOriginX /= 8;
     }
 
+    VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer %d, width %d, height, %d, rotation %d, alpha %d, shiftX %f, shiftY %f, scaleX %f, scaleY %f, offsetX %f, offsetY %f, stepX %f, stepY %f, originX %f, originY %f",
+        iLayer, dwSurfStateWd, dwSurfStateHt, pSource->Rotation, wAlpha, fShiftX, fShiftY, fScaleX, fScaleY, fOffsetX, fOffsetY, fStepX, fStepY, fOriginX, fOriginY);
+
+    VP_RENDER_NORMALMESSAGE("Scaling Info: layer %d, chromaSitingEnabled %d, isChromaUpSamplingNeeded %d, isChromaDownSamplingNeeded %d",
+        iLayer, pSource->bChromaSiting, m_bChromaUpSampling, m_bChromaDownSampling);
+
     switch (iLayer)
     {
         case 0:
@@ -3885,6 +4177,9 @@ int32_t CompositeState::SetLayer(
                     pStatic->DW11.ChromasitingUOffset = (float)((1.0f / (pSource->dwWidth)) - fHorizgap);
                     pStatic->DW12.ChromasitingVOffset = (float)((0.5f / (pSource->dwHeight)) - fVertgap);
                 }
+
+                VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer 0, ChromasitingUOffset %f, ChromasitingVOffset %f",
+                    pStatic->DW11.ChromasitingUOffset, pStatic->DW12.ChromasitingVOffset);
             }
             break;
         case 1:
@@ -4454,7 +4749,7 @@ bool CompositeState::SubmitStates(
         MOS_ZeroMemory(&SurfaceParams, sizeof(SurfaceParams));
 
         SurfaceParams.Type          = pRenderHal->SurfaceTypeDefault;
-        SurfaceParams.bRenderTarget = false;
+        SurfaceParams.isOutput = false;
         SurfaceParams.Boundary      = RENDERHAL_SS_BOUNDARY_ORIGINAL;
         SurfaceParams.bWidth16Align = false;
         SurfaceParams.MemObjCtl     = m_SurfMemObjCtl.InputSurfMemObjCtl;
@@ -4531,7 +4826,7 @@ bool CompositeState::SubmitStates(
             (m_CSpaceSrc     != src_cspace)  ||
             (m_CSpaceDst     != dst_cspace))
         {
-            VpHal_CSC_8(&m_csDst, &Src, src_cspace, dst_cspace);
+            VpUtils::GetCscMatrixForRender8Bit(&m_csDst, &Src, src_cspace, dst_cspace);
 
             // store the values for next iteration
             m_csSrc     = Src;
@@ -4811,6 +5106,8 @@ bool CompositeState::SubmitStates(
         pRenderingData->SamplerStateParams,
         MHW_RENDER_ENGINE_SAMPLERS_MAX);
 
+    PrintSamplerParams(pRenderingData->SamplerStateParams);
+
     if (MOS_FAILED(eStatus))
     {
         VPHAL_RENDER_ASSERTMESSAGE("Failed to setup sampler states.");
@@ -4831,6 +5128,7 @@ bool CompositeState::SubmitStates(
         nullptr));
 
     bResult = true;
+    PrintCurbeData(pStatic);
 
 finish:
     return bResult;
@@ -5044,7 +5342,7 @@ bool CompositeState::RenderBuffer(
     PMHW_BATCH_BUFFER               pBatchBuffer,
     PVPHAL_RENDERING_DATA_COMPOSITE pRenderingData)
 {
-    PRENDERHAL_INTERFACE                pRenderHal;
+    PRENDERHAL_INTERFACE_LEGACY         pRenderHal;
     PMHW_MI_INTERFACE                   pMhwMiInterface;
     MOS_STATUS                          eStatus;
     PVPHAL_BB_COMP_ARGS                 pBbArgs;
@@ -5542,6 +5840,9 @@ bool CompositeState::RenderBufferMediaWalker(
                                  pBbArgs->rcDst[iLayers].left;
         *pdwDestXYBottomRight = ((pBbArgs->rcDst[iLayers].bottom - 1) << 16 ) |
                                  (pBbArgs->rcDst[iLayers].right - 1);
+
+        VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer %d, DestXTopLeft %d, DestYTopLeft %d, DestXBottomRight %d, DestYBottomRight %d",
+            iLayers, pBbArgs->rcDst[iLayers].left, pBbArgs->rcDst[iLayers].top, pBbArgs->rcDst[iLayers].right - 1, pBbArgs->rcDst[iLayers].bottom - 1);
     }
 
     // GRF 9.0-4
@@ -5732,6 +6033,9 @@ bool CompositeState::RenderBufferComputeWalker(
                                  pBbArgs->rcDst[iLayers].left;
         *pdwDestXYBottomRight = ((pBbArgs->rcDst[iLayers].bottom - 1) << 16 ) |
                                  (pBbArgs->rcDst[iLayers].right - 1);
+
+        VPHAL_RENDER_NORMALMESSAGE("Scaling Info: layer %d, DestXTopLeft %d, DestYTopLeft %d, DestXBottomRight %d, DestYBottomRight %d",
+            iLayers, pBbArgs->rcDst[iLayers].left, pBbArgs->rcDst[iLayers].top, pBbArgs->rcDst[iLayers].right - 1, pBbArgs->rcDst[iLayers].bottom - 1);
     }
 
     // GRF 9.0-4
@@ -5795,6 +6099,7 @@ bool CompositeState::RenderBufferComputeWalker(
 
     bResult = true;
 
+    PrintWalkerParas(pWalkerParams);
     return bResult;
 }
 
@@ -6126,7 +6431,7 @@ MOS_STATUS CompositeState::RenderPhase(
         Kdll_SearchState *pSearchState = &m_KernelSearch;
 
         // Remove kernel entry from kernel caches
-        if (bKernelEntryUpdate)
+        if (bKernelEntryUpdate && pKernelEntry)
         {
             KernelDll_ReleaseHashEntry(&(pKernelDllState->KernelHashTable), pKernelEntry->wHashEntry);
             KernelDll_ReleaseCacheEntry(&(pKernelDllState->KernelCache), pKernelEntry);
@@ -6424,15 +6729,10 @@ bool CompositeState::BuildFilter(
         }
 
         //--------------------------------
-        // Composition path does not support conversion from BT2020 RGB to BT2020 YUV, BT2020->BT601/BT709, BT601/BT709 -> BT2020
+        // Composition path does not support conversion from BT2020->BT601/BT709, BT601/BT709 -> BT2020
         //--------------------------------
-        if (IS_COLOR_SPACE_BT2020_RGB(pSrc->ColorSpace)   &&
-            IS_COLOR_SPACE_BT2020_YUV(pCompParams->Target[0].ColorSpace))  //BT2020 RGB->BT2020 YUV
-        {
-            eStatus = MOS_STATUS_UNIMPLEMENTED;
-        }
-        else if (IS_COLOR_SPACE_BT2020(pSrc->ColorSpace) &&
-                 !IS_COLOR_SPACE_BT2020(pCompParams->Target[0].ColorSpace)) //BT2020->BT601/BT709
+        if (IS_COLOR_SPACE_BT2020(pSrc->ColorSpace) &&
+            !IS_COLOR_SPACE_BT2020(pCompParams->Target[0].ColorSpace)) //BT2020->BT601/BT709
         {
             eStatus = MOS_STATUS_UNIMPLEMENTED;
         }
@@ -6975,7 +7275,7 @@ bool CompositeState::IsSamplerLumakeySupported(PVPHAL_SURFACE pSrc)
     // 5 Enable sampler lumakey only on YUY2 and NV12 surfaces due to hw limitation.
     // 6 Enable sampler lumakey feature only if this lumakey layer is not the bottom layer.
     // 7 Enable sampler lumakey only when sample unorm being used.
-    // 8 Disable sampler lumakey for mirror case, since mirror is done after sampler scaling, which cause the lumakey mask
+    // 8 Disable sampler lumakey for mirror/rotation case
     //   not matching the layer any more.
     return m_bEnableSamplerLumakey                                                              &&
             pSrc->pLumaKeyParams != NULL                                                        &&
@@ -6984,7 +7284,7 @@ bool CompositeState::IsSamplerLumakeySupported(PVPHAL_SURFACE pSrc)
             (pSrc->Format == Format_YUY2 || pSrc->Format == Format_NV12)                        &&
             pSrc->iLayerID                                                                      &&
             pSrc->bUseSampleUnorm                                                               &&
-            pSrc->Rotation < VPHAL_MIRROR_HORIZONTAL;
+            pSrc->Rotation == VPHAL_ROTATION_IDENTITY;
 }
 
 //!
@@ -7001,7 +7301,6 @@ MOS_STATUS CompositeState::Initialize(
     const VphalSettings             *pSettings,
     Kdll_State                      *pKernelDllState)
 {
-    MOS_USER_FEATURE_VALUE_DATA     UserFeatureData;
     MOS_NULL_RENDERING_FLAGS        NullRenderingFlags;
     bool                            bAllocated;
     MOS_STATUS                      eStatus;
@@ -7024,13 +7323,11 @@ MOS_STATUS CompositeState::Initialize(
 
 #if (_DEBUG || _RELEASE_INTERNAL)
     // Read user feature key to enable 8-tap adaptive filter;
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_COMP_8TAP_ADAPTIVE_ENABLE_ID,
-        &UserFeatureData,
-        m_pOsInterface->pOsContext));
-    m_b8TapAdaptiveEnable = UserFeatureData.bData ? true : false;
+    ReadUserSettingForDebug(
+        m_userSettingPtr,
+        m_b8TapAdaptiveEnable,
+        __VPHAL_COMP_8TAP_ADAPTIVE_ENABLE,
+        MediaUserSetting::Group::Sequence);
 #endif
 
     NullRenderingFlags = m_pOsInterface->pfnGetNullHWRenderFlags(
@@ -7061,7 +7358,7 @@ MOS_STATUS CompositeState::Initialize(
             MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_RENDER,
             MOS_TILE_UNSET_GMM,
             memTypeSurfVdieoMem,
-            MOS_MEMPOOL_DEVICEMEMORY == memTypeSurfVdieoMem));
+            VPP_INTER_RESOURCE_NOTLOCKABLE));
     }
 
     // Setup Procamp Parameters
@@ -7108,9 +7405,6 @@ void CompositeState::Destroy()
     }
 
     // Free intermediate compositing buffer
-    pOsInterface->pfnFreeResource(
-        pOsInterface,
-        &m_Intermediate.OsResource);
 
     if (m_Intermediate2.pBlendingParams)
     {
@@ -7118,13 +7412,28 @@ void CompositeState::Destroy()
         m_Intermediate2.pBlendingParams = nullptr;
     }
 
-    pOsInterface->pfnFreeResource(
-        pOsInterface,
-        &m_Intermediate2.OsResource);
+    if (pOsInterface)
+    {
+        pOsInterface->pfnFreeResource(
+            pOsInterface,
+            &m_Intermediate.OsResource);
 
-    pOsInterface->pfnFreeResource(
-        pOsInterface,
-        &m_CmfcCoeff.OsResource);
+        pOsInterface->pfnFreeResource(
+            pOsInterface,
+            &m_Intermediate1.OsResource);
+
+        pOsInterface->pfnFreeResource(
+            pOsInterface,
+            &m_Intermediate2.OsResource);
+
+        pOsInterface->pfnFreeResource(
+            pOsInterface,
+            &m_AuxiliarySyncSurface.OsResource);
+
+        pOsInterface->pfnFreeResource(
+            pOsInterface,
+            &m_CmfcCoeff.OsResource);
+    }
 
     // Destroy sampler 8x8 state table parameters
     VpHal_RndrCommonDestroyAVSParams(&m_AvsParameters);
@@ -7176,7 +7485,7 @@ CompositeState::CompositeState(
     m_bAvsTableBalancedFilter(false)
 {
     MOS_STATUS                  eStatus = MOS_STATUS_SUCCESS;
-    MOS_USER_FEATURE_VALUE_DATA UserFeatureData;
+    bool       ftrCSCCoeffPatchMode = false;
 
     MOS_ZeroMemory(&m_Procamp, sizeof(m_Procamp));
     MOS_ZeroMemory(&m_csSrc, sizeof(m_csSrc));
@@ -7188,6 +7497,7 @@ CompositeState::CompositeState(
     MOS_ZeroMemory(&m_KernelSearch, sizeof(m_KernelSearch));
     MOS_ZeroMemory(&m_KernelParams, sizeof(m_KernelParams));
     MOS_ZeroMemory(&m_Intermediate, sizeof(m_Intermediate));
+    MOS_ZeroMemory(&m_Intermediate1, sizeof(m_Intermediate1));
     MOS_ZeroMemory(&m_Intermediate2, sizeof(m_Intermediate2));
     MOS_ZeroMemory(&m_CmfcCoeff, sizeof(m_CmfcCoeff));
     MOS_ZeroMemory(&m_RenderHalCmfcCoeff, sizeof(m_RenderHalCmfcCoeff));
@@ -7225,14 +7535,14 @@ CompositeState::CompositeState(
     VPHAL_RENDER_CHK_NULL(pOsInterface);
     // Reset Intermediate output surface (multiple phase)
     pOsInterface->pfnResetResourceAllocationIndex(pOsInterface, &m_Intermediate.OsResource);
+    pOsInterface->pfnResetResourceAllocationIndex(pOsInterface, &m_Intermediate1.OsResource);
 
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_CSC_COEFF_PATCH_MODE_DISABLE_ID,
-        &UserFeatureData,
-        m_pOsInterface->pOsContext));
-    m_bFtrCSCCoeffPatchMode = UserFeatureData.bData ? false : true;
+    ReadUserSetting(
+        m_userSettingPtr,
+        ftrCSCCoeffPatchMode,
+        __MEDIA_USER_FEATURE_VALUE_CSC_COEFF_PATCH_MODE_DISABLE,
+        MediaUserSetting::Group::Sequence);
+    m_bFtrCSCCoeffPatchMode = ftrCSCCoeffPatchMode ? false : true;
 
 finish:
     // copy status to output argument to pass status to caller
@@ -7262,6 +7572,390 @@ bool CompositeState::IsNeeded(
     MOS_UNUSED(pcRenderParams);
 
     return pRenderPassData->bCompNeeded;
+}
+
+//!
+//! \brief    Print walkerParas
+//! \param    [in] PMHW_GPGPU_WALKER_PARAMS
+//!
+void CompositeState::PrintWalkerParas(PMHW_GPGPU_WALKER_PARAMS pWalkerParams)
+{
+#if (_DEBUG || _RELEASE_INTERNAL)
+    if (pWalkerParams == nullptr)
+    {
+        VPHAL_RENDER_ASSERTMESSAGE("The WalkerParams pointer is null");
+        return;
+    }
+    VPHAL_RENDER_VERBOSEMESSAGE("WalkerParams: InterfaceDescriptorOffset = %x, GpGpuEnable = %x, ThreadWidth = %x, ThreadHeight = %x, ThreadDepth = %x, GroupWidth = %x, GroupHeight = %x, GroupDepth = %x, GroupStartingX = %x, GroupStartingY = %x, GroupStartingZ = %x, SLMSize = %x, IndirectDataLength = %x, IndirectDataStartAddress = %x, BindingTableID = %x",
+        pWalkerParams->InterfaceDescriptorOffset,
+        pWalkerParams->GpGpuEnable,
+        pWalkerParams->ThreadWidth,
+        pWalkerParams->ThreadHeight,
+        pWalkerParams->ThreadDepth,
+        pWalkerParams->GroupWidth,
+        pWalkerParams->GroupHeight,
+        pWalkerParams->GroupDepth,
+        pWalkerParams->GroupStartingX,
+        pWalkerParams->GroupStartingY,
+        pWalkerParams->GroupStartingZ,
+        pWalkerParams->SLMSize,
+        pWalkerParams->IndirectDataLength,
+        pWalkerParams->IndirectDataStartAddress,
+        pWalkerParams->BindingTableID);
+#endif
+}
+
+//!
+//! \brief    Print SampleParams
+//! \param    [in] PMHW_SAMPLER_STATE_PARAM
+//!
+void CompositeState::PrintSamplerParams(PMHW_SAMPLER_STATE_PARAM pSamplerParams)
+{
+#if (_DEBUG || _RELEASE_INTERNAL)
+    if (pSamplerParams == nullptr)
+    {
+        VPHAL_RENDER_ASSERTMESSAGE("The SamplerParams pointer is null");
+        return;
+    }
+    if (pSamplerParams->SamplerType == MHW_SAMPLER_TYPE_3D)
+    {
+        VPHAL_RENDER_VERBOSEMESSAGE("SamplerParams: bInUse = %x, SamplerType = %x, ElementType = %x, SamplerFilterMode = %x, MagFilter = %x, MinFilter = %x",
+            pSamplerParams->bInUse,
+            pSamplerParams->SamplerType,
+            pSamplerParams->ElementType,
+            pSamplerParams->Unorm.SamplerFilterMode,
+            pSamplerParams->Unorm.MagFilter,
+            pSamplerParams->Unorm.MinFilter);
+        VPHAL_RENDER_VERBOSEMESSAGE("SamplerParams: AddressU = %x, AddressV = %x, AddressW = %x, SurfaceFormat = %x, BorderColorRedU = %x, BorderColorGreenU = %x",
+            pSamplerParams->Unorm.AddressU,
+            pSamplerParams->Unorm.AddressV,
+            pSamplerParams->Unorm.AddressW,
+            pSamplerParams->Unorm.SurfaceFormat,
+            pSamplerParams->Unorm.BorderColorRedU,
+            pSamplerParams->Unorm.BorderColorGreenU);
+        VPHAL_RENDER_VERBOSEMESSAGE("SamplerParams: BorderColorBlueU = %x, BorderColorAlphaU = %x, IndirectStateOffset = %x, bBorderColorIsValid = %x, bChromaKeyEnable = %x, ChromaKeyIndex = %x, ChromaKeyMode = %x",
+            pSamplerParams->Unorm.BorderColorBlueU,
+            pSamplerParams->Unorm.BorderColorAlphaU,
+            pSamplerParams->Unorm.IndirectStateOffset,
+            pSamplerParams->Unorm.bBorderColorIsValid,
+            pSamplerParams->Unorm.bChromaKeyEnable,
+            pSamplerParams->Unorm.ChromaKeyIndex,
+            pSamplerParams->Unorm.ChromaKeyMode);
+    }
+    else
+    {
+        VPHAL_RENDER_VERBOSEMESSAGE("SamplerParams: bInUse = %x, SamplerType = %x, ElementType = %x",
+            pSamplerParams->bInUse,
+            pSamplerParams->SamplerType,
+            pSamplerParams->ElementType);
+    }
+#endif
+}
+
+//!
+//! \brief    Print curbe data for legacy path
+//! \param    [in] MEDIA_WALKER_KA2_STATIC_DATA *
+//!
+void CompositeState::PrintCurbeData(MEDIA_OBJECT_KA2_STATIC_DATA *pObjectStatic)
+{
+#if (_DEBUG || _RELEASE_INTERNAL)
+    if (pObjectStatic == nullptr)
+    {
+        VPHAL_RENDER_ASSERTMESSAGE("The ObjectStatic pointer is null");
+        return;
+    }
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW00.Value = %x",pObjectStatic->DW00.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     CscConstantC0 = %x, CscConstantC1 = %x, LocalDifferenceThresholdU = %x, LocalDifferenceThresholdV = %x, SobelEdgeThresholdU = %x, SobelEdgeThresholdV = %x",
+        pObjectStatic->DW00.CscConstantC0,
+        pObjectStatic->DW00.CscConstantC1,
+        pObjectStatic->DW00.LocalDifferenceThresholdU,
+        pObjectStatic->DW00.LocalDifferenceThresholdV,
+        pObjectStatic->DW00.SobelEdgeThresholdU,
+        pObjectStatic->DW00.SobelEdgeThresholdV);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW01.Value = %x",pObjectStatic->DW01.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     CscConstantC2 = %x, CscConstantC3 = %x, HistoryInitialValueU = %x, HistoryInitialValueV = %x, HistoryMaxU = %x, HistoryMaxV = %x",
+        pObjectStatic->DW01.CscConstantC2,
+        pObjectStatic->DW01.CscConstantC3,
+        pObjectStatic->DW01.HistoryInitialValueU,
+        pObjectStatic->DW01.HistoryInitialValueV,
+        pObjectStatic->DW01.HistoryMaxU,
+        pObjectStatic->DW01.HistoryMaxV);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW02.Value = %x", pObjectStatic->DW02.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     CscConstantC4 = %x, CscConstantC5 = %x, HistoryDeltaU = %x, HistoryDeltaV = %x, NSADThresholdU = %x, DNSADThresholdV = %x",
+        pObjectStatic->DW02.CscConstantC4,
+        pObjectStatic->DW02.CscConstantC5,
+        pObjectStatic->DW02.HistoryDeltaU,
+        pObjectStatic->DW02.HistoryDeltaV,
+        pObjectStatic->DW02.DNSADThresholdU,
+        pObjectStatic->DW02.DNSADThresholdV);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW03.Value = %x", pObjectStatic->DW03.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     CscConstantC6 = %x, CscConstantC7 = %x, DNTDThresholdU = %x, HistoryDeltaV = %x, DNLTDThresholdU = %x, DNLTDThresholdV = %x",
+        pObjectStatic->DW03.CscConstantC6,
+        pObjectStatic->DW03.CscConstantC7,
+        pObjectStatic->DW03.DNTDThresholdU,
+        pObjectStatic->DW03.DNTDThresholdV,
+        pObjectStatic->DW03.DNLTDThresholdU,
+        pObjectStatic->DW03.DNLTDThresholdV);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW04.Value = %x", pObjectStatic->DW04.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     CscConstantC8 = %x, CscConstantC9 = %x",
+        pObjectStatic->DW04.CscConstantC8,
+        pObjectStatic->DW04.CscConstantC9);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW05.Value = %x", pObjectStatic->DW05.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     CscConstantC10 = %x, CscConstantC11 = %x",
+        pObjectStatic->DW05.CscConstantC10,
+        pObjectStatic->DW05.CscConstantC11);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW06.Value = %x", pObjectStatic->DW06.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     ConstantBlendingAlphaLayer1 = %d, ConstantBlendingAlphaLayer2 = %d, ConstantBlendingAlphaLayer3 = %d, ConstantBlendingAlphaLayer4 = %d, HalfStatisticsSurfacePitch = %d, StatisticsSurfaceHeight = %d",
+        pObjectStatic->DW06.ConstantBlendingAlphaLayer1,
+        pObjectStatic->DW06.ConstantBlendingAlphaLayer2,
+        pObjectStatic->DW06.ConstantBlendingAlphaLayer3,
+        pObjectStatic->DW06.ConstantBlendingAlphaLayer4,
+        pObjectStatic->DW06.HalfStatisticsSurfacePitch,
+        pObjectStatic->DW06.StatisticsSurfaceHeight);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW07.Value = %x", pObjectStatic->DW07.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     ConstantBlendingAlphaLayer5 = %d, ConstantBlendingAlphaLayer6 = %d, ConstantBlendingAlphaLayer7 = %d, PointerToInlineParameters = %d, ConstantBlendingAlphaLayer51 = %d, ConstantBlendingAlphaLayer61 = %d, ConstantBlendingAlphaLayer71 = %d, OutputDepth = %d, TopFieldFirst = %d",
+        pObjectStatic->DW07.ConstantBlendingAlphaLayer5,
+        pObjectStatic->DW07.ConstantBlendingAlphaLayer6,
+        pObjectStatic->DW07.ConstantBlendingAlphaLayer7,
+        pObjectStatic->DW07.PointerToInlineParameters,
+        pObjectStatic->DW07.ConstantBlendingAlphaLayer51,
+        pObjectStatic->DW07.ConstantBlendingAlphaLayer61,
+        pObjectStatic->DW07.ConstantBlendingAlphaLayer71,
+        pObjectStatic->DW07.OutputDepth,
+        pObjectStatic->DW07.TopFieldFirst);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW08.Value = %x", pObjectStatic->DW08.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestinationRectangleWidth = %d, DestinationRectangleHeight = %d",
+        pObjectStatic->DW08.DestinationRectangleWidth,
+        pObjectStatic->DW08.DestinationRectangleHeight);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW09.Value = %x", pObjectStatic->DW09.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     RotationMirrorMode = %d, RotationMirrorAllLayer = %d, DualOutputMode = %d, ChannelSwap = %d",
+        pObjectStatic->DW09.RotationMirrorMode,
+        pObjectStatic->DW09.RotationMirrorAllLayer,
+        pObjectStatic->DW09.DualOutputMode,
+        pObjectStatic->DW09.ChannelSwap);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW10.Value = %x", pObjectStatic->DW10.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     ChromaSitingLocation = %d",
+        pObjectStatic->DW10.ObjKa2Gen9.ChromaSitingLocation);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW11.Value = %x", pObjectStatic->DW11.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW12.Value = %x", pObjectStatic->DW12.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     ColorProcessingEnable = %d, MessageFormat = %d, ColorProcessingStatePointer = %x",
+        pObjectStatic->DW12.ColorProcessingEnable,
+        pObjectStatic->DW12.MessageFormat,
+        pObjectStatic->DW12.ColorProcessingStatePointer);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW13.Value = %x", pObjectStatic->DW13.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     ColorFill_R = %x, ColorFill_G = %x, ColorFill_B = %x, ColorFill_A = %x, ColorFill_V = %x, ColorFill_Y = %x, ColorFill_U = %x",
+        pObjectStatic->DW13.ColorFill_R,
+        pObjectStatic->DW13.ColorFill_G,
+        pObjectStatic->DW13.ColorFill_B,
+        pObjectStatic->DW13.ColorFill_A,
+        pObjectStatic->DW13.ColorFill_V,
+        pObjectStatic->DW13.ColorFill_Y,
+        pObjectStatic->DW13.ColorFill_U);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW14.Value = %x", pObjectStatic->DW14.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     LumakeyLowThreshold = %x, LumakeyHighThreshold = %x, NLASEnable = %d, Reserved = %d",
+        pObjectStatic->DW14.LumakeyLowThreshold,
+        pObjectStatic->DW14.LumakeyHighThreshold,
+        pObjectStatic->DW14.NLASEnable,
+        pObjectStatic->DW14.Reserved);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW15.Value = %x", pObjectStatic->DW15.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestinationPackedYOffset = %d, DestinationPackedUOffset = %d, DestinationPackedVOffset = %d, DestinationRGBFormat = %d",
+        pObjectStatic->DW15.DestinationPackedYOffset,
+        pObjectStatic->DW15.DestinationPackedUOffset,
+        pObjectStatic->DW15.DestinationPackedVOffset,
+        pObjectStatic->DW15.DestinationRGBFormat);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW16.Value = %x", pObjectStatic->DW16.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer0 = 0x%x",
+        pObjectStatic->DW16.HorizontalScalingStepRatioLayer0);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW17.Value = %x", pObjectStatic->DW17.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer1 = 0x%x",
+        pObjectStatic->DW17.HorizontalScalingStepRatioLayer1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW18.Value = %x", pObjectStatic->DW18.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer2 = 0x%x",
+        pObjectStatic->DW18.HorizontalScalingStepRatioLayer2);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW19.Value = %x", pObjectStatic->DW19.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer3 = 0x%x",
+        pObjectStatic->DW19.HorizontalScalingStepRatioLayer3);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW20.Value = %x", pObjectStatic->DW20.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer4 = 0x%x",
+        pObjectStatic->DW20.HorizontalScalingStepRatioLayer4);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW21.Value = %x", pObjectStatic->DW21.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer5 = 0x%x",
+        pObjectStatic->DW21.HorizontalScalingStepRatioLayer5);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW22.Value = %x", pObjectStatic->DW22.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalScalingStepRatioLayer6 = 0x%x",
+        pObjectStatic->DW22.HorizontalScalingStepRatioLayer6);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW23.Value = %x", pObjectStatic->DW23.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:    HorizontalScalingStepRatioLayer7 = 0x%x",
+        pObjectStatic->DW23.HorizontalScalingStepRatioLayer7);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW24.Value = %x", pObjectStatic->DW24.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer0 = 0x%x, SourcePackedYOffset = %d, SourcePackedUOffset = %d, SourcePackedVOffset = %d, Reserved = %d",
+        pObjectStatic->DW24.VerticalScalingStepRatioLayer0,
+        pObjectStatic->DW24.SourcePackedYOffset,
+        pObjectStatic->DW24.SourcePackedUOffset,
+        pObjectStatic->DW24.SourcePackedVOffset,
+        pObjectStatic->DW24.Reserved);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW25.Value = %x", pObjectStatic->DW25.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer1 = 0x%x",
+        pObjectStatic->DW25.VerticalScalingStepRatioLayer1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW26.Value = %x", pObjectStatic->DW26.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer2 = 0x%x, HorizontalFrameOriginOffset = %d, VerticalFrameOriginOffset = %d",
+        pObjectStatic->DW26.VerticalScalingStepRatioLayer2,
+        pObjectStatic->DW26.HorizontalFrameOriginOffset,
+        pObjectStatic->DW26.VerticalFrameOriginOffset);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW27.Value = %x", pObjectStatic->DW27.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer3 = 0x%x",
+        pObjectStatic->DW27.VerticalScalingStepRatioLayer3);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW28.Value = %x", pObjectStatic->DW28.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer4 = 0x%x",
+        pObjectStatic->DW28.VerticalScalingStepRatioLayer4);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW29.Value = %x", pObjectStatic->DW29.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer5 = 0x%x",
+        pObjectStatic->DW29.VerticalScalingStepRatioLayer5);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW30.Value = %x", pObjectStatic->DW30.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer6 = 0x%x",
+        pObjectStatic->DW30.VerticalScalingStepRatioLayer6);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW31.Value = %x", pObjectStatic->DW31.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalScalingStepRatioLayer7 = 0x%x",
+         pObjectStatic->DW31.VerticalScalingStepRatioLayer7);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW32.Value = %x", pObjectStatic->DW32.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer0 = 0x%x",
+        pObjectStatic->DW32.VerticalFrameOriginLayer0);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW33.Value = %x", pObjectStatic->DW33.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer1 = 0x%x",
+        pObjectStatic->DW33.VerticalFrameOriginLayer1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW34.Value = %x", pObjectStatic->DW34.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer2 = 0x%x",
+        pObjectStatic->DW34.VerticalFrameOriginLayer2);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW35.Value = %x", pObjectStatic->DW35.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer3 = 0x%x",
+        pObjectStatic->DW35.VerticalFrameOriginLayer3);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW36.Value = %x", pObjectStatic->DW36.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer4 = 0x%x",
+        pObjectStatic->DW36.VerticalFrameOriginLayer4);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW37.Value = %x", pObjectStatic->DW37.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer5 = 0x%x",
+        pObjectStatic->DW37.VerticalFrameOriginLayer5);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW38.Value = %x", pObjectStatic->DW38.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer6 = 0x%x",
+        pObjectStatic->DW38.VerticalFrameOriginLayer6);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW39.Value = %x", pObjectStatic->DW39.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VerticalFrameOriginLayer7 = 0x%x",
+        pObjectStatic->DW39.VerticalFrameOriginLayer7);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW40.Value = %x", pObjectStatic->DW40.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer0 = 0x%x",
+        pObjectStatic->DW40.HorizontalFrameOriginLayer0);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW41.Value = %x", pObjectStatic->DW41.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer1 = 0x%x",
+        pObjectStatic->DW41.HorizontalFrameOriginLayer1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW42.Value = %x", pObjectStatic->DW42.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer2 = 0x%x",
+        pObjectStatic->DW42.HorizontalFrameOriginLayer2);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW43.Value = %x", pObjectStatic->DW43.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer3 = 0x%x",
+        pObjectStatic->DW43.HorizontalFrameOriginLayer3);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW44.Value = %x", pObjectStatic->DW44.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer4 = 0x%x",
+        pObjectStatic->DW44.HorizontalFrameOriginLayer4);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW45.Value = %x", pObjectStatic->DW45.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer5 = 0x%x",
+        pObjectStatic->DW45.HorizontalFrameOriginLayer5);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW46.Value = %x", pObjectStatic->DW46.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer6 = 0x%x",
+        pObjectStatic->DW46.HorizontalFrameOriginLayer6);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW47.Value = %x", pObjectStatic->DW47.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     HorizontalFrameOriginLayer7 = 0x%x",
+        pObjectStatic->DW47.HorizontalFrameOriginLayer7);
+
+    MEDIA_WALKER_KA2_STATIC_DATA *pWalkerStatic = (MEDIA_WALKER_KA2_STATIC_DATA *)pObjectStatic;
+
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW48.Value = %x", pWalkerStatic->DW48.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer0 = %d, DestYTopLeftLayer0 = %d",
+        pWalkerStatic->DW48.DestXTopLeftLayer0,
+        pWalkerStatic->DW48.DestYTopLeftLayer0);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW49.Value = %x", pWalkerStatic->DW49.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer1 = %d, DestYTopLeftLayer1 = %d",
+        pWalkerStatic->DW49.DestXTopLeftLayer1,
+        pWalkerStatic->DW49.DestYTopLeftLayer1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW50.Value = %x", pWalkerStatic->DW50.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer2 = %d, DestYTopLeftLayer2 = %d",
+        pWalkerStatic->DW50.DestXTopLeftLayer2,
+        pWalkerStatic->DW50.DestYTopLeftLayer2);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW51.Value = %x", pWalkerStatic->DW51.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer3 = %d, DestYTopLeftLayer3 = %d",
+        pWalkerStatic->DW51.DestXTopLeftLayer3,
+        pWalkerStatic->DW51.DestYTopLeftLayer3);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW52.Value = %x", pWalkerStatic->DW52.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer4 = %d, DestYTopLeftLayer4 = %d",
+        pWalkerStatic->DW52.DestXTopLeftLayer4,
+        pWalkerStatic->DW52.DestYTopLeftLayer4);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW53.Value = %x", pWalkerStatic->DW53.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer5 = %d, DestYTopLeftLayer5 = %d",
+        pWalkerStatic->DW53.DestXTopLeftLayer5,
+        pWalkerStatic->DW53.DestYTopLeftLayer5);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW54.Value = %x", pWalkerStatic->DW54.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer6 = %d, DestYTopLeftLayer6 = %d",
+        pWalkerStatic->DW54.DestXTopLeftLayer6,
+        pWalkerStatic->DW54.DestYTopLeftLayer6);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW55.Value = %x", pWalkerStatic->DW55.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXTopLeftLayer7 = %d, DestYTopLeftLaye7 = %d",
+        pWalkerStatic->DW55.DestXTopLeftLayer7,
+        pWalkerStatic->DW55.DestYTopLeftLayer7);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW56.Value = %x", pWalkerStatic->DW56.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer0 = %d, DestXBottomRightLayer0 = %d",
+        pWalkerStatic->DW56.DestXBottomRightLayer0,
+        pWalkerStatic->DW56.DestXBottomRightLayer0);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW57.Value = %x", pWalkerStatic->DW57.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer1 = %d, DestXBottomRightLayer1 = %d",
+        pWalkerStatic->DW57.DestXBottomRightLayer1,
+        pWalkerStatic->DW57.DestXBottomRightLayer1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW58.Value = %x", pWalkerStatic->DW58.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer2 = %d, DestXBottomRightLayer2 = %d",
+        pWalkerStatic->DW58.DestXBottomRightLayer2,
+        pWalkerStatic->DW58.DestXBottomRightLayer2);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW59.Value = %x", pWalkerStatic->DW59.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer3 = %d, DestXBottomRightLayer3 = %d",
+        pWalkerStatic->DW59.DestXBottomRightLayer3,
+        pWalkerStatic->DW59.DestXBottomRightLayer3);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW60.Value = %x", pWalkerStatic->DW60.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer4 = %d, DestXBottomRightLayer4 = %d",
+        pWalkerStatic->DW60.DestXBottomRightLayer4,
+        pWalkerStatic->DW60.DestXBottomRightLayer4);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW61.Value = %x", pWalkerStatic->DW61.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer5 = %d, DestXBottomRightLayer5 = %d",
+        pWalkerStatic->DW61.DestXBottomRightLayer5,
+        pWalkerStatic->DW61.DestXBottomRightLayer5);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW62.Value = %x", pWalkerStatic->DW62.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer6 = %d, DestXBottomRightLayer6 = %d",
+        pWalkerStatic->DW62.DestXBottomRightLayer6,
+        pWalkerStatic->DW62.DestXBottomRightLayer6);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW63.Value = %x", pWalkerStatic->DW63.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestXBottomRightLayer7 = %d, DestXBottomRightLayer7 = %d",
+        pWalkerStatic->DW63.DestXBottomRightLayer7,
+        pWalkerStatic->DW63.DestXBottomRightLayer7);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW64.Value = %x", pWalkerStatic->DW64.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     MainVideoXScalingStepLeft = %x",
+        pWalkerStatic->DW64.MainVideoXScalingStepLeft);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW65.Value = %x", pWalkerStatic->DW65.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     VideoStepDeltaForNonLinearRegion = %x",
+        pWalkerStatic->DW65.VideoStepDeltaForNonLinearRegion);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW66.Value = %x", pWalkerStatic->DW66.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     StartofLinearScalingInPixelPositionC0 = %x, StartofRHSNonLinearScalingInPixelPositionC1 = %x",
+        pWalkerStatic->DW66.StartofLinearScalingInPixelPositionC0,
+        pWalkerStatic->DW66.StartofRHSNonLinearScalingInPixelPositionC1);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW67.Value = %x", pWalkerStatic->DW67.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     MainVideoXScalingStepCenter = %x",
+        pWalkerStatic->DW67.MainVideoXScalingStepCenter);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW68.Value = %x", pWalkerStatic->DW68.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     MainVideoXScalingStepRight = %x",
+        pWalkerStatic->DW68.MainVideoXScalingStepRight);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: DW69.Value = %x", pWalkerStatic->DW69.Value);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData:     DestHorizontalBlockOrigin = %x, DestVerticalBlockOrigin = %x",
+        pWalkerStatic->DW69.DestHorizontalBlockOrigin,
+        pWalkerStatic->DW69.DestVerticalBlockOrigin);
+    VPHAL_RENDER_VERBOSEMESSAGE("CurbeData: dwPad[0] = %x, dwPad[1] = %x",
+        pWalkerStatic->dwPad[0],
+        pWalkerStatic->dwPad[1]); 
+#endif
 }
 
 //!
@@ -7350,3 +8044,25 @@ bool CompositeState::IsSamplerIDForY(
 {
     return (SamplerID == VPHAL_SAMPLER_Y) ? true : false;
 }
+
+ bool CompositeState::IsDisableAVSSampler(
+    int32_t         iSources,
+    bool            isTargetY)
+{
+     if (m_pOsInterface == nullptr)
+     {
+         return false;
+     }
+
+     MEDIA_WA_TABLE *waTable = m_pOsInterface->pfnGetWaTable(m_pOsInterface);
+     if (waTable == nullptr)
+     {
+         return false;
+     }
+
+     if (MEDIA_IS_WA(waTable, WaTargetTopYOffset) && iSources > 1 && isTargetY)
+     {
+         return true;
+     }
+     return false;
+ }

@@ -258,7 +258,7 @@ MOS_STATUS CodechalDecodeMpeg2G12::DecodeStateLevel()
                 std::string refSurfName      = "RefSurf" + std::to_string(static_cast<uint32_t>(m_debugInterface->m_refIndex));
                 CODECHAL_DECODE_CHK_STATUS_RETURN(m_debugInterface->DumpYUVSurface(
                     &dstSurface,
-                    CodechalDbgAttr::attrReferenceSurfaces,
+                    CodechalDbgAttr::attrDecodeReferenceSurfaces,
                     refSurfName.data()));
             }
         }
@@ -685,7 +685,7 @@ CodechalDecodeMpeg2G12::CodechalDecodeMpeg2G12 (
 
     CODECHAL_DECODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, true, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
 }
 
 void CodechalDecodeMpeg2G12::CalcRequestedSpace(

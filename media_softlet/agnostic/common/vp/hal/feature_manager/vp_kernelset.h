@@ -1,4 +1,4 @@
-/* Copyright (c) 2020-2021, Intel Corporation
+/* Copyright (c) 2020-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -44,7 +44,13 @@ class VpKernelSet
 {
 public:
     VpKernelSet(PVP_MHWINTERFACE hwInterface, PVpAllocator allocator);
-    virtual ~VpKernelSet() {};
+    virtual ~VpKernelSet()
+    {
+        for (auto &it : m_cachedKernels)
+        {
+            MOS_Delete(it.second);
+        }
+    };
 
     virtual MOS_STATUS Clean()
     {
@@ -66,14 +72,20 @@ public:
         VP_SURFACE_GROUP& surfacesGroup,
         KERNEL_SAMPLER_STATE_GROUP& samplerStateGroup,
         KERNEL_CONFIGS& kernelConfigs,
-        KERNEL_OBJECTS& kernelObjs);
+        KERNEL_OBJECTS& kernelObjs,
+        VP_RENDER_CACHE_CNTL& surfMemCacheCtl,
+        VP_PACKET_SHARED_CONTEXT* sharedContext);
 
     virtual MOS_STATUS DestroyKernelObjects(KERNEL_OBJECTS& kernelObjs)
     {
         while (!kernelObjs.empty())
         {
             auto it = kernelObjs.begin();
-            MOS_Delete(it->second);
+            if (m_cachedKernels.size() == 0 || m_cachedKernels.end() == m_cachedKernels.find(it->second->GetKernelId()))
+            {
+                // Only destroy the kernels not exists in m_cachedKernels.
+                MOS_Delete(it->second);
+            }
             kernelObjs.erase(it);
         }
 
@@ -81,15 +93,17 @@ public:
     }
 protected:
 
-    MOS_STATUS GetKernelInfo(uint32_t kuid, uint32_t& size, void*& kernel);
+    MOS_STATUS GetKernelInfo(std::string kernalName, uint32_t kuid, uint32_t &size, void *&kernel);
 
     MOS_STATUS FindAndInitKernelObj(VpRenderKernelObj* kernelObj);
 
 protected:
-
     KERNEL_POOL*          m_pKernelPool = nullptr;
     PVP_MHWINTERFACE      m_hwInterface = nullptr;
     PVpAllocator          m_allocator   = nullptr;
+    std::map<VpKernelID, VpRenderKernelObj *> m_cachedKernels;
+
+MEDIA_CLASS_DEFINE_END(vp__VpKernelSet)
 };
 }
 

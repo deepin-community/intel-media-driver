@@ -60,8 +60,12 @@ if(GEN11)
     media_include_subdirectory(gen11)
 endif()
 
-if(GEN12)
+if(ENABLE_REQUIRED_GEN_CODE OR GEN12)
     media_include_subdirectory(gen12)
+endif()
+
+if(XEHP_SDV OR DG2 OR PVC)
+    media_include_subdirectory(Xe_M)
 endif()
 
 include(${MEDIA_EXT}/linux/media_srcs_ext.cmake OPTIONAL)

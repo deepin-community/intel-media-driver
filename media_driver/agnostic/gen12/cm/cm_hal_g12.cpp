@@ -64,7 +64,10 @@ struct PACKET_SURFACE_STATE
 
 CM_HAL_G12_X::CM_HAL_G12_X(CM_HAL_STATE *cmState): CM_HAL_GENERIC(cmState)
 {   // Enables scheduling based on virtual enngine.
-    Mos_CheckVirtualEngineSupported(m_cmState->osInterface, false, true);
+    if (m_cmState && m_cmState->osInterface)
+    {
+        m_cmState->osInterface->pfnVirtualEngineSupported(m_cmState->osInterface, false, true);
+    }
     return;
 }
 
@@ -402,15 +405,15 @@ MOS_STATUS CM_HAL_G12_X::SubmitCommands(
                     PCM_HAL_KERNEL_PARAM    *kernelParam,
                     void                    **cmdBuffer)
 {
-    MOS_STATUS                   eStatus = MOS_STATUS_SUCCESS;
-    PCM_HAL_STATE                state     = m_cmState;
-    PRENDERHAL_INTERFACE         renderHal = state->renderHal;
-    PMOS_INTERFACE               osInterface = renderHal->pOsInterface;
+    MOS_STATUS                   eStatus        = MOS_STATUS_SUCCESS;
+    PCM_HAL_STATE                state          = m_cmState;
+    PRENDERHAL_INTERFACE_LEGACY  renderHal      = state->renderHal;
+    PMOS_INTERFACE               osInterface    = renderHal->pOsInterface;
     MhwRenderInterface           *mhwRender     = renderHal->pMhwRenderInterface;
     PMHW_MI_INTERFACE            mhwMiInterface = renderHal->pMhwMiInterface;
-    PRENDERHAL_STATE_HEAP        stateHeap = renderHal->pStateHeap;
-    MHW_PIPE_CONTROL_PARAMS      pipeCtlParams = g_cRenderHal_InitPipeControlParams;
-    MHW_MEDIA_STATE_FLUSH_PARAM  flushParam = g_cRenderHal_InitMediaStateFlushParams;
+    PRENDERHAL_STATE_HEAP        stateHeap      = renderHal->pStateHeap;
+    MHW_PIPE_CONTROL_PARAMS      pipeCtlParams  = g_cRenderHal_InitPipeControlParams;
+    MHW_MEDIA_STATE_FLUSH_PARAM  flushParam     = g_cRenderHal_InitMediaStateFlushParams;
     MHW_ID_LOAD_PARAMS           idLoadParams;
     int32_t                      remaining = 0;
     bool                         enableWalker = state->walkerParams.CmWalkerEnable;
@@ -717,7 +720,7 @@ MOS_STATUS CM_HAL_G12_X::SubmitCommands(
     // Send Interface Descriptor Load
     if (state->dshEnabled)
     {
-        PRENDERHAL_DYNAMIC_STATE dynamicState = stateHeap->pCurMediaState->pDynamicState;
+        PRENDERHAL_DYNAMIC_STATE dynamicState = ((PRENDERHAL_MEDIA_STATE_LEGACY)stateHeap->pCurMediaState)->pDynamicState;
         idLoadParams.dwInterfaceDescriptorStartOffset = dynamicState->memoryBlock.GetOffset() +
             dynamicState->MediaID.dwOffset;
         idLoadParams.dwInterfaceDescriptorLength = dynamicState->MediaID.iCount * stateHeap->dwSizeMediaID;
@@ -732,7 +735,7 @@ MOS_STATUS CM_HAL_G12_X::SubmitCommands(
 
     idLoadParams.pKernelState = nullptr;
     CM_CHK_MOSSTATUS_GOTOFINISH(mhwRender->AddMediaIDLoadCmd(&mosCmdBuffer, &idLoadParams));
-    HalOcaInterface::OnDispatch(mosCmdBuffer, *pOsContext, *renderHal->pMhwMiInterface, *pMmioRegisters);
+    HalOcaInterface::OnDispatch(mosCmdBuffer, *renderHal->pOsInterface, *renderHal->pMhwMiInterface, *pMmioRegisters);
     if (enableWalker)
     {
         // send media walker command, if required
@@ -922,7 +925,7 @@ MOS_STATUS CM_HAL_G12_X::SubmitCommands(
                 &mosSurface));
             mosSurface.OsResource = state->bufferTable[i].osResource;
 
-            CM_CHK_HRESULT_GOTOFINISH_MOSERROR(HalCm_SurfaceSync(state, &mosSurface, false));
+            CM_CHK_HRESULT_GOTOFINISH_MOSERROR(state->pfnSurfaceSync(state, &mosSurface, false));
         }
     }
 

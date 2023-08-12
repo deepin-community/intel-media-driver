@@ -27,7 +27,7 @@
 #ifndef __MEDIA_INTERFACES_MHW_H__
 #define __MEDIA_INTERFACES_MHW_H__
 
-#include "media_interfaces.h"
+#include "media_factory.h"
 #include "igfxfmid.h"
 #include "mos_utilities.h"
 #include "mos_os.h"
@@ -101,6 +101,7 @@ public:
     MhwVdboxHucInterface *m_hucInterface = nullptr;
     MhwVdboxVdencInterface *m_vdencInterface = nullptr;
     MhwBltInterface *m_bltInterface = nullptr;
+    PMOS_INTERFACE m_osInterface = nullptr;
 
     //!
     //! \brief    Calls the factory function to initialize all requested interfaces.
@@ -144,6 +145,6 @@ private:
     bool m_isDestroyed = false;
 };
 
-extern template class MediaInterfacesFactory<MhwInterfaces>;
+extern template class MediaFactory<uint32_t, MhwInterfaces>;
 
 #endif // __MEDIA_INTERFACES_MHW_H__

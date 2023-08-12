@@ -177,6 +177,7 @@ static bool InitEhlShadowSku(struct GfxDeviceInfo *devInfo,
     skuTable->FtrDisplayYTiling = 1;
     skuTable->FtrEDram          = 0;
     skuTable->FtrLLCBypass      = 1;
+    skuTable->FtrTileY = 1;
 
     return true;
 }
@@ -269,6 +270,7 @@ static struct GfxDeviceInfo icllpGt1Info = {
     .productFamily = IGFX_ICELAKE_LP,
     .displayFamily = IGFX_GEN11_CORE,
     .renderFamily  = IGFX_GEN11_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT1,
     .L3CacheSizeInKb = 2304,
     .L3BankCount   = 6,
@@ -289,6 +291,7 @@ static struct GfxDeviceInfo icllpGt05Info = {
     .productFamily = IGFX_ICELAKE_LP,
     .displayFamily = IGFX_GEN11_CORE,
     .renderFamily  = IGFX_GEN11_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT1,
     .L3CacheSizeInKb = 2304,
     .L3BankCount   = 6,
@@ -308,6 +311,7 @@ static struct GfxDeviceInfo icllpGt2Info = {
     .productFamily = IGFX_ICELAKE_LP,
     .displayFamily = IGFX_GEN11_CORE,
     .renderFamily  = IGFX_GEN11_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT2,
     .L3CacheSizeInKb = 3072,
     .L3BankCount   = 8,
@@ -327,6 +331,7 @@ static struct GfxDeviceInfo ehlDevInfo = {
     .productFamily = IGFX_ELKHARTLAKE,
     .displayFamily = IGFX_GEN11_CORE,
     .renderFamily  = IGFX_GEN11_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT1,
     .L3CacheSizeInKb = 1280,
     .L3BankCount   = 4,
@@ -346,6 +351,7 @@ static struct GfxDeviceInfo ehlDevInfo16EU = {
     .productFamily = IGFX_ELKHARTLAKE,
     .displayFamily = IGFX_GEN11_CORE,
     .renderFamily  = IGFX_GEN11_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT1,
     .L3CacheSizeInKb = 1280,
     .L3BankCount   = 4,

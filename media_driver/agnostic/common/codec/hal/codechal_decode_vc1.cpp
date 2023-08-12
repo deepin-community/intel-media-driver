@@ -1730,7 +1730,7 @@ MOS_STATUS CodechalDecodeVc1::BitplaneNorm2Mode()
 
     uint32_t count = frameFieldWidthInMb * frameFieldHeightInMb;
 
-    uint32_t value;
+    uint32_t value = 0;
     if ((frameFieldWidthInMb * frameFieldHeightInMb) & 1)
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(1, value));
@@ -1767,9 +1767,9 @@ MOS_STATUS CodechalDecodeVc1::BitplaneNorm6Mode()
 
     bool is2x3Tiled = (0 != frameFieldWidthInMb % 3) && (0 == frameFieldHeightInMb % 3);
 
-    uint32_t heightInTiles, widthInTiles;
-    uint32_t residualX, residualY;
-    uint32_t value;
+    uint32_t heightInTiles = 0, widthInTiles = 0;
+    uint32_t residualX = 0, residualY = 0;
+    uint32_t value = 0;
     if (is2x3Tiled)
     {
         widthInTiles = frameFieldWidthInMb / 2;
@@ -1842,7 +1842,7 @@ MOS_STATUS CodechalDecodeVc1::BitplaneRowskipMode()
         frameFieldHeightInMb);
     uint16_t frameFieldWidthInMb = m_picWidthInMb;
 
-    uint32_t value;
+    uint32_t value = 0;
     for (uint32_t j = 0; j < frameFieldHeightInMb; j++)
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_BITPLANE_ROWSKIP, value));
@@ -1868,8 +1868,8 @@ MOS_STATUS CodechalDecodeVc1::BitplaneColskipMode()
         meFieldHeightInMb);
     uint16_t frameFieldWidthInMb = m_picWidthInMb;
 
-    uint32_t value;
-    uint32_t colSkip;
+    uint32_t value = 0;
+    uint32_t colSkip = 0;
     for (uint32_t i = 0; i < frameFieldWidthInMb; i++)
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_BITPLANE_COLSKIP, value));
@@ -1889,7 +1889,7 @@ MOS_STATUS CodechalDecodeVc1::ParseVopDquant()
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    uint32_t value;
+    uint32_t value = 0;
     uint32_t dquantFRM = 0, dqprofile = 0, dqbilevel = 0;
     if ((1 == m_vc1PicParams->pic_quantizer_fields.dquant) ||
         (3 == m_vc1PicParams->pic_quantizer_fields.dquant))
@@ -2074,8 +2074,8 @@ MOS_STATUS CodechalDecodeVc1::ParseInterlaceMVMode(
     }
 
     uint32_t bitCount = 1;
-    uint32_t value;
-    uint32_t index, mvMode;
+    uint32_t value = 0;
+    uint32_t index = 0, mvMode = 0;
     CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(1, value));
 
     if (isPPicture)
@@ -2137,7 +2137,7 @@ MOS_STATUS CodechalDecodeVc1::ParseBitplane()
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    uint32_t value;
+    uint32_t value = 0;
     CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_BITPLANE_INVERT, value));
 
     CODECHAL_DECODE_CHK_STATUS_RETURN(GetVLC(CODECHAL_DECODE_VC1_VldBitplaneModeTable, value));
@@ -2176,7 +2176,7 @@ MOS_STATUS CodechalDecodeVc1::ParsePictureLayerIAdvanced()
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    uint32_t value;
+    uint32_t value = 0;
     if (CodecHal_PictureIsInterlacedFrame(m_vc1PicParams->CurrPic))
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(ParseBitplane());
@@ -2242,7 +2242,7 @@ MOS_STATUS CodechalDecodeVc1::ParsePictureLayerPAdvanced()
 
     CODECHAL_DECODE_CHK_STATUS_RETURN(ParseBitplane());
 
-    uint32_t value;
+    uint32_t value = 0;
     CODECHAL_DECODE_CHK_STATUS_RETURN(SkipBits(CODECHAL_DECODE_VC1_BITS_MVTAB + CODECHAL_DECODE_VC1_BITS_CBPTAB, value));
 
     CODECHAL_DECODE_CHK_STATUS_RETURN(ParseVopDquant());
@@ -2317,8 +2317,8 @@ MOS_STATUS CodechalDecodeVc1::ParseFieldPictureLayerPAdvanced()
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    uint32_t value;
-    uint32_t numRef;
+    uint32_t value = 0;
+    uint32_t numRef = 0;
     if (CodecHal_PictureIsField(m_vc1PicParams->CurrPic))
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_NUMREF, value));
@@ -2442,7 +2442,7 @@ MOS_STATUS CodechalDecodeVc1::ParseFieldPictureLayerBAdvanced()
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    uint32_t value;
+    uint32_t value = 0;
     if (CodecHal_PictureIsInterlacedFrame(m_vc1PicParams->CurrPic))
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetVLC(CODECHAL_DECODE_VC1_VldBFractionTable, value));
@@ -2583,7 +2583,7 @@ MOS_STATUS CodechalDecodeVc1::ParsePictureHeaderAdvanced()
                            ? true
                            : false;
 
-    uint32_t value;
+    uint32_t value = 0;
     if (m_vc1PicParams->sequence_fields.interlace)
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_FCM_1, value));
@@ -2768,7 +2768,7 @@ MOS_STATUS CodechalDecodeVc1::ParsePictureHeaderMainSimple()
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
-    uint32_t value;
+    uint32_t value = 0;
     if (m_vc1PicParams->sequence_fields.finterpflag)
     {
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_INTERPFRM, value));
@@ -2827,7 +2827,7 @@ MOS_STATUS CodechalDecodeVc1::GetSliceMbDataOffset()
         CODECHAL_DECODE_CHK_STATUS_RETURN(InitialiseBitstream(slice, length, true));
 
         // parse slice header to get PIC_HEADER_FLAG
-        uint32_t value;
+        uint32_t value = 0;
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_SC_SUFFIX, value));
 
         CODECHAL_DECODE_CHK_STATUS_RETURN(GetBits(CODECHAL_DECODE_VC1_BITS_SLICE_ADDR, value));
@@ -3219,13 +3219,11 @@ MOS_STATUS CodechalDecodeVc1::SetFrameStates()
         m_resBitplaneBuffer = *(m_decodeParams.m_bitplaneBuffer);
     }
 
-    bool pictureIsI = m_mfxInterface->IsVc1IPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType) ? true : false;
-    bool pictureIsP = m_mfxInterface->IsVc1PPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType) ? true : false;
+    bool pictureIsI = m_mfxInterface->IsVc1IPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType);
+    bool pictureIsP = m_mfxInterface->IsVc1PPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType);
     bool pictureIsB =
-        (m_mfxInterface->IsVc1BPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType) |
-            m_mfxInterface->IsVc1BIPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType))
-            ? true
-            : false;
+        (m_mfxInterface->IsVc1BPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType) ||
+            m_mfxInterface->IsVc1BIPicture(currPic, m_vc1PicParams->picture_fields.is_first_field, picType));
 
     // Save anchor picture type and field structure (TFF/BFF)
     if (!pictureIsB)
@@ -3470,7 +3468,7 @@ MOS_STATUS CodechalDecodeVc1::DecodeStateLevel()
                 std::string refSurfName      = "RefSurf" + std::to_string(static_cast<uint32_t>(m_debugInterface->m_refIndex));
                 CODECHAL_DECODE_CHK_STATUS_RETURN(m_debugInterface->DumpYUVSurface(
                     &dstSurface,
-                    CodechalDbgAttr::attrReferenceSurfaces,
+                    CodechalDbgAttr::attrDecodeReferenceSurfaces,
                     refSurfName.data()));
             }
         }
@@ -4845,6 +4843,7 @@ CodechalDecodeVc1::CodechalDecodeVc1(
 #if (_DEBUG || _RELEASE_INTERNAL)
     m_reportFrameCrc = true;
 #endif
+    m_hwInterface = hwInterface;
 
 }
 

@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2020, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 //!
 
 #include "decode_scalability_option.h"
-#include "decode_utils.h"
+#include "media_scalability_defs.h"
 
 namespace decode
 {
@@ -60,6 +60,11 @@ MOS_STATUS DecodeScalabilityOption::SetScalabilityOption(ScalabilityPars *params
     }
 
     bool isRealTileDecode   = IsRealTileDecode(*decPars);
+    if (!isRealTileDecode && decPars->disableVirtualTile)
+    {
+        //If Not Real Tile Decode and Virtual tile was disabled, use single pipe.
+        return MOS_STATUS_SUCCESS;
+    }
 
 #if (_DEBUG || _RELEASE_INTERNAL)
     if (decPars->forceMultiPipe)
@@ -76,12 +81,13 @@ MOS_STATUS DecodeScalabilityOption::SetScalabilityOption(ScalabilityPars *params
     }
     else
 #endif
-    if (IsResolutionMatchMultiPipeThreshold2(decPars->frameWidth, decPars->frameHeight))
+    if (!decPars->disableVirtualTile && IsResolutionMatchMultiPipeThreshold2(decPars->frameWidth, decPars->frameHeight))
     {
         m_numPipe = (decPars->numVdbox >= m_maxNumMultiPipe) ? m_maxNumMultiPipe : m_typicalNumMultiPipe;
     }
     else if (isRealTileDecode ||
-             IsResolutionMatchMultiPipeThreshold1(decPars->frameWidth, decPars->frameHeight, decPars->surfaceFormat))
+             (!decPars->disableVirtualTile &&
+              IsResolutionMatchMultiPipeThreshold1(decPars->frameWidth, decPars->frameHeight, decPars->surfaceFormat)))
     {
         m_numPipe = m_typicalNumMultiPipe;
     }
@@ -113,11 +119,6 @@ bool DecodeScalabilityOption::IsScalabilityOptionMatched(ScalabilityPars *params
     if (params == nullptr)
     {
         return false;
-    }
-
-    if (params->enableMdf == true)
-    {
-        return true;
     }
 
     bool                   matched  = false;

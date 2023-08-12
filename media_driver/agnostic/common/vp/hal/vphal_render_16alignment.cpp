@@ -1,27 +1,23 @@
 /*
+* Copyright (c) 2018-2022, Intel Corporation
 *
-* Copyright (c) Intel Corporation (2018 - 2019).
+* Permission is hereby granted, free of charge, to any person obtaining a
+* copy of this software and associated documentation files (the "Software"),
+* to deal in the Software without restriction, including without limitation
+* the rights to use, copy, modify, merge, publish, distribute, sublicense,
+* and/or sell copies of the Software, and to permit persons to whom the
+* Software is furnished to do so, subject to the following conditions:
 *
-* INTEL MAKES NO WARRANTY OF ANY KIND REGARDING THE CODE.  THIS CODE IS
-* LICENSED ON AN "AS IS" BASIS AND INTEL WILL NOT PROVIDE ANY SUPPORT,
-* ASSISTANCE, INSTALLATION, TRAINING OR OTHER SERVICES.  INTEL DOES NOT
-* PROVIDE ANY UPDATES, ENHANCEMENTS OR EXTENSIONS.  INTEL SPECIFICALLY
-* DISCLAIMS ANY WARRANTY OF MERCHANTABILITY, NONINFRINGEMENT, FITNESS FOR ANY
-* PARTICULAR PURPOSE, OR ANY OTHER WARRANTY.  Intel disclaims all liability,
-* including liability for infringement of any proprietary rights, relating to
-* use of the code. No license, express or implied, by estoppel or otherwise,
-* to any intellectual property rights is granted herein.
+* The above copyright notice and this permission notice shall be included
+* in all copies or substantial portions of the Software.
 *
-*
-* File Name  : vphal_render_16alignment.cpp
-*
-* Abstract   : Video Surface 16 bytes alignment for Video Processing
-*
-* Environment: ubuntu
-*
-* Notes      : This module contains video surface 16 bytes alignment definitions
-*              for VPHAL
-*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+* OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+* THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+* OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+* ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+* OTHER DEALINGS IN THE SOFTWARE.
 */
 //!
 //! \file     vphal_render_16alignment.cpp
@@ -154,7 +150,7 @@ MOS_STATUS VpHal_16AlignLoadStaticData(
             eStatus = MOS_STATUS_INVALID_PARAMETER;
             break;
     }
-#if defined(LINUX)
+#if defined(LINUX) && !defined(WDDM_LINUX)
     WalkerStatic.DW10.Output_Pitch            = p16AlignState->pTarget->OsResource.iPitch;
     WalkerStatic.DW10.Output_Height           = p16AlignState->pTarget->OsResource.iHeight;
 #endif
@@ -1049,7 +1045,7 @@ MOS_STATUS VpHal_16AlignSetupSurfaceStatesInt(
     PRENDERHAL_SURFACE_STATE_ENTRY      pSurfaceEntry;
     MOS_FORMAT                          format  = pSurface->Format;
     uint32_t                            width   = pSurface->dwWidth;
-#if defined(LINUX)
+#if defined(LINUX) && !defined(WDDM_LINUX)
     uint32_t                            dwSize  = pSurface->dwHeight * pSurface->OsResource.iPitch;
 #else
     uint32_t                            dwSize  = pSurface->dwHeight * pSurface->dwPitch;
@@ -1203,7 +1199,7 @@ MOS_STATUS VpHal_16AlignSetupSurfaceStates(
         SurfaceParams.bAVS          = true;
     }
     SurfaceParams.Boundary          = RENDERHAL_SS_BOUNDARY_SRCRECT;
-    SurfaceParams.bRenderTarget     = false;
+    SurfaceParams.isOutput     = false;
     SurfaceParams.MemObjCtl         =
         p16AlignState->SurfMemObjCtl.SourceSurfMemObjCtl;
     SurfaceParams.Type              = RENDERHAL_SURFACE_TYPE_ADV_G9;
@@ -1222,7 +1218,7 @@ MOS_STATUS VpHal_16AlignSetupSurfaceStates(
     SurfaceParams.MemObjCtl         =
         p16AlignState->SurfMemObjCtl.TargetSurfMemObjCtl;
     SurfaceParams.Type              = pRenderHal->SurfaceTypeDefault;
-    SurfaceParams.bRenderTarget     = true;
+    SurfaceParams.isOutput     = true;
     SurfaceParams.bAVS              = false;
     SurfaceParams.Boundary          = RENDERHAL_SS_BOUNDARY_DSTRECT;
 

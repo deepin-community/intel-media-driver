@@ -1,4 +1,4 @@
-# Copyright (c) 2021, Intel Corporation
+# Copyright (c) 2021-2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -20,28 +20,18 @@
 
 set(TMP_SOURCES_
     ${CMAKE_CURRENT_LIST_DIR}/hal_kerneldll_next.c
+    ${CMAKE_CURRENT_LIST_DIR}/hal_kernelrules_next.c
 )
 
-set(TMP_HEADERS_ "")
-
-
-set(SOURCES_
-    ${SOURCES_}
-    ${TMP_SOURCES_}
- )
-
-set(COMMON_SOURCES_
-    ${COMMON_SOURCES_}
+set(SOFTLET_VP_SOURCES_
+    ${SOFTLET_VP_SOURCES_}
     ${TMP_SOURCES_}
 )
-
-# no header for now
-#set(HEADERS_
-#    ${HEADERS_}
-#    ${TMP_HEADERS_}
-#)
 
 source_group( "VpHalNext\\Kernel DLL" FILES ${TMP_SOURCES_} ${TMP_HEADERS_} )
+set(TMP_SOURCES_ "")
 
-
-#media_add_curr_to_include_path()
+set(SOFTLET_VP_PRIVATE_INCLUDE_DIRS_
+    ${SOFTLET_VP_PRIVATE_INCLUDE_DIRS_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)

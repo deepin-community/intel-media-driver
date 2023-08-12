@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2021, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -25,11 +25,10 @@
 //!
 
 #include "mos_defs.h"
-#include "mos_util_debug_next.h"
+#include "mos_util_debug.h"
 
 #include "mos_graphicsresource_specific_next.h"
 #include "mos_context_specific_next.h"
-#include "mos_os_specific_next.h"
 #include "memory_policy_manager.h"
 
 GraphicsResourceSpecificNext::GraphicsResourceSpecificNext()
@@ -52,62 +51,6 @@ bool GraphicsResourceSpecificNext::ResourceIsNull()
 
 }
 
-GMM_RESOURCE_FORMAT GraphicsResourceSpecificNext::ConvertMosFmtToGmmFmt(MOS_FORMAT format)
-{
-    switch (format)
-    {
-        case Format_Buffer      : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_Buffer_2D   : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_L8          : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_L16         : return GMM_FORMAT_L16_UNORM_TYPE;
-        case Format_STMM        : return GMM_FORMAT_R8_UNORM_TYPE;
-        case Format_AI44        : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_IA44        : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_R5G6B5      : return GMM_FORMAT_B5G6R5_UNORM_TYPE;
-        case Format_X8R8G8B8    : return GMM_FORMAT_B8G8R8X8_UNORM_TYPE;
-        case Format_A8R8G8B8    : return GMM_FORMAT_B8G8R8A8_UNORM_TYPE;
-        case Format_X8B8G8R8    : return GMM_FORMAT_R8G8B8X8_UNORM_TYPE;
-        case Format_A8B8G8R8    : return GMM_FORMAT_R8G8B8A8_UNORM_TYPE;
-        case Format_R32F        : return GMM_FORMAT_R32_FLOAT_TYPE;
-        case Format_V8U8        : return GMM_FORMAT_GENERIC_16BIT;              // matching size as format
-        case Format_YUY2        : return GMM_FORMAT_YUY2;
-        case Format_UYVY        : return GMM_FORMAT_UYVY;
-        case Format_P8          : return GMM_FORMAT_RENDER_8BIT_TYPE;           // matching size as format
-        case Format_A8          : return GMM_FORMAT_A8_UNORM_TYPE;
-        case Format_AYUV        : return GMM_FORMAT_R8G8B8A8_UINT_TYPE;
-        case Format_NV12        : return GMM_FORMAT_NV12_TYPE;
-        case Format_NV21        : return GMM_FORMAT_NV21_TYPE;
-        case Format_YV12        : return GMM_FORMAT_YV12_TYPE;
-        case Format_R32U        : return GMM_FORMAT_R32_UINT_TYPE;
-        case Format_R32S        : return GMM_FORMAT_R32_SINT_TYPE;
-        case Format_RAW         : return GMM_FORMAT_GENERIC_8BIT;
-        case Format_444P        : return GMM_FORMAT_MFX_JPEG_YUV444_TYPE;
-        case Format_422H        : return GMM_FORMAT_MFX_JPEG_YUV422H_TYPE;
-        case Format_422V        : return GMM_FORMAT_MFX_JPEG_YUV422V_TYPE;
-        case Format_IMC3        : return GMM_FORMAT_IMC3_TYPE;
-        case Format_411P        : return GMM_FORMAT_MFX_JPEG_YUV411_TYPE;
-        case Format_411R        : return GMM_FORMAT_MFX_JPEG_YUV411R_TYPE;
-        case Format_RGBP        : return GMM_FORMAT_RGBP_TYPE;
-        case Format_BGRP        : return GMM_FORMAT_BGRP_TYPE;
-        case Format_R8U         : return GMM_FORMAT_R8_UINT_TYPE;
-        case Format_R8UN        : return GMM_FORMAT_R8_UNORM;
-        case Format_R16U        : return GMM_FORMAT_R16_UINT_TYPE;
-        case Format_R16F        : return GMM_FORMAT_R16_FLOAT_TYPE;
-        case Format_P010        : return GMM_FORMAT_P010_TYPE;
-        case Format_P016        : return GMM_FORMAT_P016_TYPE;
-        case Format_Y216        : return GMM_FORMAT_Y216_TYPE;
-        case Format_Y416        : return GMM_FORMAT_Y416_TYPE;
-        case Format_P208        : return GMM_FORMAT_P208_TYPE;
-        case Format_A16B16G16R16: return GMM_FORMAT_R16G16B16A16_UNORM_TYPE;
-        case Format_Y210        : return GMM_FORMAT_Y210_TYPE;
-        case Format_Y410        : return GMM_FORMAT_Y410_TYPE;
-        case Format_R10G10B10A2 : return GMM_FORMAT_R10G10B10A2_UNORM_TYPE;
-        case Format_A16B16G16R16F: return GMM_FORMAT_R16G16B16A16_FLOAT;
-        case Format_R32G32B32A32F: return GMM_FORMAT_R32G32B32A32_FLOAT;
-        default                 : return GMM_FORMAT_INVALID;
-    }
-}
-
 MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, CreateParams& params)
 {
     MOS_OS_FUNCTION_ENTER;
@@ -128,6 +71,13 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
     if (pOsContextSpecific == nullptr)
     {
         MOS_OS_ASSERTMESSAGE("Convert OsContextSpecific failed.");
+        return MOS_STATUS_INVALID_HANDLE;
+    }
+
+    GMM_CLIENT_CONTEXT    *gmmClientContext = pOsContextSpecific->GetGmmClientContext();
+    if (nullptr == gmmClientContext)
+    {
+        MOS_OS_ASSERTMESSAGE("Get GMM Client Context failed.");
         return MOS_STATUS_INVALID_HANDLE;
     }
 
@@ -169,7 +119,7 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
     }
 
     // Create GmmResourceInfo
-    gmmParams.Format = ConvertMosFmtToGmmFmt(params.m_format);
+    gmmParams.Format = MosInterface::MosFmtToGmmFmt(params.m_format);
     if (gmmParams.Format == GMM_FORMAT_INVALID)
     {
         MOS_OS_ASSERTMESSAGE("Unsupported format");
@@ -185,7 +135,9 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
     {
         case MOS_TILE_Y:
             tileFormatLinux               = I915_TILING_Y;
-            if (params.m_isCompressible && MEDIA_IS_SKU(pOsContextSpecific->GetSkuTable(), FtrE2ECompression))
+            if (params.m_isCompressible                                            &&
+                MEDIA_IS_SKU(pOsContextSpecific->GetSkuTable(), FtrE2ECompression) &&
+                MEDIA_IS_SKU(pOsContextSpecific->GetSkuTable(), FtrCompressibleSurfaceDefault))
             {
                 gmmParams.Flags.Gpu.MMC  = 1;
                 
@@ -291,6 +243,7 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
         memPolicyPar.resInfo          = gmmResourceInfoPtr;
         memPolicyPar.resName          = params.m_name.c_str();
         memPolicyPar.preferredMemType = params.m_memType;
+        memPolicyPar.isServer         = PLATFORM_INFORMATION_IS_SERVER & mos_get_platform_information(pOsContextSpecific->GetBufMgr());
 
         mem_type = MemoryPolicyManager::UpdateMemoryPolicy(&memPolicyPar);
     }
@@ -303,6 +256,9 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
 
     char bufName[m_maxBufNameLength];
     MosUtilities::MosSecureStrcpy(bufName, m_maxBufNameLength, params.m_name.c_str());
+
+    unsigned int patIndex = MosInterface::GetPATIndexFromGmm(gmmClientContext, gmmResourceInfoPtr);
+    bool isCpuCacheable   = gmmResourceInfoPtr->GetResFlags().Info.Cacheable;
 
     MOS_TraceEventExt(EVENT_RESOURCE_ALLOCATE, EVENT_TYPE_START, nullptr, 0, nullptr, 0);
     if (nullptr != params.m_pSystemMemory)
@@ -318,7 +274,7 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
     // Only Linear and Y TILE supported
     else if (tileFormatLinux == I915_TILING_NONE)
     {
-        boPtr = mos_bo_alloc(pOsContextSpecific->m_bufmgr, bufName, bufSize, 4096, mem_type);
+        boPtr = mos_bo_alloc(pOsContextSpecific->m_bufmgr, bufName, bufSize, 4096, mem_type, patIndex, isCpuCacheable);
     }
     else
     {
@@ -330,7 +286,9 @@ MOS_STATUS GraphicsResourceSpecificNext::Allocate(OsContextNext* osContextPtr, C
                         &tileFormatLinux,
                         &linuxPitch,
                         0,
-                        mem_type);
+                        mem_type,
+                        patIndex,
+                        isCpuCacheable);
         bufPitch = (uint32_t)linuxPitch;
     }
 
@@ -532,7 +490,7 @@ void* GraphicsResourceSpecificNext::Lock(OsContextNext* osContextPtr, LockParams
         {
             if (pOsContextSpecific->IsAtomSoc())
             {
-                mos_gem_bo_map_gtt(boPtr);
+                mos_bo_map_gtt(boPtr);
             }
             else
             {
@@ -560,13 +518,13 @@ void* GraphicsResourceSpecificNext::Lock(OsContextNext* osContextPtr, LockParams
                     }
                     else
                     {
-                        mos_gem_bo_map_gtt(boPtr);
+                        mos_bo_map_gtt(boPtr);
                         m_mmapOperation = MOS_MMAP_OPERATION_MMAP_GTT;
                     }
                 }
                 else if (params.m_uncached)
                 {
-                    mos_gem_bo_map_wc(boPtr);
+                    mos_bo_map_wc(boPtr);
                     m_mmapOperation = MOS_MMAP_OPERATION_MMAP_WC;
                 }
                 else
@@ -611,7 +569,7 @@ MOS_STATUS GraphicsResourceSpecificNext::Unlock(OsContextNext* osContextPtr)
         {
            if (pOsContextSpecific->IsAtomSoc())
            {
-               mos_gem_bo_unmap_gtt(boPtr);
+               mos_bo_unmap_gtt(boPtr);
            }
            else
            {
@@ -630,10 +588,10 @@ MOS_STATUS GraphicsResourceSpecificNext::Unlock(OsContextNext* osContextPtr)
                switch(m_mmapOperation)
                {
                    case MOS_MMAP_OPERATION_MMAP_GTT:
-                        mos_gem_bo_unmap_gtt(boPtr);
+                        mos_bo_unmap_gtt(boPtr);
                         break;
                    case MOS_MMAP_OPERATION_MMAP_WC:
-                        mos_gem_bo_unmap_wc(boPtr);
+                        mos_bo_unmap_wc(boPtr);
                         break;
                    case MOS_MMAP_OPERATION_MMAP:
                         mos_bo_unmap(boPtr);
@@ -682,6 +640,8 @@ MOS_STATUS GraphicsResourceSpecificNext::AllocateExternalResource(
     GMM_RESCREATE_PARAMS gmmParams;
     GMM_RESOURCE_INFO *gmmResourceInfo = nullptr;
     GMM_RESOURCE_TYPE resourceType = RESOURCE_2D;
+    unsigned int patIndex = PAT_INDEX_INVALID;
+    bool isCpuCacheable = true;
 
     MosUtilities::MosZeroMemory(&gmmParams, sizeof(gmmParams));
 
@@ -757,7 +717,7 @@ MOS_STATUS GraphicsResourceSpecificNext::AllocateExternalResource(
     gmmParams.BaseHeight = iAlignedHeight;
     gmmParams.ArraySize  = 1;
     gmmParams.Type       = resourceType;
-    gmmParams.Format     = MosOsSpecificNext::Mos_Specific_ConvertMosFmtToGmmFmt(params->Format);
+    gmmParams.Format     = MosInterface::MosFmtToGmmFmt(params->Format);
 
     MOS_OS_CHECK_CONDITION(gmmParams.Format == GMM_FORMAT_INVALID,
         "Unsupported format",
@@ -777,8 +737,9 @@ MOS_STATUS GraphicsResourceSpecificNext::AllocateExternalResource(
         gmmParams.Flags.Info.Linear = true;
         tileformat_linux            = I915_TILING_NONE;
     }
-    gmmParams.Flags.Info.LocalOnly = MEDIA_IS_SKU(&perStreamParameters->SkuTable, FtrLocalMemory);
+    gmmParams.Flags.Info.LocalOnly = MEDIA_IS_SKU(&perStreamParameters->m_skuTable, FtrLocalMemory);
 
+    MOS_OS_CHK_NULL_RETURN(perStreamParameters->pGmmClientContext);
     resource->pGmmResInfo = gmmResourceInfo = perStreamParameters->pGmmClientContext->CreateResInfoObject(&gmmParams);
 
     MOS_OS_CHK_NULL_RETURN(gmmResourceInfo);
@@ -812,10 +773,13 @@ MOS_STATUS GraphicsResourceSpecificNext::AllocateExternalResource(
     iSize   = GFX_ULONG_CAST(gmmResourceInfo->GetSizeSurface());
     iHeight = gmmResourceInfo->GetBaseHeight();
 
+    patIndex = MosInterface::GetPATIndexFromGmm(perStreamParameters->pGmmClientContext, gmmResourceInfo);
+    isCpuCacheable = gmmResourceInfo->GetResFlags().Info.Cacheable;
+
     // Only Linear and Y TILE supported
     if (tileformat_linux == I915_TILING_NONE)
     {
-        bo = mos_bo_alloc(perStreamParameters->bufmgr, bufname, iSize, 4096, MOS_MEMPOOL_VIDEOMEMORY);
+        bo = mos_bo_alloc(perStreamParameters->bufmgr, bufname, iSize, 4096, MOS_MEMPOOL_VIDEOMEMORY, patIndex, isCpuCacheable);
     }
     else
     {
@@ -827,7 +791,9 @@ MOS_STATUS GraphicsResourceSpecificNext::AllocateExternalResource(
                         &tileformat_linux,
                         &ulPitch,
                         0,
-                        MOS_MEMPOOL_VIDEOMEMORY);
+                        MOS_MEMPOOL_VIDEOMEMORY,
+                        patIndex,
+                        isCpuCacheable);
         iPitch = (int32_t)ulPitch;
     }
 
@@ -963,14 +929,9 @@ void* GraphicsResourceSpecificNext::LockExternalResource(
         if (!flags->NoDecompress &&
             (((GmmFlags.Gpu.MMC || GmmFlags.Gpu.CCS) && GmmFlags.Info.MediaCompressed) ||
             resource->pGmmResInfo->IsMediaMemoryCompressed(0)))
-        {
-            OsContextNext *osCtx = streamState->osDeviceContext;
-            if (nullptr == osCtx)
-            {
-                MOS_OS_ASSERTMESSAGE("osCtx is NULL.");
-                return nullptr;
-            }
-            MosDecompression *mosDecompression = osCtx->GetMosDecompression();
+        {            
+            MosDecompression   *mosDecompression = nullptr;
+            MosInterface::GetMosDecompressionFromStreamState(streamState, mosDecompression);
             if (nullptr == mosDecompression)
             {
                 MOS_OS_ASSERTMESSAGE("mosDecompression is NULL.");
@@ -983,7 +944,7 @@ void* GraphicsResourceSpecificNext::LockExternalResource(
         {
             if (perStreamParameters->bIsAtomSOC)
             {
-                mos_gem_bo_map_gtt(bo);
+                mos_bo_map_gtt(bo);
             }
             else
             {
@@ -1008,13 +969,13 @@ void* GraphicsResourceSpecificNext::LockExternalResource(
                     }
                     else
                     {
-                        mos_gem_bo_map_gtt(bo);
+                        mos_bo_map_gtt(bo);
                         resource->MmapOperation = MOS_MMAP_OPERATION_MMAP_GTT;
                     }
                 }
                 else if (flags->Uncached)
                 {
-                    mos_gem_bo_map_wc(bo);
+                    mos_bo_map_wc(bo);
                     resource->MmapOperation = MOS_MMAP_OPERATION_MMAP_WC;
                 }
                 else
@@ -1053,7 +1014,7 @@ MOS_STATUS GraphicsResourceSpecificNext::UnlockExternalResource(
         {
             if (perStreamParameters->bIsAtomSOC)
             {
-                mos_gem_bo_unmap_gtt(resource->bo);
+                mos_bo_unmap_gtt(resource->bo);
             }
             else
             {
@@ -1068,10 +1029,10 @@ MOS_STATUS GraphicsResourceSpecificNext::UnlockExternalResource(
                 switch (resource->MmapOperation)
                 {
                 case MOS_MMAP_OPERATION_MMAP_GTT:
-                    mos_gem_bo_unmap_gtt(resource->bo);
+                    mos_bo_unmap_gtt(resource->bo);
                     break;
                 case MOS_MMAP_OPERATION_MMAP_WC:
-                    mos_gem_bo_unmap_wc(resource->bo);
+                    mos_bo_unmap_wc(resource->bo);
                     break;
                 case MOS_MMAP_OPERATION_MMAP:
                     mos_bo_unmap(resource->bo);
@@ -1087,5 +1048,18 @@ MOS_STATUS GraphicsResourceSpecificNext::UnlockExternalResource(
         resource->pData = nullptr;
     }
 
+    return MOS_STATUS_SUCCESS;
+}
+
+MOS_STATUS GraphicsResourceSpecificNext::SetTileModebyForce(GMM_RESCREATE_PARAMS &gmmParams, MOS_TILE_MODE_GMM tileMode)
+{
+    if (tileMode == MOS_TILE_64_GMM)
+    {
+        gmmParams.Flags.Info.Tile64 = true;
+    }
+    else if (tileMode == MOS_TILE_4_GMM)
+    {
+        gmmParams.Flags.Info.Tile4 = true;
+    }
     return MOS_STATUS_SUCCESS;
 }

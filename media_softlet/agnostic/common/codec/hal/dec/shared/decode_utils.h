@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2020, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -24,6 +24,8 @@
 #include <mutex>
 #include "mos_util_debug.h"
 #include "mos_utilities.h"
+#include "media_class_trace.h"
+#include "media_user_setting.h"
 
 //------------------------------------------------------------------------------
 // Macros specific to MOS_CODEC_SUBCOMP_DECODE sub-comp
@@ -79,12 +81,12 @@ class Mutex
 public:
     Mutex()
     {
-        m_mutex = MOS_CreateMutex();
+        m_mutex = MosUtilities::MosCreateMutex();
         DECODE_ASSERT(m_mutex != nullptr);
     }
     ~Mutex()
     {
-        MOS_DestroyMutex(m_mutex);
+        MosUtilities::MosDestroyMutex(m_mutex);
     }
     PMOS_MUTEX Get()
     {
@@ -92,15 +94,17 @@ public:
     }
 protected:
     PMOS_MUTEX m_mutex;
+MEDIA_CLASS_DEFINE_END(decode__Mutex)
 };
 
 class AutoLock
 {
 public:
-    AutoLock(Mutex &mutex) : m_mutex(mutex) { MOS_LockMutex(m_mutex.Get()); }
-    ~AutoLock() { MOS_UnlockMutex(m_mutex.Get()); }
+    AutoLock(Mutex &mutex) : m_mutex(mutex) { MosUtilities::MosLockMutex(m_mutex.Get()); }
+    ~AutoLock() { MosUtilities::MosUnlockMutex(m_mutex.Get()); }
 protected:
     Mutex &m_mutex;
+MEDIA_CLASS_DEFINE_END(decode__AutoLock)
 };
 
 class Condition
@@ -108,29 +112,30 @@ class Condition
 public:
     Condition()
     {
-        m_sem = MOS_CreateSemaphore(0, 1);
+        m_sem = MosUtilities::MosCreateSemaphore(0, 1);
     }
 
     ~Condition()
     {
-        MOS_DestroySemaphore(m_sem);
+        MosUtilities::MosDestroySemaphore(m_sem);
     }
     MOS_STATUS Wait(PMOS_MUTEX mutex)
     {
         MOS_STATUS status = MOS_STATUS_SUCCESS;
-        MOS_UnlockMutex(mutex);
-        status = MOS_WaitSemaphore(m_sem, 5000);
-        MOS_LockMutex(mutex);
+        MosUtilities::MosUnlockMutex(mutex);
+        status = MosUtilities::MosWaitSemaphore(m_sem, 5000);
+        MosUtilities::MosLockMutex(mutex);
         return status;
     }
     MOS_STATUS Signal()
     {
-        MOS_PostSemaphore(m_sem, 1);
+        MosUtilities::MosPostSemaphore(m_sem, 1);
         return MOS_STATUS_SUCCESS;
     }
 
 protected:
     PMOS_SEMAPHORE m_sem;
+MEDIA_CLASS_DEFINE_END(decode__Condition)
 };
 
 //!
@@ -189,16 +194,15 @@ MOS_STATUS FreeDataList(type **dataList, uint32_t length)
     return MOS_STATUS_SUCCESS;
 }
 
-inline MOS_USER_FEATURE_VALUE_DATA ReadUserFeature(uint32_t id, MOS_CONTEXT_HANDLE mosCtx)
+inline MediaUserSetting::Value ReadUserFeature(MediaUserSettingSharedPtr m_userSettingPtr, std::string name, MediaUserSetting::Group userSettingGroup)
 {
-    MOS_USER_FEATURE_VALUE_DATA userFeatureData;
-    MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        id,
-        &userFeatureData,
-        mosCtx);
-    return userFeatureData;
+    MediaUserSetting::Value outValue;
+    MOS_STATUS              s_status = ReadUserSetting(
+        m_userSettingPtr,
+        outValue,
+        name,
+        userSettingGroup);
+    return outValue;  //open: how to check read user setting results.
 }
 
 }

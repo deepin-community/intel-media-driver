@@ -27,6 +27,7 @@
 //!
 
 #include "mhw_vebox_g10_X.h"
+#include "mos_interface.h"
 
 // H2S Manual Mode Coef
 static const uint16_t g_Hdr_ColorCorrect_EOTF_SMPTE_ST2084_Input_g10[HDR_OETF_1DLUT_POINT_NUMBER] =
@@ -843,7 +844,7 @@ MOS_STATUS MhwVeboxInterfaceG10::AddVeboxState(
     cmd.DW18.BypassChromaUpsampling                    = pChromaSampling->BypassChromaUpsampling;
     cmd.DW18.BypassChromaDownsampling                  = pChromaSampling->BypassChromaDownsampling;
 
-    Mos_AddCommand(pCmdBuffer, &cmd, cmd.byteSize);
+    pOsInterface->pfnAddCommand(pCmdBuffer, &cmd, cmd.byteSize);
 
 finish:
     return eStatus;
@@ -1058,7 +1059,7 @@ MOS_STATUS MhwVeboxInterfaceG10::AddVeboxDiIecp(
     cmd.DW1.EndingX   = pVeboxDiIecpCmdParams->dwEndingX;
     cmd.DW1.StartingX = pVeboxDiIecpCmdParams->dwStartingX;
 
-    Mos_AddCommand(pCmdBuffer, &cmd, cmd.byteSize);
+    pOsInterface->pfnAddCommand(pCmdBuffer, &cmd, cmd.byteSize);
 
 finish:
     return eStatus;

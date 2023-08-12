@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020, Intel Corporation
+* Copyright (c) 2020-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -23,7 +23,6 @@
 //! \file     mhw_vdbox_avp_g12_X.cpp
 //! \brief    Constructs VdBox AVP commands on Gen12-based platforms
 
-#include "mhw_mmio_g12.h"
 #include "mhw_vdbox_avp_g12_X.h"
 #include "mhw_mi_hwcmd_g12_X.h"
 #include "mhw_vdbox_vdenc_hwcmd_g12_X.h"
@@ -223,7 +222,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::GetAvpStateCommandSize(
         mhw_vdbox_vdenc_g12_X::VD_PIPELINE_FLUSH_CMD::byteSize          +
         mhw_mi_g12_X::MI_FLUSH_DW_CMD::byteSize                         +
         mhw_vdbox_avp_g12_X::AVP_PIPE_MODE_SELECT_CMD::byteSize         +
-        mhw_vdbox_avp_g12_X::AVP_SURFACE_STATE_CMD::byteSize * 7        +
+        mhw_vdbox_avp_g12_X::AVP_SURFACE_STATE_CMD::byteSize * 11       +
         mhw_vdbox_avp_g12_X::AVP_PIPE_BUF_ADDR_STATE_CMD::byteSize      +
         mhw_vdbox_avp_g12_X::AVP_IND_OBJ_BASE_ADDR_STATE_CMD::byteSize  +
         mhw_vdbox_avp_g12_X::AVP_SEGMENT_STATE_CMD::byteSize * 8        +
@@ -234,7 +233,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::GetAvpStateCommandSize(
         PATCH_LIST_COMMAND(VD_PIPELINE_FLUSH_CMD)           +
         PATCH_LIST_COMMAND(MI_FLUSH_DW_CMD)                 +
         PATCH_LIST_COMMAND(AVP_PIPE_MODE_SELECT_CMD)        +
-        PATCH_LIST_COMMAND(AVP_SURFACE_STATE_CMD) * 7       +
+        PATCH_LIST_COMMAND(AVP_SURFACE_STATE_CMD) * 11      +
         PATCH_LIST_COMMAND(AVP_PIPE_BUF_ADDR_STATE_CMD)     +
         PATCH_LIST_COMMAND(AVP_IND_OBJ_BASE_ADDR_STATE_CMD) +
         PATCH_LIST_COMMAND(AVP_SEGMENT_STATE_CMD) * 8       +
@@ -279,7 +278,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::GetAvpPrimitiveCommandSize(
 
     if(m_decodeInUse)
     {
-        if (MEDIA_IS_SKU(m_osInterface->pfnGetSkuTable(m_osInterface), FtrAV1VLDLSTDecoding) && !m_osInterface->bSimIsActive)
+        if (MEDIA_IS_SKU(m_osInterface->pfnGetSkuTable(m_osInterface), FtrAV1VLDLSTDecoding) && !m_disableLstCmd)
         {
             maxSize =
                 mhw_vdbox_avp_g12_X::AVP_TILE_CODING_CMD_LST::byteSize +
@@ -387,7 +386,8 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::GetAv1BufferSize(
         case lrTileColVBuf:
         case lrMetaTileCol:
             bufferSize = sbPerFrmHgt * CodecAv1BufferSize[index][avpBufSizeParam->m_bitDepthIdc][avpBufSizeParam->m_isSb128x128]
-                + CodecAv1BufferSizeExt[index][avpBufSizeParam->m_bitDepthIdc][avpBufSizeParam->m_isSb128x128];
+                + CodecAv1BufferSizeExt[index][avpBufSizeParam->m_bitDepthIdc][avpBufSizeParam->m_isSb128x128]
+                + MOS_PAGE_SIZE; //Add one page size here to fix page fault issue
             break;
         //frame buffer
         case segmentIdBuf:
@@ -551,7 +551,8 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpPipeModeSelectCmd(
     cmd.DW1.TileBasedEngine                             = paramsG12->bTileBasedReplayMode;
     cmd.DW3.PicStatusErrorReportId                      = false;
     cmd.DW5.PhaseIndicator                              = paramsG12->ucPhaseIndicator;
-    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, params->pBatchBuffer, &cmd, sizeof(cmd)));
+
+    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, params->pBatchBuffer, &cmd, sizeof(cmd)));
 
     // for Gen11+, we need to add MFX wait for both KIN and VRT before and after AVP Pipemode select...
     MHW_MI_CHK_STATUS(m_miInterface->AddMfxWaitCmd(cmdBuffer, nullptr, true));
@@ -603,23 +604,17 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodeSurfaceStateCmd(
 
     cmd->DW3.DefaultAlphaValue = 0;
 
-    // Add compression setting for each ref
-    cmd->DW4.MemoryCompressionEnableForAv1IntraFrame   = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1LastFrame    = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1Last2Frame   = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1Last3Frame   = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1GoldenFrame  = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1BwdrefFrame  = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1Altref2Frame = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.MemoryCompressionEnableForAv1AltrefFrame  = (MmcEnable(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForIntraFrame              = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForLastFrame               = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForLast2Frame              = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForLast3Frame              = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForGoldenFrame             = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForBwdrefFrame             = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForAltref2Frame            = (MmcIsRc(params->mmcState)) ? 0xff : 0;
-    cmd->DW4.CompressionTypeForAltrefFrame             = (MmcIsRc(params->mmcState)) ? 0xff : 0;
+    uint32_t DW4 = 0;
+    if(MmcEnable(params->mmcState))
+    {
+        DW4 |= ((~params->mmcSkipMask) & 0xff);
+    }
+    if(MmcIsRc(params->mmcState))
+    {
+        DW4 |= 0xff00;
+    }
+    
+    cmd->DW4.Value             = (DW4 | params->dwCompressionFormat << 16);
 
     return MOS_STATUS_SUCCESS;
 }
@@ -632,6 +627,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpPipeBufAddrCmd(
 
     MHW_FUNCTION_ENTER;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(cmdBuffer);
     MHW_MI_CHK_NULL(params);
 
@@ -676,13 +672,6 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpPipeBufAddrCmd(
             resourceParams.dwLocationInCmd = (i * 2) + 1;
             resourceParams.bIsWritable = false;
             resourceParams.dwSharedMocsOffset = 17 - resourceParams.dwLocationInCmd;
-
-            MOS_GPU_CONTEXT gpuContext = m_osInterface->pfnGetGpuContext(m_osInterface);
-            m_osInterface->pfnSyncOnResource(
-                m_osInterface,
-                params->m_references[i],
-                gpuContext,
-                false);
 
             MHW_MI_CHK_STATUS(AddResourceToCmd(
                 m_osInterface,
@@ -1446,7 +1435,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpPipeBufAddrCmd(
             &resourceParams));
     }
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, sizeof(cmd)));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, sizeof(cmd)));
 
     return eStatus;
 }
@@ -1459,6 +1448,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpIndObjBaseAddrCmd(
 
     MHW_FUNCTION_ENTER;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(params);
 
     MHW_RESOURCE_PARAMS resourceParams;
@@ -1494,7 +1484,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpIndObjBaseAddrCmd(
         resourceParams.dwUpperBoundLocationOffsetFromCmd = 0;
     }
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
     return eStatus;
 }
@@ -1505,6 +1495,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodePicStateCmd(
 {
     MHW_FUNCTION_ENTER;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(params);
     MHW_MI_CHK_NULL(params->m_picParams);
 
@@ -1659,6 +1650,8 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodePicStateCmd(
         PCODEC_PICTURE  refFrameList = &(picParams->m_refFrameMap[0]);
         uint32_t        refFrameWidth[7], refFrameHeight[7];
         uint8_t         refPicIndex;
+        uint32_t        av1ScalingFactorMax = (1 << 15);  //!< AV1 Scaling factor range [1/16, 2]
+        uint32_t        av1ScalingFactorMin = (1 << 10);  //!< AV1 Scaling factor range [1/16, 2]
 
         union
         {
@@ -1696,6 +1689,10 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodePicStateCmd(
 
             refFrameRes[i].m_widthInPixelMinus1     = refFrameWidth[i] - 1;
             refFrameRes[i].m_heightInPixelMinus1    = refFrameHeight[i] - 1;
+            MHW_CHK_COND(refScaleFactor[i].m_horizontalScaleFactor > av1ScalingFactorMax, "Invalid parameter");
+            MHW_CHK_COND(refScaleFactor[i].m_verticalScaleFactor   > av1ScalingFactorMax, "Invalid parameter");
+            MHW_CHK_COND(refScaleFactor[i].m_horizontalScaleFactor < av1ScalingFactorMin, "Invalid parameter");
+            MHW_CHK_COND(refScaleFactor[i].m_verticalScaleFactor   < av1ScalingFactorMin, "Invalid parameter");
         }
 
         cmd.DW31.Value = CAT2SHORTS(picParams->m_frameWidthMinus1, picParams->m_frameHeightMinus1);
@@ -1726,7 +1723,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodePicStateCmd(
     cmd.DW48.ReferenceFrameOrderHint6ForAltref2Frame    = params->m_refOrderHints[5];
     cmd.DW48.ReferenceFrameOrderHint7ForAltrefFrame     = params->m_refOrderHints[6];
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
     return MOS_STATUS_SUCCESS;
 }
@@ -1737,6 +1734,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpSegmentStateCmd(
 {
     MOS_STATUS eStatus = MOS_STATUS_SUCCESS;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(params);
     MHW_MI_CHK_NULL(params->m_av1SegmentParams);
 
@@ -1759,7 +1757,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpSegmentStateCmd(
     cmd.DW3.SegmentDeltaLoopFilterLevelChromaV          = params->m_av1SegmentParams->m_featureData[seg][segLvlAltLfV];
     cmd.DW3.SegmentReferenceFrame                       = params->m_av1SegmentParams->m_featureData[seg][segLvlRefFrame];
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
     return eStatus;
 }
@@ -1801,7 +1799,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodeTileCodingCmd(
     cmd.DW5.NumOfTileColumnsMinus1InAFrame  = params->m_numOfTileColumnsInFrame - 1;
     cmd.DW5.NumOfTileRowsMinus1InAFrame     = params->m_numOfTileRowsInFrame - 1;
 
-    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, &cmd, sizeof(cmd)));
+    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, &cmd, sizeof(cmd)));
 
     return MOS_STATUS_SUCCESS;
 }
@@ -1845,7 +1843,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpDecodeTileCodingCmdLst(
     cmd.DW6.OutputDecodedTileColumnPositionInSbUnit = params->m_outputDecodedTileColumnPositionInSBUnit;
     cmd.DW6.OutputDecodedTileRowPositionInSbUnit    = params->m_outputDecodedTileRowPositionInSBUnit;
 
-    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, &cmd, sizeof(cmd)));
+    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, &cmd, sizeof(cmd)));
 
     return MOS_STATUS_SUCCESS;
 }
@@ -1861,7 +1859,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpTileCodingCmd(
 
     if (m_decodeInUse)
     {
-        if (MEDIA_IS_SKU(m_osInterface->pfnGetSkuTable(m_osInterface), FtrAV1VLDLSTDecoding) && !m_osInterface->bSimIsActive)
+        if (MEDIA_IS_SKU(m_osInterface->pfnGetSkuTable(m_osInterface), FtrAV1VLDLSTDecoding) && !m_disableLstCmd)
         {
             MHW_MI_CHK_STATUS(AddAvpDecodeTileCodingCmdLst(cmdBuffer, batchBuffer, params));
         }
@@ -1892,7 +1890,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpBsdObjectCmd(
     cmd.DW1.TileIndirectBsdDataLength       = params->m_bsdDataLength;
     cmd.DW2.TileIndirectDataStartAddress    = params->m_bsdDataStartOffset;
 
-    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, &cmd, sizeof(cmd)));
+    MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, &cmd, sizeof(cmd)));
 
     return MOS_STATUS_SUCCESS;
 }
@@ -1905,6 +1903,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpInloopFilterStateCmd(
 
     MHW_FUNCTION_ENTER;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(params);
     mhw_vdbox_avp_g12_X::AVP_INLOOP_FILTER_STATE_CMD cmd;
 
@@ -2013,7 +2012,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpInloopFilterStateCmd(
         cmd.DW3.DeblockerFilterRefDeltas7 = -1;
     }
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
     return eStatus;
 }
@@ -2026,6 +2025,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpInterPredStateCmd(
 
     MHW_FUNCTION_ENTER;
 
+    MHW_MI_CHK_NULL(m_osInterface);
     MHW_MI_CHK_NULL(params);
     mhw_vdbox_avp_g12_X::AVP_INTER_PRED_STATE_CMD cmd;
 
@@ -2093,7 +2093,7 @@ MOS_STATUS MhwVdboxAvpInterfaceG12::AddAvpInterPredStateCmd(
     cmd.DW14.SavedOrderHintsForAllReferences65 = params->m_savedRefOrderHints[6][5];
     cmd.DW14.SavedOrderHintsForAllReferences66 = params->m_savedRefOrderHints[6][6];
 
-    MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+    MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
     return eStatus;
 }

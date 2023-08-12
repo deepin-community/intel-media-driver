@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -27,7 +27,6 @@
 #ifndef __MEDIA_LIBVA_REGISTER_H__
 #define __MEDIA_LIBVA_REGISTER_H__
 
-#include "ddi_cp_functions.h"
 #include "ddi_decode_functions.h"
 #include "ddi_encode_functions.h"
 #include "ddi_vp_functions.h"
@@ -35,7 +34,6 @@
 static const bool registeredMedia  = FunctionsFactory::Register<DdiMediaFunctions>((CompCommon));
 static const bool registeredEncode = FunctionsFactory::Register<DdiEncodeFunctions>((CompEncode));
 static const bool registeredDecode = FunctionsFactory::Register<DdiDecodeFunctions>((CompDecode));
-static const bool registeredCp     = FunctionsFactory::Register<DdiCpFunctions>((CompCp));
 static const bool registeredVp     = FunctionsFactory::Register<DdiVpFunctions>((CompVp));
 
 #endif //__MEDIA_LIBVA_REGISTER_H__

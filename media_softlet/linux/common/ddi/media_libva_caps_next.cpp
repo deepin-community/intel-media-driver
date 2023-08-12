@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,24 +28,24 @@
 
 MediaLibvaCapsNext::MediaLibvaCapsNext(DDI_MEDIA_CONTEXT *mediaCtx)
 {
+    DDI_FUNC_ENTER;
     DDI_CHK_NULL(mediaCtx,    "Media context is null", );
     m_mediaCtx  = mediaCtx;
 
     m_capsTable = MOS_New(MediaCapsTableSpecific, mediaCtx->m_hwInfo->GetDeviceInfo());
     DDI_CHK_NULL(m_capsTable, "Caps table is null", );
-
-    m_capsTable->Init();
 }
 
 MediaLibvaCapsNext::~MediaLibvaCapsNext()
 {
+    DDI_FUNC_ENTER;
     MOS_Delete(m_capsTable);
     m_capsTable = nullptr;
 }
 
 MediaLibvaCapsNext* MediaLibvaCapsNext::CreateCaps(DDI_MEDIA_CONTEXT *mediaCtx)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     if(mediaCtx != nullptr)
     {
@@ -56,6 +56,13 @@ MediaLibvaCapsNext* MediaLibvaCapsNext::CreateCaps(DDI_MEDIA_CONTEXT *mediaCtx)
     {
         return nullptr;
     }
+}
+
+VAStatus MediaLibvaCapsNext::Init()
+{
+    DDI_FUNC_ENTER;
+
+    return m_capsTable->Init(m_mediaCtx);
 }
 
 ConfigList* MediaLibvaCapsNext::GetConfigList()
@@ -69,7 +76,7 @@ VAStatus MediaLibvaCapsNext::GetAttribValue(
     VAConfigAttribType  type,
     uint32_t            *value)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable, "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(value,       "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -91,7 +98,7 @@ VAStatus MediaLibvaCapsNext::GetAttribValue(
 
 uint32_t MediaLibvaCapsNext::GetImageFormatsMaxNum()
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
     DDI_CHK_NULL(m_capsTable, "Caps table is null", 0);
 
     return m_capsTable->GetImageFormatsMaxNum();
@@ -101,7 +108,7 @@ VAStatus MediaLibvaCapsNext::QueryConfigProfiles(
     VAProfile *profileList,
     int32_t   *profilesNum)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable, "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(profileList, "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -117,7 +124,7 @@ VAStatus MediaLibvaCapsNext::QueryConfigAttributes(
     VAConfigAttrib *attribList,
     int32_t        *numAttribs)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable,  "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(profile,      "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -135,7 +142,10 @@ VAStatus MediaLibvaCapsNext::QueryConfigAttributes(
     *numAttribs     = configItem->numAttribs;
     for (int i = 0; i < configItem->numAttribs; ++i)
     {
-        attribList[i] = configItem->attribList[i];
+        if (configItem->attribList[i].value != VA_ATTRIB_NOT_SUPPORTED)
+        {
+            attribList[i] = configItem->attribList[i];
+        }
     }
     return VA_STATUS_SUCCESS;
 }
@@ -146,10 +156,9 @@ VAStatus MediaLibvaCapsNext::CheckAttribList(
     VAConfigAttrib  *attrib,
     int32_t         numAttribs)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     VAStatus     status = VA_STATUS_SUCCESS;
-    
     AttribList  *supportedAttribList = nullptr;
     supportedAttribList =  m_capsTable->QuerySupportedAttrib(profile, entrypoint);
     DDI_CHK_NULL(supportedAttribList, "AttribList in null, not supported attribute", VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -310,13 +319,12 @@ VAStatus MediaLibvaCapsNext::CreateConfig(
     int32_t         numAttribs,
     VAConfigID      *configId)
 {
-    DDI_FUNCTION_ENTER();
+    VAStatus  status = VA_STATUS_SUCCESS;
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable,  "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
-    DDI_CHK_NULL(attribList,   "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
-    DDI_CHK_NULL(configId,     "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
+    DDI_CHK_NULL(configId,     "nullptr configId",   VA_STATUS_ERROR_INVALID_PARAMETER);
 
-    VAStatus  status = VA_STATUS_SUCCESS;
     status = m_capsTable->CreateConfig(profile, entrypoint, attribList, numAttribs, configId);
     if(status != VA_STATUS_SUCCESS)
     {
@@ -329,7 +337,7 @@ VAStatus MediaLibvaCapsNext::CreateConfig(
 
 VAStatus MediaLibvaCapsNext::DestroyConfig(VAConfigID configId)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable,  "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
 
@@ -342,7 +350,7 @@ VAStatus MediaLibvaCapsNext::GetConfigAttributes(
     VAConfigAttrib  *attribList,
     int32_t         numAttribs)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable,  "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(attribList,   "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -363,8 +371,29 @@ VAStatus MediaLibvaCapsNext::GetConfigAttributes(
                 attribList[j].value = supportedAttribList->at(i).value;
                 break;
             }
+            else
+            {
+               GetGeneralConfigAttrib(&attribList[j]);
+            }
         }
     }
+    return VA_STATUS_SUCCESS;
+}
+
+VAStatus MediaLibvaCapsNext::GetGeneralConfigAttrib(VAConfigAttrib *attrib)
+{
+    static const std::map<VAConfigAttribType, uint32_t> generalAttribMap = {
+#if VA_CHECK_VERSION(1, 10, 0)
+    {VAConfigAttribContextPriority, CONTEXT_PRIORITY_MAX},
+#endif
+    };
+
+    DDI_CHK_NULL(attrib, "Null pointer", VA_STATUS_ERROR_INVALID_PARAMETER);
+    if (generalAttribMap.find(attrib->type) != generalAttribMap.end())
+    {
+        attrib->value = CONTEXT_PRIORITY_MAX;
+    }
+
     return VA_STATUS_SUCCESS;
 }
 
@@ -373,7 +402,7 @@ VAStatus MediaLibvaCapsNext::QueryConfigEntrypoints(
     VAEntrypoint  *entrypointList,
     int32_t       *entrypointNum)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable,    "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(entrypointList, "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -383,7 +412,7 @@ VAStatus MediaLibvaCapsNext::QueryConfigEntrypoints(
     VAStatus      status = VA_STATUS_SUCCESS;
 
     entryMap = m_capsTable->QueryConfigEntrypointsMap(profile);
-    DDI_CHK_NULL(entryMap,       "QueryConfigEntrypointsMap failed", VA_STATUS_ERROR_INVALID_PARAMETER);
+    DDI_CHK_NULL(entryMap,       "QueryConfigEntrypointsMap failed", VA_STATUS_ERROR_UNSUPPORTED_PROFILE);
 
     int i = 0;
     for (auto it = entryMap->begin(); it!=entryMap->end(); ++it)
@@ -401,11 +430,16 @@ VAStatus MediaLibvaCapsNext::QuerySurfaceAttributes(
     VASurfaceAttrib  *attribList,
     uint32_t         *numAttribs)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable, "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
-    DDI_CHK_NULL(attribList,  "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(numAttribs,  "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
+
+    if (attribList == nullptr)
+    {
+        *numAttribs = DDI_CODEC_GEN_MAX_SURFACE_ATTRIBUTES;
+        return VA_STATUS_SUCCESS;
+    }
 
     ProfileSurfaceAttribInfo *surfaceAttribInfo = nullptr;
     VAStatus                 status = VA_STATUS_SUCCESS;
@@ -423,9 +457,21 @@ VAStatus MediaLibvaCapsNext::QuerySurfaceAttributes(
     for (uint32_t j = 0; j < surfaceAttribInfo->size(); j++)
     {
         attribs[i].type =          surfaceAttribInfo->at(j).type1;
-        attribs[i].value.type =    surfaceAttribInfo->at(j).type2;
         attribs[i].flags =         surfaceAttribInfo->at(j).flags;
-        attribs[i].value.value.i = surfaceAttribInfo->at(j).value;
+        attribs[i].value.type =    surfaceAttribInfo->at(j).value.type;
+        if(attribs[i].value.type == VAGenericValueTypeInteger)
+        {
+            attribs[i].value.value.i = surfaceAttribInfo->at(j).value.value.i;
+        }
+        else if(attribs[i].value.type = VAGenericValueTypePointer)
+        {
+            attribs[i].value.value.p = surfaceAttribInfo->at(j).value.value.p;
+        }
+        else
+        {
+            DDI_ASSERTMESSAGE("Invalid VAGenericValueType");
+            return VA_STATUS_ERROR_UNIMPLEMENTED;
+        }
         ++i;
     }
 
@@ -447,7 +493,7 @@ VAStatus MediaLibvaCapsNext::QueryImageFormats(
     VAImageFormat *formatList,
     int32_t       *numFormats)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable, "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(formatList,  "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -455,7 +501,7 @@ VAStatus MediaLibvaCapsNext::QueryImageFormats(
 
     int   num    = 0;
     auto  imgTbl = m_capsTable->GetImgTable();
-    MOS_ZeroMemory(&formatList, sizeof(VAImageFormat) * imgTbl->size());
+    MOS_ZeroMemory(formatList, sizeof(VAImageFormat) * imgTbl->size());
 
     for(auto imgTblIter : *imgTbl)
     {
@@ -480,7 +526,7 @@ VAStatus MediaLibvaCapsNext::QueryImageFormats(
 
 VAStatus MediaLibvaCapsNext::PopulateColorMaskInfo(VAImageFormat *vaImgFmt)
 {
-    DDI_FUNCTION_ENTER();
+    DDI_FUNC_ENTER;
 
     DDI_CHK_NULL(m_capsTable, "Caps table is null", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(vaImgFmt,    "Null pointer",       VA_STATUS_ERROR_INVALID_PARAMETER);
@@ -500,5 +546,63 @@ VAStatus MediaLibvaCapsNext::PopulateColorMaskInfo(VAImageFormat *vaImgFmt)
     vaImgFmt->blue_mask  = imageFormatInfo->blue_mask;
     vaImgFmt->alpha_mask = imageFormatInfo->alpha_mask;
 
+    return VA_STATUS_SUCCESS;
+}
+
+
+VAStatus MediaLibvaCapsNext::QueryDisplayAttributes(
+    VADisplayAttribute *attribList,
+    int32_t            *attributesNum)
+{
+    DDI_FUNC_ENTER;
+
+    DDI_CHK_NULL(attribList, "Null attribList", VA_STATUS_ERROR_INVALID_PARAMETER);
+    DDI_CHK_NULL(attributesNum, "Null attribs", VA_STATUS_ERROR_INVALID_PARAMETER);
+    VADisplayAttribute * attrib = attribList;
+    *attributesNum = 0;
+
+    attrib->type = VADisplayAttribCopy;
+    (*attributesNum) ++;
+
+#if VA_CHECK_VERSION(1, 15, 0)
+    attrib ++;
+
+    attrib->type = VADisplayPCIID;
+    (*attributesNum) ++;
+#endif
+
+    return GetDisplayAttributes(attribList, *attributesNum);
+}
+
+VAStatus MediaLibvaCapsNext::GetDisplayAttributes(
+    VADisplayAttribute *attribList,
+    int32_t             attributesNum)
+{
+    DDI_FUNC_ENTER;
+    DDI_CHK_NULL(attribList, "Null attribList", VA_STATUS_ERROR_INVALID_PARAMETER);
+
+    for(auto i = 0; i < attributesNum; i ++)
+    {
+        switch(attribList->type)
+        {
+            case VADisplayAttribCopy:
+                attribList->min_value = attribList->value = attribList->max_value = 0;
+                attribList->flags = VA_DISPLAY_ATTRIB_GETTABLE;
+                break;
+#if VA_CHECK_VERSION(1, 15, 0)
+            case VADisplayPCIID:
+                attribList->min_value = attribList->value = attribList->max_value = (m_mediaCtx->iDeviceId & 0xffff) | 0x80860000;
+                attribList->flags = VA_DISPLAY_ATTRIB_GETTABLE;
+                break;
+#endif
+            default:
+                attribList->min_value = VA_ATTRIB_NOT_SUPPORTED;
+                attribList->max_value = VA_ATTRIB_NOT_SUPPORTED;
+                attribList->value = VA_ATTRIB_NOT_SUPPORTED;
+                attribList->flags = VA_DISPLAY_ATTRIB_NOT_SUPPORTED;
+                break;
+        }
+        attribList ++;
+    }
     return VA_STATUS_SUCCESS;
 }

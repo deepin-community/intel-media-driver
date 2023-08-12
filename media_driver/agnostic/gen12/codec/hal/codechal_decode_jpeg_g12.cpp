@@ -386,6 +386,8 @@ MOS_STATUS CodechalDecodeJpegG12::DecodePrimitiveLevel()
                 MOS_ZeroMemory(&huffmanTableParams, sizeof(huffmanTableParams));
 
                 huffmanTableParams.HuffTableID = huffTableID;
+                if (acTableSelector >= JPEG_MAX_NUM_HUFF_TABLE_INDEX || dcTableSelector >= JPEG_MAX_NUM_HUFF_TABLE_INDEX)
+                    return MOS_STATUS_INVALID_PARAMETER;
 
                 huffmanTableParams.pACBits   = &m_jpegHuffmanTable->HuffTable[acTableSelector].AC_BITS[0];
                 huffmanTableParams.pDCBits   = &m_jpegHuffmanTable->HuffTable[dcTableSelector].DC_BITS[0];
@@ -617,7 +619,7 @@ CodechalDecodeJpegG12::CodechalDecodeJpegG12(
 
     CODECHAL_DECODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, true, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
 }
 
 void CodechalDecodeJpegG12::CalcRequestedSpace(

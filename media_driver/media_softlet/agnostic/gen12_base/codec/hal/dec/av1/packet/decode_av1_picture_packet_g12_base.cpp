@@ -26,6 +26,7 @@
 #include "codechal_utilities.h"
 #include "decode_av1_picture_packet_g12_base.h"
 #include "codechal_debug.h"
+#include "decode_resource_auto_lock.h"
 
 namespace decode{
     Av1DecodePicPkt_G12_Base::~Av1DecodePicPkt_G12_Base()
@@ -113,7 +114,7 @@ namespace decode{
         DECODE_CHK_NULL(m_av1Pipeline);
         DECODE_CHK_NULL(m_avpInterface);
 
-        m_av1BasicFeature = dynamic_cast<Av1BasicFeature*>(m_featureManager->GetFeature(FeatureIDs::basicFeature));
+        m_av1BasicFeature = dynamic_cast<Av1BasicFeatureG12*>(m_featureManager->GetFeature(FeatureIDs::basicFeature));
         DECODE_CHK_NULL(m_av1BasicFeature);
 
         m_allocator = m_pipeline ->GetDecodeAllocator();
@@ -1017,6 +1018,12 @@ namespace decode{
     {
         DECODE_FUNC_CALL();
 
+#ifdef _MMC_SUPPORTED
+        //Record each reference surface mmc state
+        uint8_t  skipMask          = 0;
+        uint32_t compressionFormat = 0;
+#endif
+
         if (m_av1PicParams->m_picInfoFlags.m_fields.m_frameType != keyFrame && m_av1PicParams->m_picInfoFlags.m_fields.m_frameType != intraOnlyFrame)
         {
                 Av1SurfaceId surfaceId[av1TotalRefsPerFrame] = {
@@ -1032,7 +1039,7 @@ namespace decode{
             //set for intra frame
             refSurface[0] = m_av1BasicFeature->m_destSurface;
 
-            Av1ReferenceFrames &refFrames = m_av1BasicFeature->m_refFrames;
+            Av1ReferenceFramesG12 &refFrames = m_av1BasicFeature->m_refFrames;
             const std::vector<uint8_t> &activeRefList = refFrames.GetActiveReferenceList(*m_av1PicParams, m_av1BasicFeature->m_av1TileParams[m_av1BasicFeature->m_tileCoding.m_curTile]);
             for (uint8_t i = 0; i < activeRefList.size(); i++)
             {
@@ -1058,8 +1065,32 @@ namespace decode{
             #ifdef _MMC_SUPPORTED
                 DECODE_CHK_STATUS(m_mmcState->GetSurfaceMmcState(refSurfaceParams[i].psSurface, &refSurfaceParams[i].mmcState));
                 DECODE_CHK_STATUS(m_mmcState->GetSurfaceMmcFormat(refSurfaceParams[i].psSurface, &refSurfaceParams[i].dwCompressionFormat));
+                if (refSurfaceParams[i].mmcState == MOS_MEMCOMP_DISABLED)
+                {
+                    skipMask |= (1 << i);
+                }
+                else
+                {
+                    DECODE_CHK_STATUS(m_mmcState->GetSurfaceMmcFormat(refSurfaceParams[i].psSurface, &compressionFormat));
+                }
+                DECODE_NORMALMESSAGE("AV1 MMC skip mask is %d compression format %d\n", skipMask, compressionFormat);
             #endif
             }
+
+#ifdef _MMC_SUPPORTED
+            if (m_mmcState->IsMmcEnabled())
+            {
+                for (auto i = 0; i < av1TotalRefsPerFrame; i++)
+                {
+                    // Set each refSurfaceParams mmcState as MOS_MEMCOMP_MC to satisfy MmcEnable in AddAvpSurfaceCmd
+                    // Compression type/enable should be the same for all reference surface state
+                    // The actual refSurfac mmcstate is recorded by skipMask
+                    refSurfaceParams[i].mmcState            = MOS_MEMCOMP_MC;
+                    refSurfaceParams[i].mmcSkipMask         = skipMask;
+                    refSurfaceParams[i].dwCompressionFormat = compressionFormat;
+                }
+            }
+#endif
         }
 
         return MOS_STATUS_SUCCESS;
@@ -1198,12 +1229,14 @@ namespace decode{
         DECODE_CHK_NULL(curMvBuffer);
         pipeBufAddrParams.m_curMvTemporalBuffer = &(curMvBuffer->OsResource);
 
-        Av1ReferenceFrames &refFrames = m_av1BasicFeature->m_refFrames;
+        Av1ReferenceFramesG12 &refFrames = m_av1BasicFeature->m_refFrames;
         uint8_t prevFrameIdx = refFrames.GetPrimaryRefIdx();
 
+        uint32_t refSize = 0;
         if (m_av1PicParams->m_picInfoFlags.m_fields.m_frameType != keyFrame)
         {
             const std::vector<uint8_t> &activeRefList = refFrames.GetActiveReferenceList(*m_av1PicParams, m_av1BasicFeature->m_av1TileParams[m_av1BasicFeature->m_tileCoding.m_curTile]);
+            refSize = activeRefList.size();
 
             //set for INTRA_FRAME
             pipeBufAddrParams.m_references[0] = &m_av1BasicFeature->m_destSurface.OsResource;
@@ -1252,7 +1285,7 @@ namespace decode{
             }
         }
 
-        CODECHAL_DEBUG_TOOL(DumpResources(pipeBufAddrParams));
+        CODECHAL_DEBUG_TOOL(DumpResources(pipeBufAddrParams, refSize));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -1531,7 +1564,7 @@ namespace decode{
         int32_t curFrameOffset = m_av1PicParams->m_orderHint;
         int32_t refFrameOffset[2] = { -1, 0x7fffffff };
         int32_t refIdx[2] = { -1, -1 };
-        Av1ReferenceFrames &refFrames = m_av1BasicFeature->m_refFrames;
+        Av1ReferenceFramesG12 &refFrames = m_av1BasicFeature->m_refFrames;
         DECODE_CHK_STATUS(refFrames.Identify1stNearRef(*m_av1PicParams, curFrameOffset, refFrameOffset, refIdx));
 
         if (refIdx[0] != -1 && refIdx[1] != -1)
@@ -1587,25 +1620,35 @@ namespace decode{
     }
 
 #if USE_CODECHAL_DEBUG_TOOL
-    MOS_STATUS Av1DecodePicPkt_G12_Base::DumpResources(MhwVdboxAvpPipeBufAddrParams& pipeBufAddrParams)
+    MOS_STATUS Av1DecodePicPkt_G12_Base::DumpResources(MhwVdboxAvpPipeBufAddrParams &pipeBufAddrParams, uint32_t refSize)
     {
         DECODE_FUNC_CALL();
 
         CodechalDebugInterface *debugInterface = m_av1Pipeline->GetDebugInterface();
-        debugInterface->m_frameType = m_av1PicParams->m_picInfoFlags.m_fields.m_frameType ? P_TYPE : I_TYPE;
-        m_av1PicParams->m_currPic.PicFlags  = PICTURE_FRAME;
-        debugInterface->m_currPic      = m_av1PicParams->m_currPic;
-        debugInterface->m_bufferDumpFrameNum = m_av1BasicFeature->m_frameNum;
+        debugInterface->m_frameType            = m_av1PicParams->m_picInfoFlags.m_fields.m_frameType ? P_TYPE : I_TYPE;
+        m_av1PicParams->m_currPic.PicFlags     = PICTURE_FRAME;
+        debugInterface->m_currPic              = m_av1PicParams->m_currPic;
+        debugInterface->m_bufferDumpFrameNum   = m_av1BasicFeature->m_frameNum;
+
+        if (m_av1PicParams->m_picInfoFlags.m_fields.m_frameType != keyFrame)
+        {
+            for (uint32_t n = 0; n < refSize; n++)
+            {
+                MOS_SURFACE refSurface;
+                MOS_ZeroMemory(&refSurface, sizeof(MOS_SURFACE));
+                refSurface.OsResource = *(pipeBufAddrParams.m_references[n + lastFrame]);
+                DECODE_CHK_STATUS(m_allocator->GetSurfaceInfo(&refSurface));
+                std::string refSurfName = "RefSurf[" + std::to_string(static_cast<uint32_t>(n + lastFrame)) + "]";
+                DECODE_CHK_STATUS(debugInterface->DumpYUVSurface(
+                    &refSurface,
+                    CodechalDbgAttr::attrDecodeReferenceSurfaces,
+                    refSurfName.c_str()));
+            }
+        }
+
         //For multi-tiles per frame case, only need dump these resources once.
         if (m_av1BasicFeature->m_tileCoding.m_curTile == 0)
         {
-            DECODE_CHK_STATUS(debugInterface->DumpBuffer(
-                pipeBufAddrParams.m_cdfTableInitializationBuffer,
-                CodechalDbgAttr::attrCoefProb,
-                "CdfTableInitialization",
-                m_av1BasicFeature->m_cdfMaxNumBytes,
-                CODECHAL_NUM_MEDIA_STATES));
-
             if (pipeBufAddrParams.m_segmentIdReadBuffer != nullptr &&
                 !m_allocator->ResourceIsNull(pipeBufAddrParams.m_segmentIdReadBuffer))
             {
@@ -1617,31 +1660,13 @@ namespace decode{
                     CODECHAL_NUM_MEDIA_STATES));
             }
 
-            if (m_av1PicParams->m_picInfoFlags.m_fields.m_frameType != keyFrame)
-            {
-                for (auto n = 1; n < av1TotalRefsPerFrame; n++)
-                {
-                    MOS_SURFACE destSurface;
-                    MOS_ZeroMemory(&destSurface, sizeof(MOS_SURFACE));
-                    destSurface.OsResource = *(pipeBufAddrParams.m_references[n]);
-                    DECODE_CHK_STATUS(m_allocator->GetSurfaceInfo(&destSurface));
-                    std::string refSurfName = "RefSurf[" + std::to_string(static_cast<uint32_t>(n)) + "]";
-                    DECODE_CHK_STATUS(debugInterface->DumpYUVSurface(
-                        &destSurface,
-                        CodechalDbgAttr::attrReferenceSurfaces,
-                        refSurfName.c_str()));
-                }
-            }
+            DECODE_CHK_STATUS(debugInterface->DumpBuffer(
+                pipeBufAddrParams.m_cdfTableInitializationBuffer,
+                CodechalDbgAttr::attrCoefProb,
+                "CdfTableInitialization",
+                m_av1BasicFeature->m_cdfMaxNumBytes,
+                CODECHAL_NUM_MEDIA_STATES));
         }
-
-        //Should dump each tile's bit stream
-        DECODE_CHK_STATUS(debugInterface->DumpBuffer(
-            &m_av1BasicFeature->m_resDataBuffer.OsResource,
-            CodechalDbgAttr::attrBitstream,
-            "DEC",
-            m_av1BasicFeature->m_dataSize,
-            m_av1BasicFeature->m_dataOffset,
-            CODECHAL_NUM_MEDIA_STATES));
 
         return MOS_STATUS_SUCCESS;
     }

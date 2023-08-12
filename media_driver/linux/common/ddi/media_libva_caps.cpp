@@ -93,7 +93,17 @@ const uint32_t MediaLibvaCaps::m_vpSurfaceAttr[m_numVpSurfaceAttr] =
     VA_FOURCC_X2B10G10R10,
     VA_FOURCC_AYUV,
     VA_FOURCC_Y210,
-    VA_FOURCC_Y410
+    VA_FOURCC_Y410,
+    VA_FOURCC_P012,
+#if VA_CHECK_VERSION(1, 9, 0)
+    VA_FOURCC_Y212,
+    VA_FOURCC_Y412,
+#endif
+#if VA_CHECK_VERSION(1, 13, 0)
+    VA_FOURCC_XYUV,
+#else
+    0,
+#endif
 };
 
 const uint32_t MediaLibvaCaps::m_jpegSurfaceAttr[m_numJpegSurfaceAttr] =
@@ -104,7 +114,8 @@ const uint32_t MediaLibvaCaps::m_jpegSurfaceAttr[m_numJpegSurfaceAttr] =
     VA_FOURCC_411P,
     VA_FOURCC_422H,
     VA_FOURCC_422V,
-    VA_FOURCC_444P
+    VA_FOURCC_444P,
+    VA_FOURCC_RGBP
 };
 
 const uint32_t MediaLibvaCaps::m_jpegEncSurfaceAttr[m_numJpegEncSurfaceAttr] =
@@ -112,7 +123,8 @@ const uint32_t MediaLibvaCaps::m_jpegEncSurfaceAttr[m_numJpegEncSurfaceAttr] =
     VA_FOURCC_NV12,
     VA_FOURCC_YUY2,
     VA_FOURCC_UYVY,
-    VA_FOURCC_Y800
+    VA_FOURCC_Y800,
+    VA_FOURCC_ABGR
 };
 
 MediaLibvaCaps::MediaLibvaCaps(DDI_MEDIA_CONTEXT *mediaCtx)
@@ -661,18 +673,21 @@ VAStatus MediaLibvaCaps::CreateEncAttributes(
     }
     (*attribList)[attrib.type] = attrib.value;
 
-    attrib.type = VAConfigAttribEncJPEG;
-    VAConfigAttribValEncJPEG jpegAttribVal;
-    jpegAttribVal.bits.arithmatic_coding_mode = 0;
-    jpegAttribVal.bits.progressive_dct_mode = 0;
-    jpegAttribVal.bits.non_interleaved_mode = 0;
-    jpegAttribVal.bits.differential_mode = 0;
-    jpegAttribVal.bits.max_num_components = jpegNumComponent;
-    jpegAttribVal.bits.max_num_scans = 1;
-    jpegAttribVal.bits.max_num_huffman_tables = JPEG_MAX_NUM_HUFF_TABLE_INDEX;
-    jpegAttribVal.bits.max_num_quantization_tables = JPEG_MAX_QUANT_TABLE;
-    attrib.value = jpegAttribVal.value;
-    (*attribList)[attrib.type] = attrib.value;
+    if (profile == VAProfileJPEGBaseline)
+    {
+        attrib.type = VAConfigAttribEncJPEG;
+        VAConfigAttribValEncJPEG jpegAttribVal;
+        jpegAttribVal.bits.arithmatic_coding_mode = 0;
+        jpegAttribVal.bits.progressive_dct_mode = 0;
+        jpegAttribVal.bits.non_interleaved_mode = 0;
+        jpegAttribVal.bits.differential_mode = 0;
+        jpegAttribVal.bits.max_num_components = jpegNumComponent;
+        jpegAttribVal.bits.max_num_scans = 1;
+        jpegAttribVal.bits.max_num_huffman_tables = JPEG_MAX_NUM_HUFF_TABLE_INDEX;
+        jpegAttribVal.bits.max_num_quantization_tables = JPEG_MAX_QUANT_TABLE;
+        attrib.value = jpegAttribVal.value;
+        (*attribList)[attrib.type] = attrib.value;
+    }
 
     attrib.type = VAConfigAttribEncQualityRange;
     if (profile == VAProfileJPEGBaseline)
@@ -2548,7 +2563,7 @@ VAStatus MediaLibvaCaps::QueryProcessingRate(
     MEDIA_WA_TABLE waTable;
     memset(&platform, 0, sizeof(platform));
 
-    if (MOS_STATUS_SUCCESS != HWInfo_GetGfxInfo(m_mediaCtx->fd, m_mediaCtx->pDrmBufMgr, &platform, &skuTable, &waTable, m_mediaCtx->pGtSystemInfo))
+    if (MOS_STATUS_SUCCESS != HWInfo_GetGfxInfo(m_mediaCtx->fd, m_mediaCtx->pDrmBufMgr, &platform, &skuTable, &waTable, m_mediaCtx->pGtSystemInfo, m_mediaCtx->m_userSettingPtr))
     {
         DDI_ASSERTMESSAGE("Fatal error - Cannot get Sku/Wa Tables/GtSystemInfo and Platform information");
         return VA_STATUS_ERROR_OPERATION_FAILED;
@@ -2686,7 +2701,7 @@ VAStatus MediaLibvaCaps::QuerySurfaceAttributes(
         attribs[i].value.value.i = VP_MIN_PIC_HEIGHT;
         i++;
 
-        for (uint32_t j = 0; j < m_numVpSurfaceAttr; j++)
+        for (uint32_t j = 0; j < m_numVpSurfaceAttr && m_vpSurfaceAttr[j]; j++)
         {
             attribs[i].type = VASurfaceAttribPixelFormat;
             attribs[i].value.type = VAGenericValueTypeInteger;
@@ -2701,7 +2716,8 @@ VAStatus MediaLibvaCaps::QuerySurfaceAttributes(
         attribs[i].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA |
             VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR |
             VA_SURFACE_ATTRIB_MEM_TYPE_KERNEL_DRM |
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME |
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2;
         i++;
 
         attribs[i].type = VASurfaceAttribExternalBufferDescriptor;
@@ -2921,7 +2937,8 @@ VAStatus MediaLibvaCaps::QuerySurfaceAttributes(
         attribs[i].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA |
             VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR |
             VA_SURFACE_ATTRIB_MEM_TYPE_KERNEL_DRM |
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME |
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2;
         i++;
     }
     else if(entrypoint == VAEntrypointEncSlice || entrypoint == VAEntrypointEncSliceLP || entrypoint == VAEntrypointEncPicture || entrypoint == VAEntrypointFEI)
@@ -3053,7 +3070,8 @@ VAStatus MediaLibvaCaps::QuerySurfaceAttributes(
         attribs[i].value.value.i = VA_SURFACE_ATTRIB_MEM_TYPE_VA |
             VA_SURFACE_ATTRIB_MEM_TYPE_USER_PTR |
             VA_SURFACE_ATTRIB_MEM_TYPE_KERNEL_DRM |
-            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME;
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME |
+            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2;
         i++;
     }
     else
@@ -3082,10 +3100,17 @@ VAStatus MediaLibvaCaps::QueryDisplayAttributes(
 {
     DDI_CHK_NULL(attribList, "Null attribList", VA_STATUS_ERROR_INVALID_PARAMETER);
     DDI_CHK_NULL(numAttribs, "Null num_attribs", VA_STATUS_ERROR_INVALID_PARAMETER);
+    VADisplayAttribute * attrib = attribList;
     *numAttribs = 0;
 
-    attribList->type = VADisplayAttribCopy;
+    attrib->type = VADisplayAttribCopy;
     (*numAttribs) ++;
+#if VA_CHECK_VERSION(1, 15, 0)
+    attrib ++;
+
+    attrib->type = VADisplayPCIID;
+    (*numAttribs) ++;
+#endif
 
     return GetDisplayAttributes(attribList, *numAttribs);
 }
@@ -3103,6 +3128,12 @@ VAStatus MediaLibvaCaps::GetDisplayAttributes(
                 attribList->min_value = attribList->value = attribList->max_value = 0;
                 attribList->flags = VA_DISPLAY_ATTRIB_GETTABLE;
                 break;
+#if VA_CHECK_VERSION(1, 15, 0)
+            case VADisplayPCIID:
+                attribList->min_value = attribList->value = attribList->max_value = (m_mediaCtx->iDeviceId & 0xffff) | 0x80860000;
+                attribList->flags = VA_DISPLAY_ATTRIB_GETTABLE;
+                break;
+#endif
             default:
                 attribList->min_value = VA_ATTRIB_NOT_SUPPORTED;
                 attribList->max_value = VA_ATTRIB_NOT_SUPPORTED;
@@ -3765,5 +3796,43 @@ VAStatus MediaLibvaCaps::GetSurfaceModifier(DDI_MEDIA_SURFACE* mediaSurface, uin
             break;
 
     }
+    return VA_STATUS_SUCCESS;
+}
+
+VAStatus MediaLibvaCaps::SetExternalSurfaceTileFormat(DDI_MEDIA_SURFACE* mediaSurface,
+                                                      uint32_t &tileformat, bool &bMemCompEnable, bool &bMemCompRC)
+{
+    DDI_CHK_NULL(mediaSurface,                     "nullptr mediaSurface",                     VA_STATUS_ERROR_INVALID_SURFACE);
+    DDI_CHK_NULL(mediaSurface->pSurfDesc,          "nullptr mediaSurface->pSurfDesc",          VA_STATUS_ERROR_INVALID_SURFACE);
+
+    switch (mediaSurface->pSurfDesc->modifier)
+    {
+        case DRM_FORMAT_MOD_LINEAR:
+            tileformat = I915_TILING_NONE;
+            bMemCompEnable = false;
+            break;
+        case I915_FORMAT_MOD_X_TILED:
+            tileformat = I915_TILING_X;
+            bMemCompEnable = false;
+            break;
+        case I915_FORMAT_MOD_Y_TILED:
+        case I915_FORMAT_MOD_Yf_TILED:
+            tileformat = I915_TILING_Y;
+            bMemCompEnable = false;
+            break;
+        case I915_FORMAT_MOD_Y_TILED_GEN12_RC_CCS:
+            tileformat = I915_TILING_Y;
+            bMemCompEnable = true;
+            bMemCompRC = true;
+            break;
+        case I915_FORMAT_MOD_Y_TILED_GEN12_MC_CCS:
+            tileformat = I915_TILING_Y;
+            bMemCompEnable = true;
+            bMemCompRC = false;
+            break;
+        default:
+            return VA_STATUS_ERROR_INVALID_SURFACE;
+    }
+
     return VA_STATUS_SUCCESS;
 }

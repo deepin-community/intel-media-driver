@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -43,6 +43,14 @@ public:
     //! \return   MediaLibvaCapsNext*
     //!           
     static MediaLibvaCapsNext* CreateCaps(DDI_MEDIA_CONTEXT *mediaCtx);
+
+    //!
+    //! \brief    Init MediaLibvaCapsNext
+    //!
+    //! \return   VAStatus
+    //!           VA_STATUS_SUCCESS if success
+    //!
+    VAStatus Init();
 
     //!
     //! \brief    Get configlist for create configs
@@ -200,6 +208,16 @@ public:
         VAConfigAttrib  *attribList,
         int32_t         numAttribs);
 
+    //! \brief Get the general attribute
+    //!
+    //! \param    [in,out] attrib
+    //!           Pointer to the CAConfigAttrib
+    //!
+    //! \return   VAStatus
+    //!           VA_STATUS_SUCCESS if success
+    //!
+    VAStatus GetGeneralConfigAttrib(VAConfigAttrib *attrib);
+
     //!
     //! \brief    Query supported entrypoints for a given profile
     //!
@@ -272,6 +290,39 @@ public:
     //!
     VAStatus PopulateColorMaskInfo(VAImageFormat *vaImgFmt);
 
+    //!
+    //! \brief  Query display attributes
+    //!
+    //! \param  [in] attrList
+    //!         VA display attribute
+    //! \param  [in] attributesNum
+    //!         Number of attributes
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    VAStatus QueryDisplayAttributes(
+        VADisplayAttribute *attrList,
+        int32_t            *attributesNum);
+
+    //!
+    //! \brief  Get display attributes
+    //! \details    This function returns the current attribute values in "attr_list".
+    //!         Only attributes returned with VA_DISPLAY_ATTRIB_GETTABLE set in the "flags" field
+    //!         from vaQueryDisplayAttributes() can have their values retrieved.
+    //!
+    //! \param  [in] attrList
+    //!         VA display attribute
+    //! \param  [in] attributesNum
+    //!         Number of attributes
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_ERROR_UNIMPLEMENTED
+    //!
+    VAStatus GetDisplayAttributes(
+        VADisplayAttribute *attrList,
+        int32_t             attributesNum);
+
     MediaCapsTableSpecific *m_capsTable = nullptr;
 
 protected:
@@ -300,6 +351,7 @@ protected:
         VAEntrypoint    entrypoint,
         VAConfigAttrib  *attrib,
         int32_t         numAttribs);
+MEDIA_CLASS_DEFINE_END(MediaLibvaCapsNext)
 };
 
 #endif //__MEDIA_LIBVA_CAPS_NEXT_H__

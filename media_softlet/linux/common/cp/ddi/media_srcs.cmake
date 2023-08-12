@@ -1,4 +1,4 @@
-# Copyright (c) 2021, Intel Corporation
+# Copyright (c) 2022, Intel Corporation
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -19,21 +19,31 @@
 # OTHER DEALINGS IN THE SOFTWARE.
 
 set(TMP_SOURCES_
-    ${CMAKE_CURRENT_LIST_DIR}/ddi_cp_functions.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/ddi_cp_caps_interface.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/ddi_cp_interface_next.cpp
 )
 
 set(TMP_HEADERS_
-    ${CMAKE_CURRENT_LIST_DIR}/ddi_cp_functions.h
+    ${CMAKE_CURRENT_LIST_DIR}/ddi_cp_caps_interface.h
+    ${CMAKE_CURRENT_LIST_DIR}/ddi_cp_interface_next.h
 )
 
-set(SOURCES_
-    ${SOURCES_}
+set(CP_COMMON_NEXT_SOURCES_
+    ${CP_COMMON_NEXT_SOURCES_}
     ${TMP_SOURCES_}
  )
 
-set(HEADERS_
-    ${HEADERS_}
+set(CP_COMMON_NEXT_HEADERS_
+    ${CP_COMMON_NEXT_HEADERS_}
     ${TMP_HEADERS_}
 )
 
-media_add_curr_to_include_path()
+set(COMMON_CP_DIRECTORIES_
+    ${COMMON_CP_DIRECTORIES_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)
+
+set(SOFTLET_DDI_PUBLIC_INCLUDE_DIRS_
+    ${SOFTLET_DDI_PUBLIC_INCLUDE_DIRS_}
+    ${CMAKE_CURRENT_LIST_DIR}
+)

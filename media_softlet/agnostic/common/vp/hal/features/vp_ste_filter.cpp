@@ -25,7 +25,7 @@
 //!           this file is for the base interface which is shared by all STE in driver.
 //!
 #include "vp_ste_filter.h"
-#include "vp_vebox_cmd_packet.h"
+#include "vp_vebox_cmd_packet_base.h"
 #include "hw_filter.h"
 #include "sw_filter_pipe.h"
 
@@ -95,8 +95,10 @@ MOS_STATUS VpSteFilter::CalculateEngineParams()
             MOS_ZeroMemory(m_pVeboxSteParams, sizeof(VEBOX_STE_PARAMS));
         }
 
-        m_pVeboxSteParams->bEnableSTE = m_steParams.bEnableSTE;
+        m_pVeboxSteParams->bEnableSTE  = m_steParams.bEnableSTE;
         m_pVeboxSteParams->dwSTEFactor = m_steParams.dwSTEFactor;
+        m_pVeboxSteParams->bEnableSTD  = m_steParams.bEnableSTD;
+        m_pVeboxSteParams->STDParam    = m_steParams.STDParam;
     }
     else
     {
@@ -184,18 +186,21 @@ bool VpVeboxSteParameter::SetPacketParam(VpCmdPacket *pPacket)
 {
     VP_FUNC_CALL();
 
-    VpVeboxCmdPacket *pVeboxPacket = dynamic_cast<VpVeboxCmdPacket *>(pPacket);
-    if (nullptr == pVeboxPacket)
+    VEBOX_STE_PARAMS *params = m_steFilter.GetVeboxParams();
+    if (nullptr == params)
     {
+        VP_PUBLIC_ASSERTMESSAGE("Failed to get vebox ste params");
         return false;
     }
 
-    VEBOX_STE_PARAMS *pParams = m_steFilter.GetVeboxParams();
-    if (nullptr == pParams)
+    VpVeboxCmdPacketBase *packet = dynamic_cast<VpVeboxCmdPacketBase *>(pPacket);
+    if (packet)
     {
-        return false;
+        return MOS_SUCCEEDED(packet->SetSteParams(params));
     }
-    return MOS_SUCCEEDED(pVeboxPacket->SetSteParams(pParams));
+
+    VP_PUBLIC_ASSERTMESSAGE("Invalid packet for vebox ste");
+    return false;
 }
 
 MOS_STATUS VpVeboxSteParameter::Initialize(HW_FILTER_STE_PARAM &params)

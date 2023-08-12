@@ -1,5 +1,5 @@
 ﻿/*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -35,10 +35,16 @@
 #include "vp_utils.h"
 #include "sw_filter.h"
 #include "vp_feature_caps.h"
+#include "vp_render_fc_types.h"
 
 namespace vp {
 
 #define ESR_LAYER_NUM       10
+#define VPHAL_MAX_HDR_INPUT_LAYER 8
+#define VPHAL_HDR_EOTF_1DLUT_POINT_NUMBER 256
+#define VPHAL_HDR_OETF_1DLUT_POINT_NUMBER 256
+#define VPHAL_HDR_OETF_1DLUT_WIDTH 16
+#define VPHAL_HDR_OETF_1DLUT_HEIGHT 16
 
 class VpCmdPacket;
 
@@ -101,6 +107,16 @@ public:
         m_packet = packet;
     }
 
+    //!
+    //! \brief  Get current associated media Packet
+    //! \return MediaTask*
+    //!         return the media task pointer
+    //!
+    PVP_MHWINTERFACE GetMhwInterface()
+    {
+        return m_pvpMhwInterface;
+    }
+
 protected:
 
     PVP_MHWINTERFACE      m_pvpMhwInterface = nullptr;   // vp HW interfaces
@@ -109,6 +125,7 @@ protected:
 
     VpCmdPacket         * m_packet = nullptr;
 
+MEDIA_CLASS_DEFINE_END(vp__VpFilter)
 };
 
 struct _SFC_SCALING_PARAMS
@@ -129,6 +146,11 @@ struct _SFC_SCALING_PARAMS
     uint32_t                        dwScaledRegionWidth;                        // Scaled region width
     uint32_t                        dwScaledRegionVerticalOffset;               // Scaled region vertical offset
     uint32_t                        dwScaledRegionHorizontalOffset;             // Scaled region horizontal offset
+    uint32_t                        dwTargetRectangleStartHorizontalOffset;     // Target rectangle start horizontal offset
+    uint32_t                        dwTargetRectangleEndHorizontalOffset;       // Target rectangle end horizontal offset
+    uint32_t                        dwTargetRectangleStartVerticalOffset;       // Target rectangle start vertical offset
+    uint32_t                        dwTargetRectangleEndVerticalOffset;         // Target rectangle end vertical offset
+    bool                            bRectangleEnabled;                          // Target rectangle enabled
     float                           fAVSXScalingRatio;                          // X Scaling Ratio
     float                           fAVSYScalingRatio;                          // Y Scaling Ratio
 
@@ -148,6 +170,7 @@ struct _SFC_CSC_PARAMS
     bool                            bIEFEnable;                                  // IEF Enabled
     bool                            bChromaUpSamplingEnable;                     // ChromaUpSampling
     bool                            b8tapChromafiltering;                        // Enables 8 tap filtering for Chroma Channels
+    bool                            isDitheringNeeded;                           // 0: dithering is not needed; 1: dithering is needed
     VPHAL_CSPACE                    inputColorSpace;                             // Input Color Space
     MOS_FORMAT                      inputFormat;                                 // SFC Input Format
     MOS_FORMAT                      outputFormat;                                // SFC Output Format
@@ -180,6 +203,9 @@ struct _VEBOX_STE_PARAMS
 {
     bool                            bEnableSTE;                                 // STE Enabled
     uint32_t                        dwSTEFactor;
+
+    bool                            bEnableSTD;                                 // STD alone Enabled
+    VPHAL_STD_PARAMS                STDParam;
 };
 
 struct _VEBOX_DI_PARAMS
@@ -256,6 +282,18 @@ struct _VEBOX_CSC_PARAMS
     uint32_t                        chromaDownSamplingHorizontalCoef;            // Chroma DownSampling Horizontal Coeff
 };
 
+struct _RENDER_CSC_PARAMS
+{
+    uint32_t                        layer;
+    bool                            bCSCEnabled;                                 // CSC Enabled
+    VPHAL_CSPACE                    inputColorSpcase;                            // Input Color Space
+    VPHAL_CSPACE                    outputColorSpcase;                           // Input Color Space
+    MOS_FORMAT                      inputFormat;                                 // Input Format
+    MOS_FORMAT                      outputFormat;                                // Output Format
+    PVPHAL_ALPHA_PARAMS             alphaParams;                                 // Output Alpha Params
+    uint32_t                        inputChromaSetting;                          // Chroma setting
+};
+
 struct _VEBOX_HDR_PARAMS
 {
     uint32_t                        uiMaxDisplayLum;       //!< Maximum Display Luminance
@@ -264,6 +302,7 @@ struct _VEBOX_HDR_PARAMS
     VPHAL_CSPACE                    srcColorSpace;
     VPHAL_CSPACE                    dstColorSpace;
     MOS_FORMAT                      dstFormat;
+    HDR_STAGE                       stage;
 };
 
 using SFC_SCALING_PARAMS    = _SFC_SCALING_PARAMS;
@@ -298,10 +337,38 @@ struct _VEBOX_UPDATE_PARAMS
     VpKernelID                      kernelId;
 };
 
-using VEBOX_UPDATE_PARAMS      = _VEBOX_UPDATE_PARAMS;
-using PVEBOX_UPDATE_PARAMS     = VEBOX_UPDATE_PARAMS *;
-using VEBOX_HDR_PARAMS      = _VEBOX_HDR_PARAMS;
-using PVEBOX_HDR_PARAMS     = VEBOX_HDR_PARAMS *;
+using VEBOX_UPDATE_PARAMS                 = _VEBOX_UPDATE_PARAMS;
+using PVEBOX_UPDATE_PARAMS                = VEBOX_UPDATE_PARAMS *;
+using VEBOX_HDR_PARAMS                    = _VEBOX_HDR_PARAMS;
+using PVEBOX_HDR_PARAMS                   = VEBOX_HDR_PARAMS *;
+
+struct _RENDER_HDR_3DLUT_CAL_PARAMS
+{
+    uint32_t                        maxDisplayLum;       //!< Maximum Display Luminance
+    uint32_t                        maxContentLevelLum;  //!< Maximum Content Level Luminance
+    VPHAL_HDR_MODE                  hdrMode;
+    VpKernelID                      kernelId;
+    uint32_t                        threadWidth;
+    uint32_t                        threadHeight;
+    KERNEL_ARGS                     kernelArgs;
+};
+
+using RENDER_HDR_3DLUT_CAL_PARAMS  = _RENDER_HDR_3DLUT_CAL_PARAMS;
+using PRENDER_HDR_3DLUT_CAL_PARAMS = RENDER_HDR_3DLUT_CAL_PARAMS *;
+
+struct _RENDER_DN_HVS_CAL_PARAMS
+{
+    uint32_t                        qp;
+    uint32_t                        strength;
+    VPHAL_HVSDN_MODE                hvsMode;
+    VpKernelID                      kernelId;
+    uint32_t                        threadWidth;
+    uint32_t                        threadHeight;
+    KERNEL_ARGS                     kernelArgs;
+};
+
+using RENDER_DN_HVS_CAL_PARAMS  = _RENDER_DN_HVS_CAL_PARAMS;
+using PRENDER_DN_HVS_CAL_PARAMS = RENDER_DN_HVS_CAL_PARAMS *;
 
 struct _STATE_COPY_PARAMS
 {
@@ -373,30 +440,6 @@ struct CHROMA_LAYER_PARAMS
     uint32_t                                          uThreadHeight;
 };
 
-struct  _RENDER_SR_PARAMS
-{
-    bool bEnableSR;
-    std::vector<SR_LAYER_PARAMS> layersParam;
-    CHROMA_LAYER_PARAMS chromaLayerParam;
-    const uint8_t *(*sr2xConvWeightTable)[ESR_LAYER_NUM];
-    const uint8_t *(*sr2xConvBiasTable)[ESR_LAYER_NUM];
-    const uint8_t *(*sr2xConvPreluTable)[ESR_LAYER_NUM];
-
-    const uint32_t (*sr2xConvWeightTableSize)[ESR_LAYER_NUM];
-    const uint32_t (*sr2xConvBiasTableSize)[ESR_LAYER_NUM];
-    const uint32_t (*sr2xConvPreluTableSize)[ESR_LAYER_NUM];
-    uint32_t uInputWidth;
-    uint32_t uInputHeight;
-    MOS_FORMAT inputFormat;
-    RECT                    rcSrcInput;
-    RECT                    rcDstInput;                     //!< Input dst rect without rotate being applied.
-    uint32_t                uOutputWidth;
-    uint32_t                uOutputHeight;
-};
-
-using RENDER_SR_PARAMS = _RENDER_SR_PARAMS;
-using PRENDER_SR_PARAMS = RENDER_SR_PARAMS*;
-
 struct _RENDER_DI_FMD_PARAMS
 {
     bool                  bEnableDiFmd;
@@ -408,6 +451,94 @@ struct _RENDER_DI_FMD_PARAMS
 
 using RENDER_DI_FMD_PARAMS  = _RENDER_DI_FMD_PARAMS;
 using PRENDER_DI_FMD_PARAMS = RENDER_DI_FMD_PARAMS *;
+
+struct _RENDER_FC_PARAMS
+{
+    VpKernelID              kernelId;
+    VP_COMPOSITE_PARAMS     compParams;
+};
+using RENDER_FC_PARAMS  = _RENDER_FC_PARAMS;
+using PRENDER_FC_PARAMS = RENDER_FC_PARAMS *;
+
+struct _RENDER_HDR_PARAMS
+{
+    VpKernelID              kernelId;
+    VP_COMPOSITE_PARAMS     compParams;
+    uint32_t                uiMaxDisplayLum;       //!< Maximum Display Luminance
+    uint32_t                uiMaxContentLevelLum;  //!< Maximum Content Level Luminance
+    VPHAL_HDR_MODE          hdrMode;
+    VPHAL_CSPACE            srcColorSpace;
+    VPHAL_CSPACE            dstColorSpace;
+    uint32_t                threadWidth;
+    uint32_t                threadHeight;
+
+
+    VPHAL_HDR_CACHE_CNTL            SurfMemObjCtl;                  //!< Cache attributes
+    uint32_t                        uiSplitFramePortions = 1;       //!< Split Frame flag
+    bool                            bForceSplitFrame     = false;
+
+    uint32_t                        uSourceCount;                                               //!< Number of sources
+    uint32_t                        uTargetCount;                                               //!< Number of targets
+    uint32_t                        uSourceBindingTableIndex[8];        //!< Binding Table Index
+    uint32_t                        uTargetBindingTableIndex[8];       //!< Binding Table Index
+    uint32_t                        dwSurfaceWidth;                                             //!< Record the input surface width of last HDR render
+    uint32_t                        dwSurfaceHeight;                                            //!< Record the input surface height of last HDR render
+    PVPHAL_COLORFILL_PARAMS         pColorFillParams;                                           //!< ColorFill - BG only
+
+    VPHAL_HDR_LUT_MODE              LUTMode[VPHAL_MAX_HDR_INPUT_LAYER];         //!< LUT Mode
+    VPHAL_HDR_LUT_MODE              GlobalLutMode;                              //!< Global LUT mode control for debugging purpose
+
+    uint32_t                        dwOetfSurfaceWidth;             //!< Gamma 1D LUT surface
+    uint32_t                        dwOetfSurfaceHeight;            //!< Gamma 1D LUT surface
+    uint32_t                        dwUpdateMask;                   //!< Coefficients Update Mask
+    uint32_t                        Cri3DLUTSize;                   //!< CRI 3D LUT surface
+
+    VPHAL_SURFACE                   OETF1DLUTSurface[VPHAL_MAX_HDR_INPUT_LAYER];        //!< OETF 1D LUT surface
+    VPHAL_SURFACE                   CoeffSurface;                                       //!< CSC CCM Coeff surface
+
+    uint16_t                        OetfSmpteSt2084[VPHAL_HDR_OETF_1DLUT_POINT_NUMBER];      //!< EOTF 1D LUT SMPTE ST2084
+
+    uint8_t*                        pInput3DLUT;                                             //!< Input 3DLUT address for GPU generate 3DLUT
+
+    const uint16_t                  *pHDRStageConfigTable = nullptr;
+
+    HDRStageEnables                 StageEnableFlags[VPHAL_MAX_HDR_INPUT_LAYER];
+
+    VPHAL_GAMMA_TYPE                EOTFGamma[VPHAL_MAX_HDR_INPUT_LAYER]; //!< EOTF
+    VPHAL_GAMMA_TYPE                OETFGamma[VPHAL_MAX_HDR_INPUT_LAYER]; //!< OETF
+    VPHAL_HDR_MODE                  HdrMode[VPHAL_MAX_HDR_INPUT_LAYER];   //!< Hdr Mode
+    VPHAL_HDR_CCM_TYPE              CCM[VPHAL_MAX_HDR_INPUT_LAYER];       //!< CCM Mode
+    VPHAL_HDR_CCM_TYPE              CCMExt1[VPHAL_MAX_HDR_INPUT_LAYER];   //!< CCM Ext1 Mode
+    VPHAL_HDR_CCM_TYPE              CCMExt2[VPHAL_MAX_HDR_INPUT_LAYER];   //!< CCM Ext2 Mode
+    VPHAL_HDR_CSC_TYPE              PriorCSC[VPHAL_MAX_HDR_INPUT_LAYER];  //!< Prior CSC Mode
+    VPHAL_HDR_CSC_TYPE              PostCSC[VPHAL_MAX_HDR_INPUT_LAYER];   //!< Post CSC Mode
+
+    HDR_PARAMS                      HDRFrameTargetParams;
+    HDR_PARAMS                      HDRLastFrameSourceParams[VPHAL_MAX_HDR_INPUT_LAYER];
+    HDR_PARAMS                      HDRLastFrameTargetParams;
+
+    STATUS_TABLE_UPDATE_PARAMS      StatusTableUpdateParams;                   //!< Status table, Video Pre-Processing Only
+
+    bool                            bNeed3DSampler;                       //!< indicate whether 3D should neede by force considering AVS removal etc.
+
+   VPHAL_ROTATION                   Rotation   = VPHAL_ROTATION_IDENTITY;  //!<  0: 0 degree, 1: 90 degree, 2: 180 degree, 3: 270 degreee
+   VPHAL_SCALING_MODE               ScalingMode = VPHAL_SCALING_NEAREST;    //!<  Scaling Mode
+   PVPHAL_IEF_PARAMS                pIEFParams;
+   HDR_PARAMS                       srcHDRParams[VPHAL_MAX_HDR_INPUT_LAYER];
+   HDR_PARAMS                       targetHDRParams[VPHAL_MAX_HDR_OUTPUT_LAYER];
+   bool                             bUsingAutoModePipe;  //!< Hdr Auto Mode pipe flag
+   uint16_t                         InputSrc[VPHAL_MAX_HDR_INPUT_LAYER] = {};  // Input Surface
+   uint16_t                         Target[VPHAL_MAX_HDR_OUTPUT_LAYER]  = {};  // Target Surface
+   bool                             bGpuGenerate3DLUT;                         //!< Flag for per frame GPU generation of 3DLUT
+   float                            f3DLUTNormalizationFactor;                 //!< Normalization factor for 3DLUT
+   bool                             bDisableAutoMode;                          //!< Force to disable Hdr auto mode tone mapping for debugging purpose
+   bool                             coeffAllocated     = false;
+   bool                             OETF1DLUTAllocated = false;
+   bool                             Cri3DLUTAllocated  = false;
+   PVPHAL_BLENDING_PARAMS           pBlendingParams    = nullptr;              //!< Blending parameters
+};
+using RENDER_HDR_PARAMS  = _RENDER_HDR_PARAMS;
+using PRENDER_HDR_PARAMS = RENDER_HDR_PARAMS *;
 
 class SwFilterPipe;
 class HwFilter;
@@ -428,6 +559,8 @@ public:
 
 private:
     FeatureType m_FeatureType = FeatureTypeInvalid;
+
+MEDIA_CLASS_DEFINE_END(vp__HwFilterParameter)
 };
 
 /////////////////////////////Packet Parameters///////////////////////////////////
@@ -444,6 +577,8 @@ public:
 
 private:
     PacketParamFactoryBase *m_packetParamFactory = nullptr;
+
+MEDIA_CLASS_DEFINE_END(vp__VpPacketParameter)
 };
 
 /////////////////////////////Policy Feature Handler//////////////////////////////
@@ -465,6 +600,8 @@ protected:
     FeatureType m_Type = FeatureTypeInvalid;
     std::vector<HwFilterParameter *> m_Pool;
     VP_HW_CAPS  &m_hwCaps;
+
+MEDIA_CLASS_DEFINE_END(vp__PolicyFeatureHandler)
 };
 
 class PacketParamFactoryBase
@@ -476,6 +613,8 @@ public:
     void ReturnPacketParameter(VpPacketParameter *&p);
 protected:
     std::vector<VpPacketParameter *> m_Pool;
+
+MEDIA_CLASS_DEFINE_END(vp__PacketParamFactoryBase)
 };
 
 template<class T>
@@ -517,6 +656,8 @@ public:
             return p;
         }
     }
+
+MEDIA_CLASS_DEFINE_END(vp__PacketParamFactory)
 };
 
 struct HW_FILTER_PARAM

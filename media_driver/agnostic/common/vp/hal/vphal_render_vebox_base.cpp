@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2011-2021, Intel Corporation
+* Copyright (c) 2011-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -216,9 +216,9 @@ MOS_STATUS VPHAL_VEBOX_STATE::Initialize(
 {
     MOS_STATUS                          eStatus;
     PRENDERHAL_INTERFACE                pRenderHal;
-    MOS_USER_FEATURE_VALUE_DATA         UserFeatureData;
     MOS_NULL_RENDERING_FLAGS            NullRenderingFlags;
     PVPHAL_VEBOX_STATE                  pVeboxState = this;
+    uint32_t                            customValue = VPHAL_COMP_BYPASS_ENABLED;
 
     eStatus      = MOS_STATUS_SUCCESS;
     pRenderHal   = pVeboxState->m_pRenderHal;
@@ -318,30 +318,26 @@ MOS_STATUS VPHAL_VEBOX_STATE::Initialize(
     pVeboxState->dwCompBypassMode = VPHAL_COMP_BYPASS_ENABLED;
 
     // Read user feature key to get the Composition Bypass mode
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
-
     // Vebox Comp Bypass is on by default
-    UserFeatureData.u32Data = VPHAL_COMP_BYPASS_ENABLED;
-
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_BYPASS_COMPOSITION_ID,
-        &UserFeatureData,
-        m_pOsInterface->pOsContext));
-    pVeboxState->dwCompBypassMode = UserFeatureData.u32Data;
+    ReadUserSetting(
+        m_userSettingPtr,
+        pVeboxState->dwCompBypassMode,
+        __VPHAL_BYPASS_COMPOSITION,
+        MediaUserSetting::Group::Sequence,
+        customValue,
+        true);
 
     if (MEDIA_IS_SKU(pVeboxState->m_pSkuTable, FtrSFCPipe) &&
         m_sfcPipeState)
     {
         // Read user feature key to Disable SFC
-        MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-        MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-            nullptr,
-            __VPHAL_VEBOX_DISABLE_SFC_ID,
-            &UserFeatureData,
-            m_pOsInterface->pOsContext));
-        m_sfcPipeState->SetDisable(UserFeatureData.bData ? true : false);
+        bool disableSfc = 0;
+        ReadUserSetting(
+            m_userSettingPtr,
+            disableSfc,
+            __VPHAL_VEBOX_DISABLE_SFC,
+            MediaUserSetting::Group::Sequence);
+        m_sfcPipeState->SetDisable(disableSfc ? true : false);
     }
 
     pVeboxState->bEnableMMC = 0;
@@ -1215,7 +1211,7 @@ finish:
 //!
 MOS_STATUS VPHAL_VEBOX_STATE::VeboxFlushUpdateStateCmdBuffer()
 {
-    PRENDERHAL_INTERFACE                pRenderHal = nullptr;
+    PRENDERHAL_INTERFACE_LEGACY         pRenderHal = nullptr;
     PRENDERHAL_STATE_HEAP               pStateHeap = nullptr;
     MhwRenderInterface                  *pMhwRender = nullptr;
     PMOS_INTERFACE                      pOsInterface = nullptr;
@@ -1230,7 +1226,6 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxFlushUpdateStateCmdBuffer()
     MHW_ID_LOAD_PARAMS                  IdLoadParams = {};
     PVPHAL_VEBOX_STATE                  pVeboxState = this;
     PVPHAL_VEBOX_RENDER_DATA            pRenderData = GetLastExecRenderData();
-    MediaPerfProfiler                   *pPerfProfiler = nullptr;
     MOS_CONTEXT                         *pOsContext = nullptr;
     PMHW_MI_MMIOREGISTERS               pMmioRegisters = nullptr;
 
@@ -1241,13 +1236,13 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxFlushUpdateStateCmdBuffer()
     VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pMhwRenderInterface->GetMmioRegisters());
     VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pOsInterface);
     VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pOsInterface->pOsContext);
+    VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pRenderHalPltInterface);
 
     pRenderHal              = pVeboxState->m_pRenderHal;
     pStateHeap              = pRenderHal->pStateHeap;
     pMhwRender              = pRenderHal->pMhwRenderInterface;
     pMhwMiInterface         = pRenderHal->pMhwMiInterface;
     pOsInterface            = pRenderHal->pOsInterface;
-    pPerfProfiler           = pRenderHal->pPerfProfiler;
     pOsContext              = pOsInterface->pOsContext;
     pMmioRegisters          = pMhwRender->GetMmioRegisters();
 
@@ -1261,15 +1256,16 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxFlushUpdateStateCmdBuffer()
         *pMhwMiInterface, *pMmioRegisters);
 
     // Add kernel info to log.
-    HalOcaInterface::DumpVpKernelInfo(CmdBuffer, *pOsContext, kernelVeboxUpdateDnState, 0, nullptr);
+    HalOcaInterface::DumpVpKernelInfo(CmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, kernelVeboxUpdateDnState, 0, nullptr);
     // Add vphal param to log.
-    HalOcaInterface::DumpVphalParam(CmdBuffer, *pOsContext, pRenderHal->pVphalOcaDumper);
+    HalOcaInterface::DumpVphalParam(CmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, pRenderHal->pVphalOcaDumper);
 
     // Initialize command buffer and insert prolog
     VPHAL_RENDER_CHK_STATUS(pRenderHal->pfnInitCommandBuffer(pRenderHal, &CmdBuffer, nullptr));
-    VPHAL_RENDER_CHK_STATUS(pPerfProfiler->AddPerfCollectStartCmd((void*)pRenderHal, pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
+    
+    VPHAL_RENDER_CHK_STATUS(pRenderHal->pRenderHalPltInterface->AddPerfCollectStartCmd(pRenderHal, pOsInterface, &CmdBuffer));
 
-    VPHAL_RENDER_CHK_STATUS(NullHW::StartPredicate(pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(NullHW::StartPredicate(pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
 
     VPHAL_RENDER_CHK_STATUS(pRenderHal->pfnSendSyncTag(pRenderHal, &CmdBuffer));
 
@@ -1318,7 +1314,7 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxFlushUpdateStateCmdBuffer()
     MediaObjectParams.dwInlineDataSize              = iInlineSize;
     MediaObjectParams.pInlineData                   = &InlineData;
 
-    HalOcaInterface::OnDispatch(CmdBuffer, *pOsContext, *pMhwMiInterface, *pMmioRegisters);
+    HalOcaInterface::OnDispatch(CmdBuffer, *pOsInterface, *pMhwMiInterface, *pMmioRegisters);
 
 #if VEBOX_AUTO_DENOISE_SUPPORTED
     // Launch Interface Descriptor for DN Update kernel
@@ -1374,9 +1370,9 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxFlushUpdateStateCmdBuffer()
         }
     }
 
-    VPHAL_RENDER_CHK_STATUS(NullHW::StopPredicate(pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(NullHW::StopPredicate(pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
 
-    VPHAL_RENDER_CHK_STATUS(pPerfProfiler->AddPerfCollectEndCmd((void*)pRenderHal, pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(pRenderHal->pRenderHalPltInterface->AddPerfCollectEndCmd(pRenderHal, pOsInterface, &CmdBuffer));
 
     HalOcaInterface::On1stLevelBBEnd(CmdBuffer, *pOsInterface);
 
@@ -1960,7 +1956,6 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxRenderVeboxCmd(
     const MHW_VEBOX_HEAP                    *pVeboxHeap = nullptr;
     PVPHAL_VEBOX_STATE                      pVeboxState = this;
     PVPHAL_VEBOX_RENDER_DATA                pRenderData = GetLastExecRenderData();
-    MediaPerfProfiler                       *pPerfProfiler = nullptr;
     MOS_CONTEXT                             *pOsContext = nullptr;
     PMHW_MI_MMIOREGISTERS                   pMmioRegisters = nullptr;
 
@@ -1970,13 +1965,13 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxRenderVeboxCmd(
     VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pMhwMiInterface->GetMmioRegisters());
     VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pOsInterface);
     VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pOsInterface->pOsContext);
+    VPHAL_RENDER_CHK_NULL(pVeboxState->m_pRenderHal->pRenderHalPltInterface);
 
     eStatus                 = MOS_STATUS_SUCCESS;
     pRenderHal              = pVeboxState->m_pRenderHal;
     pMhwMiInterface         = pRenderHal->pMhwMiInterface;
     pOsInterface            = pVeboxState->m_pOsInterface;
     pVeboxInterface         = pVeboxState->m_pVeboxInterface;
-    pPerfProfiler           = pRenderHal->pPerfProfiler;
     pOsContext              = pOsInterface->pOsContext;
     pMmioRegisters          = pMhwMiInterface->GetMmioRegisters();
 
@@ -1990,14 +1985,14 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxRenderVeboxCmd(
     HalOcaInterface::TraceOcaSkuValue(CmdBuffer, *pOsInterface);
 
     // Add vphal param to log.
-    HalOcaInterface::DumpVphalParam(CmdBuffer, *pOsContext, pRenderHal->pVphalOcaDumper);
+    HalOcaInterface::DumpVphalParam(CmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, pRenderHal->pVphalOcaDumper);
 
     // Initialize command buffer and insert prolog
     VPHAL_RENDER_CHK_STATUS(pRenderHal->pfnInitCommandBuffer(pRenderHal, &CmdBuffer, pGenericPrologParams));
 
-    VPHAL_RENDER_CHK_STATUS(pPerfProfiler->AddPerfCollectStartCmd((void*)pRenderHal, pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(pRenderHal->pRenderHalPltInterface->AddPerfCollectStartCmd(pRenderHal, pOsInterface, &CmdBuffer));
 
-    VPHAL_RENDER_CHK_STATUS(NullHW::StartPredicate(pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(NullHW::StartPredicate(pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
 
     bDiVarianceEnable = pRenderData->bDeinterlace || IsQueryVarianceEnabled();
 
@@ -2010,7 +2005,7 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxRenderVeboxCmd(
     {
         std::string info = "in_comps = " + std::to_string(int(this->m_currentSurface->bCompressible)) + ", out_comps = " + std::to_string(int(VeboxSurfaceStateCmdParams.pSurfOutput->bCompressible));
         const char* ocaLog = info.c_str();
-        HalOcaInterface::TraceMessage(CmdBuffer, *pOsContext, ocaLog, info.size());
+        HalOcaInterface::TraceMessage(CmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, ocaLog, info.size());
     }
 
     VPHAL_RENDER_CHK_STATUS(pVeboxState->SetupVeboxState(
@@ -2124,7 +2119,7 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxRenderVeboxCmd(
             &CmdBuffer));
     }
 
-    HalOcaInterface::OnDispatch(CmdBuffer, *pOsContext, *pRenderHal->pMhwMiInterface, *pMmioRegisters);
+    HalOcaInterface::OnDispatch(CmdBuffer, *pOsInterface, *pRenderHal->pMhwMiInterface, *pMmioRegisters);
 
     //---------------------------------
     // Send CMD: Vebox_DI_IECP
@@ -2160,9 +2155,9 @@ MOS_STATUS VPHAL_VEBOX_STATE::VeboxRenderVeboxCmd(
             &FlushDwParams));
     }
 
-    VPHAL_RENDER_CHK_STATUS(NullHW::StopPredicate(pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(NullHW::StopPredicate(pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
 
-    VPHAL_RENDER_CHK_STATUS(pPerfProfiler->AddPerfCollectEndCmd((void*)pRenderHal, pOsInterface, pRenderHal->pMhwMiInterface, &CmdBuffer));
+    VPHAL_RENDER_CHK_STATUS(pRenderHal->pRenderHalPltInterface->AddPerfCollectEndCmd(pRenderHal, pOsInterface, &CmdBuffer));
 
     HalOcaInterface::On1stLevelBBEnd(CmdBuffer, *pOsInterface);
 
@@ -2357,23 +2352,34 @@ void VPHAL_VEBOX_STATE::VeboxSetCommonRenderingFlags(
 
     pRenderData->bProgressive   = (pSrc->SampleType == SAMPLE_PROGRESSIVE);
 
-    pRenderData->bDenoise       = (pSrc->pDenoiseParams                         &&
-                                  (pSrc->pDenoiseParams->bEnableLuma            ||
-                                   pSrc->pDenoiseParams->bEnableSlimIPUDenoise  ||
-                                   pSrc->pDenoiseParams->bEnableHVSDenoise)     &&
-                                   pVeboxState->IsDnFormatSupported(pSrc));
+    if (IsDnDisabled())
+    {
+        pRenderData->bDenoise = false;
+        pRenderData->bChromaDenoise = false;
+#if VEBOX_AUTO_DENOISE_SUPPORTED
+        pRenderData->bAutoDenoise   = false;
+#endif
+    }
+    else
+    {
+        pRenderData->bDenoise = (pSrc->pDenoiseParams &&
+                                 (pSrc->pDenoiseParams->bEnableLuma ||
+                                     pSrc->pDenoiseParams->bEnableSlimIPUDenoise ||
+                                     pSrc->pDenoiseParams->bEnableHVSDenoise) &&
+                                 pVeboxState->IsDnFormatSupported(pSrc));
 
-    pRenderData->bChromaDenoise = (pSrc->pDenoiseParams                 &&
-                                   pSrc->pDenoiseParams->bEnableChroma  &&
-                                   pSrc->pDenoiseParams->bEnableLuma    &&
-                                   pVeboxState->IsDnFormatSupported(pSrc));
+        pRenderData->bChromaDenoise = (pSrc->pDenoiseParams &&
+                                       pSrc->pDenoiseParams->bEnableChroma &&
+                                       pSrc->pDenoiseParams->bEnableLuma &&
+                                       pVeboxState->IsDnFormatSupported(pSrc));
 
 #if VEBOX_AUTO_DENOISE_SUPPORTED
-    pRenderData->bAutoDenoise   = (pRenderData->bDenoise                &&
-                                   pSrc->pDenoiseParams                 &&
-                                   pSrc->pDenoiseParams->bAutoDetect    &&
-                                   pVeboxState->IsDnFormatSupported(pSrc));
+        pRenderData->bAutoDenoise = (pRenderData->bDenoise &&
+                                     pSrc->pDenoiseParams &&
+                                     pSrc->pDenoiseParams->bAutoDetect &&
+                                     pVeboxState->IsDnFormatSupported(pSrc));
 #endif
+    }
 
     // Free dDenoiseParams when DN don`t support source format
     // to avoid the possible using by mistake, 8 alignement for DN in renderhal
@@ -3619,6 +3625,7 @@ MOS_STATUS VPHAL_VEBOX_STATE::Render(
     MOS_STATUS               eStatus;
     PVPHAL_VEBOX_RENDER_DATA pRenderData;
     bool                     bRender;
+    bool                     bDIVeboxBypass;
     PVPHAL_VEBOX_STATE       pVeboxState = this;
     PVPHAL_SURFACE           pSrcSurface;
     PVPHAL_SURFACE           pOutputSurface;
@@ -3637,6 +3644,7 @@ MOS_STATUS VPHAL_VEBOX_STATE::Render(
     pOsInterface            = pVeboxState->m_pOsInterface;
     eStatus                 = MOS_STATUS_SUCCESS;
     bRender                 = false;
+    bDIVeboxBypass          = false;
     pRenderData             = pVeboxState->GetLastExecRenderData();
 
     VPHAL_DBG_STATE_DUMPPER_SET_CURRENT_STAGE(VPHAL_DBG_STAGE_VEBOX);
@@ -3650,7 +3658,8 @@ MOS_STATUS VPHAL_VEBOX_STATE::Render(
         if (IS_VPHAL_OUTPUT_PIPE_SFC(pRenderData) &&
             pRenderData->bDeinterlace)                // Vebox + SFC
         {
-            pSrcSurface = GetOutputSurfForDiSameSampleWithSFC(pSrcSurface);
+            bDIVeboxBypass = true;
+            pSrcSurface    = GetOutputSurfForDiSameSampleWithSFC(pSrcSurface);
         }
         else
         {
@@ -3791,8 +3800,18 @@ finish:
         SET_VPHAL_OUTPUT_PIPE(pRenderData, VPHAL_OUTPUT_PIPE_MODE_COMP);
     }
     m_reporting->GetFeatures().outputPipeMode = pRenderData->OutputPipe;
-    m_reporting->GetFeatures().veFeatureInUse = !pRenderData->bVeboxBypass;
     m_reporting->GetFeatures().diScdMode      = pRenderData->VeboxDNDIParams.bSyntheticFrame;
+
+    // DI with ref 2nd filed use SFC output
+    // Update VEBOX usage report here
+    if (bDIVeboxBypass)
+    {
+        m_reporting->GetFeatures().veFeatureInUse = false;
+    }
+    else
+    {
+        m_reporting->GetFeatures().veFeatureInUse = !pRenderData->bVeboxBypass;
+    }
 
     return eStatus;
 }
@@ -4630,6 +4649,7 @@ MOS_STATUS VpHal_RndrRenderVebox(
             pRenderData->bDenoise = false;
             pRenderData->bDeinterlace = false;
             pRenderData->bQueryVariance = false;
+            pRenderData->bRefValid = false;
 
             VPHAL_RENDER_NORMALMESSAGE("2nd pass sfc scaling ratio x = %f, y = %f",
               (long)((pInSurface->rcDst.right - pInSurface->rcDst.left) / (pInSurface->rcSrc.right - pInSurface->rcSrc.left)),

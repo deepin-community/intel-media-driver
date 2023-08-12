@@ -30,8 +30,9 @@
 #ifndef __MEDIA_SCALABILITY_MULTIPIPE_H__
 #define __MEDIA_SCALABILITY_MULTIPIPE_H__
 #include "mos_defs.h"
-#include "mos_os.h"
 #include "media_scalability.h"
+class MediaContext;
+class MhwMiInterface;
 
 class MediaScalabilityMultiPipe: public MediaScalability
 {
@@ -57,5 +58,7 @@ protected:
     inline bool IsLastPipe() { return (m_currentPipe == (m_pipeNum - 1)) ? true : false; }
 
     inline bool IsPipeReadyToSubmit() { return (m_currentPipe == (m_pipeIndexForSubmit - 1)) ? true : false; }
+
+MEDIA_CLASS_DEFINE_END(MediaScalabilityMultiPipe)
 };
 #endif // !__MEDIA_SCALABILITY_MULTIPIPE_H__

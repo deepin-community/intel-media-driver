@@ -20,7 +20,7 @@
 * OTHER DEALINGS IN THE SOFTWARE.
 */
 //!
-//! \file      codechal_decode_avc_g11.cpp
+//! \file      codechal_decode_avc_g12.cpp
 //! \brief     This modules implements Render interface layer for AVC decoding to be used on all operating systems/DDIs, across CODECHAL components.
 //!
 
@@ -31,6 +31,7 @@
 #include "mhw_vdbox_mfx_g12_X.h"
 #include "codechal_mmc_decode_avc_g12.h"
 #include "hal_oca_interface.h"
+#include "mos_os_cp_interface_specific.h"
 
 MOS_STATUS CodechalDecodeAvcG12::AllocateStandard(
     CodechalSetting *          settings)
@@ -119,6 +120,12 @@ MOS_STATUS CodechalDecodeAvcG12::InitMmcState()
     m_mmc = MOS_New(CodechalMmcDecodeAvcG12, m_hwInterface, this);
     CODECHAL_DECODE_CHK_NULL_RETURN(m_mmc);
 #endif
+
+    if (m_osInterface->pfnIsMismatchOrderProgrammingSupported())
+    {
+        m_mmc->SetMmcDisabled();
+    }
+
     return MOS_STATUS_SUCCESS;
 }
 
@@ -418,8 +425,10 @@ MOS_STATUS CodechalDecodeAvcG12::DecodePrimitiveLevel()
         m_debugInterface->DetectCorruptionHw(m_hwInterface, &m_frameCountTypeBuf, curIdx, frameCrcOffset, vSemaResource, &cmdBuffer, m_frameNum);
     }
 #endif
-
-    CODECHAL_DECODE_CHK_STATUS_RETURN(m_miInterface->AddMiBatchBufferEnd(&cmdBuffer, nullptr));
+    if (!m_osInterface->pfnIsMismatchOrderProgrammingSupported())
+    {
+        CODECHAL_DECODE_CHK_STATUS_RETURN(m_miInterface->AddMiBatchBufferEnd(&cmdBuffer, nullptr));
+    }
 
     m_osInterface->pfnReturnCommandBuffer(m_osInterface, &cmdBuffer, 0);
 
@@ -455,6 +464,7 @@ MOS_STATUS CodechalDecodeAvcG12::DecodePrimitiveLevel()
         CodecHalDecodeSinglePipeVE_PopulateHintParams(m_veState, &cmdBuffer, true);
     }
 
+    HalOcaInterface::DumpCodechalParam(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, m_pCodechalOcaDumper, CODECHAL_AVC);
     HalOcaInterface::On1stLevelBBEnd(cmdBuffer, *m_osInterface);
 
     CODECHAL_DECODE_CHK_STATUS_RETURN(m_osInterface->pfnSubmitCommandBuffer(m_osInterface, &cmdBuffer, m_videoContextUsesNullHw));
@@ -548,7 +558,7 @@ CodechalDecodeAvcG12::CodechalDecodeAvcG12(
 
     CODECHAL_DECODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, true, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
 }
 
 MOS_STATUS CodechalDecodeAvcG12::FormatAvcMonoPicture(PMOS_SURFACE surface)

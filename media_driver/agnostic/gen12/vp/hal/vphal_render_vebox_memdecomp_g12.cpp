@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2020, Intel Corporation
+* Copyright (c) 2019-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,6 +29,8 @@
 #include "mhw_vebox_hwcmd_g12_X.h"
 #include "mhw_vebox_g12_X.h"
 #include "hal_oca_interface.h"
+#include "mos_os_cp_interface_specific.h"
+#include "vp_utils.h"
 
 MediaVeboxDecompStateG12::MediaVeboxDecompStateG12() :
     MediaVeboxDecompState()
@@ -70,6 +72,10 @@ MOS_STATUS MediaVeboxDecompStateG12::RenderDecompCMD(PMOS_SURFACE surface)
     veboxInterface = m_veboxInterface;
 
     m_osInterface->pfnSetGpuContext(m_osInterface, MOS_GPU_CONTEXT_VEBOX);
+    if (m_syncResource)
+    {
+        VPHAL_MEMORY_DECOMP_CHK_STATUS_RETURN(m_osInterface->pfnRegisterResource(m_osInterface, m_syncResource, true, true));
+    }
 
     // Reset allocation list and house keeping
     m_osInterface->pfnResetOsStates(m_osInterface);
@@ -117,7 +123,7 @@ MOS_STATUS MediaVeboxDecompStateG12::RenderDecompCMD(PMOS_SURFACE surface)
         &cmdBuffer,
         &mhwVeboxSurfaceStateCmdParams));
 
-    HalOcaInterface::OnDispatch(cmdBuffer, *pOsContext, *m_mhwMiInterface, *pMmioRegisters);
+    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *m_mhwMiInterface, *pMmioRegisters);
 
     //---------------------------------
     // Send CMD: Vebox_Tiling_Convert
@@ -166,21 +172,16 @@ MOS_STATUS MediaVeboxDecompStateG12::RenderDecompCMD(PMOS_SURFACE surface)
 
 MOS_STATUS MediaVeboxDecompStateG12::IsVeboxDecompressionEnabled()
 {
-    MOS_USER_FEATURE_VALUE_DATA         UserFeatureData;
+    bool                                customValue = true;
     MOS_STATUS                          eStatus = MOS_STATUS_SUCCESS;
 
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    UserFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
-
-    UserFeatureData.bData = true;
-
-    MOS_USER_FEATURE_INVALID_KEY_ASSERT(MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __VPHAL_ENABLE_VEBOX_MMC_DECOMPRESS_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext));
-
-    m_veboxMMCResolveEnabled = UserFeatureData.bData ? true: false;
+    ReadUserSetting(
+        m_userSettingPtr,
+        m_veboxMMCResolveEnabled,
+        __VPHAL_ENABLE_VEBOX_MMC_DECOMPRESS,
+        MediaUserSetting::Group::Device,
+        customValue,
+        true);
 
     return eStatus;
 }
@@ -323,7 +324,7 @@ MOS_STATUS MediaVeboxDecompStateG12::VeboxSendVeboxTileConvertCMD(
     veboxOutputSurfCtrlBits.DW0.IndexToMemoryObjectControlStateMocsTables =
         (m_osInterface->pfnCachePolicyGetMemoryObject(
             MOS_MP_RESOURCE_USAGE_DEFAULT,
-            m_osInterface->pfnGetGmmClientContext(m_osInterface))).DwordValue >> 1; //Need shift 1 bit for resvered bit
+            m_osInterface->pfnGetGmmClientContext(m_osInterface))).Gen12.Index;
 
     // Set Input surface compression status
     if (inputSurface->CompressionMode != MOS_MMC_DISABLED)
@@ -397,6 +398,8 @@ MOS_STATUS MediaVeboxDecompStateG12::VeboxSendVeboxTileConvertCMD(
         break;
     }
 
+    InitMocsParams(ResourceParams, &cmd.DW1_2.Value[0], 1, 6);
+
     ResourceParams.presResource = &inputSurface->OsResource;
     ResourceParams.HwCommandType = MOS_VEBOX_TILING_CONVERT;
 
@@ -408,6 +411,7 @@ MOS_STATUS MediaVeboxDecompStateG12::VeboxSendVeboxTileConvertCMD(
     VPHAL_MEMORY_DECOMP_CHK_STATUS_RETURN(m_veboxInterface->pfnAddResourceToCmd(m_osInterface, cmdBuffer, &ResourceParams));
 
     MOS_ZeroMemory(&ResourceParams, sizeof(MHW_RESOURCE_PARAMS));
+    InitMocsParams(ResourceParams, &cmd.DW3_4.Value[0], 1, 6);
 
     if (outputSurface)
     {
@@ -428,7 +432,7 @@ MOS_STATUS MediaVeboxDecompStateG12::VeboxSendVeboxTileConvertCMD(
         (outputSurface != nullptr ? outputSurface->dwOffset : inputSurface->dwOffset) + veboxOutputSurfCtrlBits.DW0.Value;
     m_veboxInterface->pfnAddResourceToCmd(m_osInterface, cmdBuffer, &ResourceParams);
 
-    Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize);
+    m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize);
 
     return eStatus;
 }

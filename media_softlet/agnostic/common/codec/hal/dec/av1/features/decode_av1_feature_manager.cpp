@@ -39,7 +39,7 @@ namespace decode
 
         DECODE_CHK_STATUS(DecodeFeatureManager::CreateFeatures(codecSettings));
 
-        Av1BasicFeature *decBasic = MOS_New(Av1BasicFeature, m_allocator, m_hwInterface);
+        Av1BasicFeature *decBasic = MOS_New(Av1BasicFeature, m_allocator, m_hwInterface, m_osInterface);
         DECODE_CHK_STATUS(RegisterFeatures(FeatureIDs::basicFeature, decBasic));
 
         return MOS_STATUS_SUCCESS;

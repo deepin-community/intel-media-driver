@@ -28,6 +28,9 @@
 #define __MEDIA_SFC_RENDER_H__
 
 #include "mos_os_specific.h"
+#include "mhw_vebox_itf.h"
+#include "mhw_sfc_itf.h"
+#include "mhw_mi_itf.h"
 
 namespace vp
 {
@@ -71,7 +74,7 @@ public:
     //! \return   MOS_STATUS
     //!           Return MOS_STATUS_SUCCESS if supported, otherwise failed
     //!
-    MOS_STATUS IsParameterSupported(VDBOX_SFC_PARAMS &param);
+    virtual MOS_STATUS IsParameterSupported(VDBOX_SFC_PARAMS &param);
 
     //!
     //! \brief    Check whether the Parameter for VEBOX-SFC supported
@@ -81,7 +84,7 @@ public:
     //! \return   MOS_STATUS
     //!           Return MOS_STATUS_SUCCESS if supported, otherwise failed
     //!
-    MOS_STATUS IsParameterSupported(VEBOX_SFC_PARAMS &param);
+    virtual MOS_STATUS IsParameterSupported(VEBOX_SFC_PARAMS &param);
 
     //!
     //! \brief    Render Vdbox-SFC States
@@ -113,6 +116,8 @@ public:
     //!
     virtual MOS_STATUS Initialize();
 
+    bool IsInitialized() { return m_initialized; }
+
 protected:
     MOS_STATUS InitScalingParams(vp::FeatureParamScaling &scalingParams, VDBOX_SFC_PARAMS &sfcParam);
     MOS_STATUS InitScalingParams(vp::FeatureParamScaling &scalingParams, VEBOX_SFC_PARAMS &sfcParam);
@@ -122,14 +127,16 @@ protected:
     vp::VpPipeline          *m_vpPipeline           = nullptr;
     _RENDERHAL_INTERFACE    *m_renderHal            = nullptr;
     MhwCpInterface          *m_cpInterface          = nullptr;
-    MhwSfcInterface         *m_sfcInterface         = nullptr;
-    MhwVeboxInterface       *m_veboxInterface       = nullptr;
     _VPHAL_STATUS_TABLE     *m_statusTable          = nullptr;
     PMOS_INTERFACE          m_osInterface           = nullptr;
     MediaVdboxSfcRender     *m_vdboxSfcRender       = nullptr;
     bool                    m_initialized           = false;
     MEDIA_SFC_INTERFACE_MODE m_mode                 = {};
     MediaMemComp            *m_mmc                  = nullptr;
+    std::shared_ptr<mhw::vebox::Itf> m_veboxItf     = nullptr;
+    std::shared_ptr<mhw::sfc::Itf>   m_sfcItf       = nullptr;
+    std::shared_ptr<mhw::mi::Itf>    m_miItf        = nullptr;
+MEDIA_CLASS_DEFINE_END(MediaSfcRender)
 };
 
 #endif // __MEDIA_SFC_RENDER_H__

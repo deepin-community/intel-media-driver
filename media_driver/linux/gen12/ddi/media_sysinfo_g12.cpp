@@ -1,6 +1,6 @@
 /*===================== begin_copyright_notice ==================================
 
-Copyright (c) 2017-2020, Intel Corporation
+Copyright (c) 2017-2021, Intel Corporation
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
@@ -31,7 +31,7 @@ OTHER DEALINGS IN THE SOFTWARE.
 #include "linux_skuwa_debug.h"
 #include "linux_media_skuwa.h"
 #include "linux_shadow_skuwa.h"
-#include "mos_utilities.h"
+#include "media_user_setting_specific.h"
 
 //extern template class DeviceInfoFactory<GfxDeviceInfo>;
 typedef DeviceInfoFactory<GfxDeviceInfo> base_fact;
@@ -116,7 +116,7 @@ static bool InitTglShadowSku(struct GfxDeviceInfo *devInfo,
         nullptr,
         __MEDIA_USER_FEATURE_VALUE_DISABLE_MMC_ID,
         &userFeatureData,
-        nullptr);
+        (MOS_CONTEXT_HANDLE)nullptr);
     if (userFeatureData.bData)
     {
         disableMMC = true;
@@ -159,6 +159,10 @@ static bool InitTglShadowWa(struct GfxDeviceInfo *devInfo,
     //source and recon surfaces need to be aligned to the LCU size
     waTable->WaAlignYUVResourceToLCU = 1;
 
+    /* For TGLLP and derivative platforms HW supports both 16K and 64K Aux granularity, POR mode is 64K. On all aux based
+    platforms (where FtrFlaPhysCCS = 0) WaAuxTable64KGranular is expected to be set. */
+    waTable->WaAuxTable64KGranular = 1;
+
     return true;
 }
 
@@ -182,6 +186,7 @@ static struct GfxDeviceInfo tgllpGt1Info = {
     .productFamily = IGFX_TIGERLAKE_LP,
     .displayFamily = IGFX_GEN12_CORE,
     .renderFamily  = IGFX_GEN12_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT1,
     .L3CacheSizeInKb = 0,
     .L3BankCount   = 4,
@@ -202,6 +207,7 @@ static struct GfxDeviceInfo tgllpGt2Info = {
     .productFamily = IGFX_TIGERLAKE_LP,
     .displayFamily = IGFX_GEN12_CORE,
     .renderFamily  = IGFX_GEN12_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT2,
     .L3CacheSizeInKb = 0,
     .L3BankCount   = 8,
@@ -223,6 +229,7 @@ static struct GfxDeviceInfo dg1Gt2Info = {
     .productFamily = IGFX_DG1,
     .displayFamily = IGFX_GEN12_CORE,
     .renderFamily  = IGFX_GEN12_CORE,
+    .mediaFamily   = IGFX_UNKNOWN_CORE,
     .eGTType       = GTTYPE_GT2,
     .L3CacheSizeInKb = 0,
     .L3BankCount   = 8,
@@ -249,6 +256,9 @@ static bool dg1Gt2Device4907 = DeviceInfoFactory<GfxDeviceInfo>::
 
 static bool dg1Gt2Device4908 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x4908, &dg1Gt2Info);
+
+static bool dg1Gt2Device4909 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x4909, &dg1Gt2Info);
 #endif
 
 #ifdef IGFX_GEN12_RKL_SUPPORTED
@@ -257,6 +267,7 @@ static struct GfxDeviceInfo rklGt1Info = {
     .productFamily    = IGFX_ROCKETLAKE,
     .displayFamily    = IGFX_GEN12_CORE,
     .renderFamily     = IGFX_GEN12_CORE,
+    .mediaFamily      = IGFX_UNKNOWN_CORE,
     .eGTType          = GTTYPE_GT1,
     .L3CacheSizeInKb  = 0,
     .L3BankCount      = 4,
@@ -277,6 +288,7 @@ static struct GfxDeviceInfo rklGt1fInfo = {
     .productFamily    = IGFX_ROCKETLAKE,
     .displayFamily    = IGFX_GEN12_CORE,
     .renderFamily     = IGFX_GEN12_CORE,
+    .mediaFamily      = IGFX_UNKNOWN_CORE,
     .eGTType          = GTTYPE_GT0_5,
     .L3CacheSizeInKb  = 0,
     .L3BankCount      = 4,
@@ -317,6 +329,7 @@ static struct GfxDeviceInfo adlsGt1Info = {
     .productFamily    = IGFX_ALDERLAKE_S,
     .displayFamily    = IGFX_GEN12_CORE,
     .renderFamily     = IGFX_GEN12_CORE,
+    .mediaFamily      = IGFX_UNKNOWN_CORE,
     .eGTType          = GTTYPE_GT1,
     .L3CacheSizeInKb  = 0,
     .L3BankCount      = 4,
@@ -338,6 +351,7 @@ static struct GfxDeviceInfo adlsGt1fInfo = {
     .productFamily    = IGFX_ALDERLAKE_S,
     .displayFamily    = IGFX_GEN12_CORE,
     .renderFamily     = IGFX_GEN12_CORE,
+    .mediaFamily      = IGFX_UNKNOWN_CORE,
     .eGTType          = GTTYPE_GT0_5,
     .L3CacheSizeInKb  = 0,
     .L3BankCount      = 4,
@@ -366,6 +380,9 @@ static bool adlsGt1Device4682 = DeviceInfoFactory<GfxDeviceInfo>::
 static bool adlsGt1Device4683 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x4683, &adlsGt1fInfo);
 
+static bool adlsGt1Device4688 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x4688, &adlsGt1Info);
+
 static bool adlsGt1Device4690 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x4690, &adlsGt1Info);
 
@@ -378,6 +395,30 @@ static bool adlsGt1Device4692 = DeviceInfoFactory<GfxDeviceInfo>::
 static bool adlsGt1Device4693 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x4693, &adlsGt1Info);
 
+static bool rplsGt1DeviceA780 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA780, &adlsGt1Info);
+
+static bool rplsGt1DeviceA781 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA781, &adlsGt1Info);
+
+static bool rplsGt1DeviceA782 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA782, &adlsGt1Info);
+
+static bool rplsGt1DeviceA783 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA783, &adlsGt1Info);
+
+static bool rplsGt1DeviceA788 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA788, &adlsGt1Info);
+
+static bool rplsGt1DeviceA789 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA789, &adlsGt1Info);
+
+static bool rplsGt1DeviceA78A = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA78A, &adlsGt1Info);
+
+static bool rplsGt1DeviceA78B = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA78B, &adlsGt1Info);
+
 #endif
 
 
@@ -387,6 +428,7 @@ static struct GfxDeviceInfo adlpGt2Info = {
     .productFamily    = IGFX_ALDERLAKE_P,
     .displayFamily    = IGFX_GEN12_CORE,
     .renderFamily     = IGFX_GEN12_CORE,
+    .mediaFamily      = IGFX_UNKNOWN_CORE,
     .eGTType          = GTTYPE_GT2,
     .L3CacheSizeInKb  = 0,
     .L3BankCount      = 8,
@@ -413,17 +455,13 @@ static bool adlpGt2Device46A2 = DeviceInfoFactory<GfxDeviceInfo>::
 
 static bool adlpGt2Device46A3 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46A3, &adlpGt2Info);
-    
+
 static bool adlpGt2Device46A6 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46A6, &adlpGt2Info);
-    
-static bool adlpGt2Device46A8 = DeviceInfoFactory<GfxDeviceInfo>::
-    RegisterDevice(0x46A8, &adlpGt2Info);
-    
-static bool adlpGt2Device4628 = DeviceInfoFactory<GfxDeviceInfo>::
-    RegisterDevice(0x4628, &adlpGt2Info);
-    
-    
+
+static bool adlpGt2Device4626 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x4626, &adlpGt2Info);
+
 static bool adlpGt2Device46B0 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46B0, &adlpGt2Info);
 
@@ -435,7 +473,12 @@ static bool adlpGt2Device46B2 = DeviceInfoFactory<GfxDeviceInfo>::
 
 static bool adlpGt2Device46B3 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46B3, &adlpGt2Info);
-    
+
+static bool adlpGt2Device46A8 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x46A8, &adlpGt2Info);
+
+static bool adlpGt2Device4628 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x4628, &adlpGt2Info);
 
 static bool adlpGt2Device46C0 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46C0, &adlpGt2Info);
@@ -448,17 +491,64 @@ static bool adlpGt2Device46C2 = DeviceInfoFactory<GfxDeviceInfo>::
 
 static bool adlpGt2Device46C3 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46C3, &adlpGt2Info);
-    
+
 static bool adlpGt2Device46AA = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x46AA, &adlpGt2Info);
-    
+
 static bool adlpGt2Device462A = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x462A, &adlpGt2Info);
 
-static bool adlpGt2Device4626 = DeviceInfoFactory<GfxDeviceInfo>::
-    RegisterDevice(0x4626, &adlpGt2Info);
+static bool rplpGt2DeviceA7A0 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA7A0, &adlpGt2Info);
 
+static bool rplpGt2DeviceA720 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA720, &adlpGt2Info);
+
+static bool rplpGt2DeviceA7A8 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA7A8, &adlpGt2Info);
+
+static bool rplpGt2DeviceA7A1 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA7A1, &adlpGt2Info);
+
+static bool rplpGt2DeviceA721 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA721, &adlpGt2Info);
+
+static bool rplpGt2DeviceA7A9 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0xA7A9, &adlpGt2Info);
 #endif
+
+#ifdef IGFX_GEN12_ADLN_SUPPORTED
+static struct GfxDeviceInfo adlnGt1Info = {
+    .platformType     = PLATFORM_MOBILE,
+    .productFamily    = IGFX_ALDERLAKE_N,
+    .displayFamily    = IGFX_GEN12_CORE,
+    .renderFamily     = IGFX_GEN12_CORE,
+    .mediaFamily      = IGFX_UNKNOWN_CORE,
+    .eGTType          = GTTYPE_GT1,
+    .L3CacheSizeInKb  = 0,
+    .L3BankCount      = 8,
+    .EUCount          = 0,
+    .SliceCount       = 0,
+    .SubSliceCount    = 0,
+    .MaxEuPerSubSlice = 0,
+    .isLCIA           = 0,
+    .hasLLC           = 0,
+    .hasERAM          = 0,
+    .InitMediaSysInfo = InitTglMediaSysInfo,
+    .InitShadowSku    = InitTglShadowSku,
+    .InitShadowWa     = InitTglShadowWa,
+};
+
+static bool adlnGt1Device46D0 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x46D0, &adlnGt1Info);
+
+static bool adlnGt1Device46D1 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x46D1, &adlnGt1Info);
+
+static bool adlnGt1Device46D2 = DeviceInfoFactory<GfxDeviceInfo>::
+    RegisterDevice(0x46D2, &adlnGt1Info);
+#endif 
+
 
 static bool tgllpGt2Device9a40 = DeviceInfoFactory<GfxDeviceInfo>::
     RegisterDevice(0x9A40, &tgllpGt2Info);

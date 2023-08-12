@@ -42,8 +42,8 @@
 #include "cm_thread_space.h"
 #include "cm_vebox.h"
 #include "cm_type.h"
-using namespace CMRT_UMD;
 
+using namespace CMRT_UMD;
 
 //!
 //! \brief    Creates a CmDevice from a MOS context.
@@ -56,13 +56,16 @@ using namespace CMRT_UMD;
 //!           [in,out] reference to the pointer to the CmDevice.
 //! \param    devCreateOption
 //!           [in] option to customize CmDevice.
+//! \param    priority
+//!           [in] priority for queue.
 //! \retval   CM_SUCCESS if the CmDevice is successfully created.
 //! \retval   CM_NULL_POINTER if pMosContext is null.
 //! \retval   CM_FAILURE otherwise.
 //!
 CM_RT_API int32_t CreateCmDevice(MOS_CONTEXT *mosContext,
-                                 CmDevice* &device,
-                                 uint32_t devCreateOption);
+                                 CmDevice *&  device,
+                                 uint32_t devCreateOption,
+                                 uint8_t  priority = CM_DEVICE_CREATE_PRIORITY_DEFAULT);
 
 //!
 //! \brief    Destroys the CmDevice. 

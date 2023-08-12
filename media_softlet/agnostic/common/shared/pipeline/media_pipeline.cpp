@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -30,10 +30,19 @@
 #include "media_pipeline.h"
 #include "media_cmd_task.h"
 #include "media_packet.h"
-#include "media_interfaces_mcpy.h"
+#include "media_interfaces_mcpy_next.h"
+#include "media_debug_interface.h"
 
 MediaPipeline::MediaPipeline(PMOS_INTERFACE osInterface) : m_osInterface(osInterface)
 {
+    if (m_osInterface)
+    {
+        m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    }
+    if (!m_userSettingPtr)
+    {
+        MOS_OS_NORMALMESSAGE("Initialize m_userSettingPtr instance failed!");
+    }
     MediaPerfProfiler *perfProfiler = MediaPerfProfiler::Instance();
     if (!perfProfiler)
     {
@@ -50,10 +59,10 @@ MediaPipeline::~MediaPipeline()
     DeletePackets();
     DeleteTasks();
 
-    MOS_Delete(m_mediaCopy);
-
-    CODECHAL_DEBUG_TOOL(MOS_Delete(m_debugInterface));
-
+    MOS_Delete(m_mediaCopyWrapper);
+#if !EMUL
+    MEDIA_DEBUG_TOOL(MOS_Delete(m_debugInterface));
+#endif
     MediaPerfProfiler *perfProfiler = MediaPerfProfiler::Instance();
 
     if (!perfProfiler)
@@ -64,6 +73,10 @@ MediaPipeline::~MediaPipeline()
     {
         MediaPerfProfiler::Destroy(perfProfiler, (void *)this, m_osInterface);
     }
+
+#if MHW_HWCMDPARSER_ENABLED
+    mhw::HwcmdParser::DestroyInstance();
+#endif
 }
 
 MOS_STATUS MediaPipeline::DeletePackets()
@@ -101,7 +114,10 @@ MOS_STATUS MediaPipeline::InitPlatform()
 MOS_STATUS MediaPipeline::UserFeatureReport()
 {
 #if (_DEBUG || _RELEASE_INTERNAL)
-    WriteUserFeature(__MEDIA_USER_FEATURE_VALUE_APOGEIOS_ENABLE_ID, 1, m_osInterface->pOsContext);
+    ReportUserSetting(m_userSettingPtr,
+                      __MEDIA_USER_FEATURE_VALUE_APOGEIOS_ENABLE,
+                      uint32_t(1),
+                      MediaUserSetting::Group::Device);
 #endif
     return MOS_STATUS_SUCCESS;
 }
@@ -123,17 +139,41 @@ MOS_STATUS MediaPipeline::RegisterPacket(uint32_t packetId, MediaPacket *packet)
     return MOS_STATUS_SUCCESS;
 }
 
-MOS_STATUS MediaPipeline::ActivatePacket(uint32_t packetId, bool immediateSubmit, uint16_t pass, uint8_t pipe, uint8_t pipeNum, uint8_t subPass, uint8_t rowNum)
+MediaPacket *MediaPipeline::GetOrCreate(uint32_t packetId)
 {
     auto iter = m_packetList.find(packetId);
-    if (iter == m_packetList.end())
+    if (iter != m_packetList.end())
     {
-        return MOS_STATUS_INVALID_PARAMETER;
+        return iter->second;
+    }
+
+    auto iterCreator = m_packetCreators.find(packetId);
+    if (iterCreator != m_packetCreators.end())
+    {
+        RegisterPacket(packetId, iterCreator->second());
+
+        iter = m_packetList.find(packetId);
+        if (iter != m_packetList.end())
+        {
+            iter->second->Init();
+            return iter->second;
+        }
+    }
+
+    return nullptr;
+}
+
+MOS_STATUS MediaPipeline::ActivatePacket(uint32_t packetId, bool immediateSubmit, uint16_t pass, uint8_t pipe, uint8_t pipeNum, uint8_t subPass, uint8_t rowNum)
+{
+    auto packet = GetOrCreate(packetId);
+    if (packet == nullptr)
+    {
+        return MOS_STATUS_NULL_POINTER;
     }
 
     PacketProperty prop;
-    prop.packetId        = iter->first;
-    prop.packet          = iter->second;
+    prop.packetId        = packetId;
+    prop.packet          = packet;
     prop.immediateSubmit = immediateSubmit;
 
     prop.stateProperty.currentPass        = pass;
@@ -200,8 +240,6 @@ MediaTask *MediaPipeline::CreateTask(MediaTask::TaskType type)
     case MediaTask::TaskType::cmdTask:
         task = MOS_New(CmdTask, m_osInterface);
         break;
-    case MediaTask::TaskType::mdfTask:
-        break;
     default:
         break;
     }
@@ -239,15 +277,20 @@ MOS_STATUS MediaPipeline::CreateFeatureManager()
     }
 }
 
-MOS_STATUS MediaPipeline::CreateMediaCopy()
+MOS_STATUS MediaPipeline::CreateMediaCopyWrapper()
 {
-    PMOS_CONTEXT mos_context = nullptr;
-    if (m_osInterface && m_osInterface->pfnGetMosContext)
+    if (nullptr == m_mediaCopyWrapper)
     {
-        m_osInterface->pfnGetMosContext(m_osInterface, &mos_context);
+        m_mediaCopyWrapper = MOS_New(MediaCopyWrapper, m_osInterface);
     }
-    m_mediaCopy = static_cast<MediaCopyBaseState*>(McpyDevice::CreateFactory(mos_context));
-    return MOS_STATUS_SUCCESS;
+    if (nullptr != m_mediaCopyWrapper)
+    {
+        return MOS_STATUS_SUCCESS;
+    }
+    else
+    {
+        return MOS_STATUS_NO_SPACE;
+    }
 }
 
 bool MediaPipeline::IsFrameTrackingEnabled()

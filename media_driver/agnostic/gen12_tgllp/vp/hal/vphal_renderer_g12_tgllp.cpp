@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017-2021, Intel Corporation
+* Copyright (c) 2017-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -25,7 +25,7 @@
 //! \details  The top renderer is responsible for coordinating the sequence of calls to low level renderers, e.g. DNDI or Comp
 //!
 #include "vphal_renderer_g12_tgllp.h"
-#include "vphal_debug.h"
+#include "vp_debug.h"
 #if defined(ENABLE_KERNELS)
 #include "igvpkrn_g12_tgllp_cmfc.h"
 #include "igvpkrn_g12_tgllp_cmfcpatch.h"
@@ -259,81 +259,6 @@ MOS_STATUS VphalRendererG12Tgllp::SetRenderGpuContext(VPHAL_RENDER_PARAMS& Rende
 }
 
 //!
-//! \brief    Allocate surface
-//! \details  Allocate surface according to the attributes of surface except the specified width/height/format.
-//! \param    [in] RenderParams
-//!           VPHAL render parameter
-//! \param    [in] pSurface
-//!           Pointer to the surface which specifies the attributes except the specified width/height/format.
-//! \param    [in] pAllocatedSurface
-//!           Pointer to the allocated surface.
-//! \param    [in] dwSurfaceWidth
-//!           The width of allocated surface.
-//! \param    [in] dwSurfaceHeight
-//!           The height of allocated surface.
-//! \param    [in] eFormat
-//!           The format of allocated surface.
-//! \return   MOS_STATUS
-//!           Return MOS_STATUS_SUCCESS if successful, otherwise failed
-//!
-MOS_STATUS VphalRendererG12Tgllp::AllocateSurface(
-    PCVPHAL_RENDER_PARAMS       pcRenderParams,
-    PVPHAL_SURFACE              pSurface,
-    PVPHAL_SURFACE              pAllocatedSurface,
-    uint32_t                    dwSurfaceWidth,
-    uint32_t                    dwSurfaceHeight,
-    MOS_FORMAT                  eFormat)
-{
-    MOS_STATUS eStatus                  = MOS_STATUS_SUCCESS;
-    bool bAllocated                     = false;
-
-    VPHAL_RENDER_CHK_NULL(pcRenderParams);
-    VPHAL_RENDER_CHK_NULL(pSurface);
-    VPHAL_RENDER_CHK_NULL(pAllocatedSurface);
-    VPHAL_RENDER_CHK_NULL(m_pOsInterface);
-
-    if ((dwSurfaceWidth == 0) || (dwSurfaceHeight == 0) || (eFormat == Format_Any))
-    {
-        VPHAL_RENDER_ASSERTMESSAGE("Invalid width, height, format.");
-        eStatus = MOS_STATUS_INVALID_PARAMETER;
-        goto finish;
-    }
-
-    eStatus = VpHal_ReAllocateSurface(
-        m_pOsInterface,
-        pAllocatedSurface,
-        "RenderIntermediateSurface",
-        eFormat,
-        MOS_GFXRES_2D,
-        pSurface->TileType,
-        dwSurfaceWidth,
-        dwSurfaceHeight,
-        false,
-        MOS_MMC_DISABLED,
-        &bAllocated);
-
-    if (MOS_SUCCEEDED(eStatus))
-    {
-        pAllocatedSurface->SurfType                 = SURF_IN_PRIMARY;
-        pAllocatedSurface->SampleType               = SAMPLE_PROGRESSIVE;
-        pAllocatedSurface->ColorSpace               = pSurface->ColorSpace;
-        pAllocatedSurface->ExtendedGamut            = pSurface->ExtendedGamut;
-        pAllocatedSurface->ScalingMode              = pSurface->ScalingMode;
-        pAllocatedSurface->ScalingPreference        = pSurface->ScalingPreference;
-        pAllocatedSurface->bIEF                     = false;
-        pAllocatedSurface->FrameID                  = pSurface->FrameID;
-        pAllocatedSurface->ChromaSiting             = pSurface->ChromaSiting;
-    }
-    else
-    {
-        VPHAL_PUBLIC_ASSERTMESSAGE("Failed to create surface, eStatus: %d.\n", eStatus);
-    }
-
-finish:
-    return eStatus;
-}
-
-//!
 //! \brief    Scaling function
 //! \details  The scaling function is only for scaling without other VP features.
 //!           Down scaling needs 2 pass if scaling ratio is >2 for better quality.
@@ -450,7 +375,7 @@ MOS_STATUS VphalRendererG12Tgllp::RenderScaling(
         VPHAL_RENDER_CHK_STATUS(RenderPass(&renderParams));
         m_pDSSurface[0]->rcSrc          = m_pDSSurface[0]->rcDst;
         m_pDSSurface[0]->rcMaxSrc       = m_pDSSurface[0]->rcDst;
-        m_pDSSurface[0]->rcDst          = pTarget->rcDst;
+        m_pDSSurface[0]->rcDst          = pSource->rcDst;
         pDSSurface                      = m_pDSSurface[0];
     }
 
@@ -460,7 +385,7 @@ MOS_STATUS VphalRendererG12Tgllp::RenderScaling(
         dwAllocatedWidth                = pTarget->dwWidth;
         dwAllocatedHeight               = pTarget->dwHeight;
         VPHAL_RENDER_CHK_STATUS(AllocateSurface(pRenderParams, pSource, m_pDSSurface[1], dwAllocatedWidth, dwAllocatedHeight, pSource->Format));
-        rectScalingRegion               = pTarget->rcDst;
+        rectScalingRegion               = pSource->rcDst;
         m_pDSSurface[0]->rcDst          = rectScalingRegion;
         m_pDSSurface[1]->rcDst          = rectScalingRegion;
 
@@ -471,7 +396,7 @@ MOS_STATUS VphalRendererG12Tgllp::RenderScaling(
         VPHAL_RENDER_CHK_STATUS(RenderPass(&renderParams));
         m_pDSSurface[1]->rcSrc           = m_pDSSurface[1]->rcDst;
         m_pDSSurface[1]->rcMaxSrc        = m_pDSSurface[1]->rcDst;
-        m_pDSSurface[1]->rcDst           = pTarget->rcDst;
+        m_pDSSurface[1]->rcDst           = pSource->rcDst;
         pDSSurface                       = m_pDSSurface[1];
     }
 

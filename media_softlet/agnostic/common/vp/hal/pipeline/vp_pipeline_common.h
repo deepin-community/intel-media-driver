@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,13 +28,14 @@
 #define __VP_PIPELINE_COMMON_H__
 
 #include "mos_utilities.h"
-#include "vphal_common.h"
+#include "vp_common.h"
 #include "renderhal.h"
-#include "vphal.h"
+#include "vp_base.h"
 
 namespace vp
 {
 class VpPlatformInterface;
+class VpUserFeatureControl;
 }
 
 using VP_PIPELINE_PARAMS   = VPHAL_RENDER_PARAMS;
@@ -51,37 +52,67 @@ using PCVP_PIPELINE_PARAMS = const VPHAL_RENDER_PARAMS*;
 #define VP_VEBOX_FLAG_ENABLE_KERNEL_FMD_SUMMATION          0x00000010
 
 #define RESOURCE_ASSIGNMENT_HINT_BITS_DI        \
-    uint32_t    bDi         : 1;                \
-    uint32_t    b60fpsDi    : 1;                \
+    uint32_t    bDi                 : 1;        \
+    uint32_t    b60fpsDi            : 1;
+
+#define RESOURCE_ASSIGNMENT_HINT_BITS_SCALING   \
+    uint32_t    isIScalingTypeNone  : 1;        \
+    uint32_t    isFieldWeaving      : 1;
+
+#define RESOURCE_ASSIGNMENT_HINT_BITS_HDR       \
+    uint32_t    is3DLut2DNeeded     : 1;
+
+#define RESOURCE_ASSIGNMENT_HINT_BITS_DENOISE \
+    uint32_t isHVSTableNeeded : 1;
+
+#define RESOURCE_ASSIGNMENT_HINT_BITS_STD_ALONE \
+    uint32_t isSkinScoreDumpNeededForSTDonly : 1; \
+    uint32_t isSkinScoreOutputNeededForSTDOnly : 1;
 
 #define RESOURCE_ASSIGNMENT_HINT_BITS           \
-        RESOURCE_ASSIGNMENT_HINT_BITS_DI
-#define RESOURCE_ASSIGNMENT_HINT_SIZE   2
+        RESOURCE_ASSIGNMENT_HINT_BITS_DI        \
+        RESOURCE_ASSIGNMENT_HINT_BITS_SCALING   \
+        RESOURCE_ASSIGNMENT_HINT_BITS_HDR       \
+        RESOURCE_ASSIGNMENT_HINT_BITS_DENOISE   \
+        RESOURCE_ASSIGNMENT_HINT_BITS_STD_ALONE
+
+#define RESOURCE_ASSIGNMENT_HINT_SIZE   4
+
+//!
+//! \brief Enumeration for the user feature key "Bypass Composition" values
+//!
+typedef enum _VPHAL_COMP_BYPASS_MODE
+{
+    VPHAL_COMP_BYPASS_NOT_SET  = 0xffffffff,
+    VPHAL_COMP_BYPASS_DISABLED = 0x0,
+    VPHAL_COMP_BYPASS_ENABLED  = 0x1,
+    VPHAL_COMP_BYPASS_DEFAULT  = 0x2
+} VPHAL_COMP_BYPASS_MODE, *PVPHAL_COMP_BYPASS_MODE;
 
 struct VP_SURFACE
 {
-    MOS_SURFACE                 *osSurface;         //!< mos surface
-    bool                        isResourceOwner;    //!< true if the resource is owned by current instance.
-    VPHAL_CSPACE                ColorSpace;         //!< Color Space
-    uint32_t                    ChromaSiting;       //!< ChromaSiting
+    MOS_SURFACE                 *osSurface      = nullptr;         //!< mos surface
+    bool                        isResourceOwner = false;           //!< true if the resource is owned by current instance.
+    VPHAL_CSPACE                ColorSpace      = CSpace_None;     //!< Color Space
+    uint32_t                    ChromaSiting    = 0;               //!< ChromaSiting
 
-    bool                        bQueryVariance;     //!< enable variance query. Not in use for internal surface
-    int32_t                     FrameID;            //!< Not in use for internal surface
-    bool                        ExtendedGamut;      //!< Extended Gamut Flag. Not in use for internal surface
-    VPHAL_PALETTE               Palette;            //!< Palette data. Not in use for internal surface
-    VPHAL_SURFACE_TYPE          SurfType;           //!< Surface type (context). Not in use for internal surface
-    uint32_t                    uFwdRefCount;       //!< Not in use for internal surface
-    uint32_t                    uBwdRefCount;       //!< Not in use for internal surface
-    VPHAL_SURFACE               *pFwdRef;           //!< Use VP_SURFACE instead of VPHAL_SURFACE later. Not in use for internal surface.
-    VPHAL_SURFACE               *pBwdRef;           //!< Use VP_SURFACE instead of VPHAL_SURFACE later. Not in use for internal surface.
-    VPHAL_SAMPLE_TYPE           SampleType;         //!<  Interlaced/Progressive sample type.
+    bool                        bQueryVariance  = false;     //!< enable variance query. Not in use for internal surface
+    int32_t                     FrameID         = 0;         //!< Not in use for internal surface
+    bool                        ExtendedGamut   = false;     //!< Extended Gamut Flag. Not in use for internal surface
+    VPHAL_PALETTE               Palette         = {};        //!< Palette data. Not in use for internal surface
+    VPHAL_SURFACE_TYPE          SurfType        = SURF_NONE; //!< Surface type (context). Not in use for internal surface
+    uint32_t                    uFwdRefCount    = 0;         //!< Not in use for internal surface
+    uint32_t                    uBwdRefCount    = 0;         //!< Not in use for internal surface
+    VPHAL_SURFACE               *pFwdRef        = nullptr;   //!< Use VP_SURFACE instead of VPHAL_SURFACE later. Not in use for internal surface.
+    VPHAL_SURFACE               *pBwdRef        = nullptr;   //!< Use VP_SURFACE instead of VPHAL_SURFACE later. Not in use for internal surface.
+    VPHAL_SAMPLE_TYPE            SampleType     = SAMPLE_PROGRESSIVE;  //!<  Interlaced/Progressive sample type.
     // Use index of m_InputSurfaces for layerID. No need iLayerID here anymore.
-    RECT                        rcSrc;              //!< Source rectangle
-    RECT                        rcDst;              //!< Destination rectangle
-    RECT                        rcMaxSrc;           //!< Max source rectangle
-    bool                        bVEBOXCroppingUsed; //!<Vebox crop case need use rcSrc as vebox input.
-    uint32_t                    bufferWidth;        //!< 1D buffer Width, n/a if 2D surface
-    uint32_t                    bufferHeight;       //!< 1D buffer Height, n/a if 2D surface
+    RECT                        rcSrc               = {0, 0, 0, 0};    //!< Source rectangle
+    RECT                        rcDst               = {0, 0, 0, 0};    //!< Destination rectangle
+    RECT                        rcMaxSrc            = {0, 0, 0, 0};    //!< Max source rectangle
+    bool                        bVEBOXCroppingUsed  = false;           //!<Vebox crop case need use rcSrc as vebox input.
+    uint32_t                    bufferWidth         = 0;               //!< 1D buffer Width, n/a if 2D surface
+    uint32_t                    bufferHeight        = 0;               //!< 1D buffer Height, n/a if 2D surface
 
     // Return true if no resource assigned to current vp surface.
     bool        IsEmpty();
@@ -95,10 +126,11 @@ struct VP_SURFACE
 struct _VP_SETTINGS
 {
     // For validation purpose settings
-    uint32_t               disableDnDi;                              //!< Disable DNDI(Vebox)
-    uint32_t               kernelUpdate;                             //!< For VEBox Copy and Update kernels
-    uint32_t               disableHdr;                               //!< Disable Hdr
-    uint32_t               veboxParallelExecution;                   //!< Control VEBox parallel execution with render engine
+    uint32_t               disableDnDi            = 0;                   //!< Disable DNDI(Vebox)
+    uint32_t               kernelUpdate           = 0;                   //!< For VEBox Copy and Update kernels
+    uint32_t               disableHdr             = 0;                   //!< Disable Hdr
+    uint32_t               veboxParallelExecution = 0;                   //!< Control VEBox parallel execution with render engine
+    bool                   clearVideoViewMode     = 0;                   //!< Perf Optimize for ClearVideoView DDI
 };
 
 using VP_SETTINGS = _VP_SETTINGS;
@@ -112,8 +144,13 @@ struct _VP_EXECUTE_CAPS
             uint64_t bSFC           : 1;   // SFC needed
             uint64_t bRender        : 1;   // Render Only needed
             uint64_t bSecureVebox   : 1;   // Vebox in Secure Mode
+            uint64_t bRenderHdr     : 1;   // Render HDR in use
 
             uint64_t bOutputPipeFeatureInuse : 1; // Output surface of pipeline is in use.
+            uint64_t bForceCscToRender : 1; // If true, force to use render for csc.
+            uint64_t bForceProcampToRender : 1;   // If true, force to use render for procamp.
+            uint64_t lastSubmission : 1;    // If true, it's the last submission of current DDI.
+            uint64_t bTemperalInputInuse : 1; // If true, will use temperal input instead of input
 
             // Vebox Features
             uint64_t bDN            : 1;   // Vebox DN needed
@@ -121,7 +158,7 @@ struct _VP_EXECUTE_CAPS
             uint64_t bDiProcess2ndField : 1;   // Vebox DI enabled
             uint64_t bDIFmdKernel   : 1;   // Vebox FMD Kernel enabled
             uint64_t bIECP          : 1;   // Vebox IECP needed
-            uint64_t bSTE           : 1;   // Vebox STE needed
+            uint64_t bSTE           : 1;   // Vebox STE or Vebox STD_alone needed
             uint64_t bACE           : 1;   // Vebox ACE needed
             uint64_t bTCC           : 1;   // Vebox TCC needed
             uint64_t bCGC           : 1;   // Vebox CGC needed
@@ -138,6 +175,9 @@ struct _VP_EXECUTE_CAPS
             uint64_t bDV            : 1;
             uint64_t b3DlutOutput   : 1;
             uint64_t bCappipe       : 1;
+            uint64_t bLgca          : 1;
+            uint64_t bFDFB          : 1;
+            uint64_t bColorBalance  : 1;
 
             // SFC features
             uint64_t bSfcCsc        : 1;   // Sfc Csc enabled
@@ -149,6 +189,10 @@ struct _VP_EXECUTE_CAPS
             // Render Features
             uint64_t bComposite     : 1;
             uint64_t bSR            : 1;
+            uint64_t b3DLutCalc     : 1;
+            uint64_t bHVSCalc       : 1;
+            uint64_t bSegmentation  : 1;
+            uint64_t bHdr           : 1;
         };
         uint64_t value;
     };
@@ -162,16 +206,23 @@ typedef struct _VP_EngineEntry
     {
         struct
         {
+            // set by GetXxxExecuteCaps
             uint32_t bEnabled : 1;
             uint32_t SfcNeeded : 1;
             uint32_t VeboxNeeded : 1;
             uint32_t RenderNeeded : 1;
+            uint32_t hdrKernelNeeded : 1;
             uint32_t fcSupported : 1;           // Supported by fast composition
+            uint32_t hdrKernelSupported : 1;    // Supported by Hdr Kenrel
             uint32_t isolated : 1;              // Only support single feature.
+            uint32_t bt2020ToRGB : 1;           // true if bt2020 to rgb
+
+            // set by GetXxxPipeEnginCaps
             uint32_t bypassIfVeboxSfcInUse : 1; // Bypass the feature if vebox or sfc in use. In such case, VeboxNeeded and
                                                 // SfcNeeded are 0 but it should not block vebox or sfc being selected. 
             uint32_t forceEnableForSfc : 1;     // Force enabled when sfc being selected.
-            uint32_t forceEnableForRender : 1;  // Force enabled when render being selected.
+            uint32_t forceEnableForFc  : 1;     // Force enabled when fc being selected.
+            uint32_t forceEnableForHdrKernel : 1;
             uint32_t nonFcFeatureExists : 1;    // The feature exists, which do not support fc
             uint32_t nonVeboxFeatureExists : 1; // The feature exists, which do not support vebox
             uint32_t fcOnlyFeatureExists : 1;   // The feature exists, which only support render fc, and not support vebox/sfc.
@@ -184,6 +235,12 @@ typedef struct _VP_EngineEntry
             uint32_t sfc2PassScalingNeededX : 1;
             uint32_t sfc2PassScalingNeededY : 1;
             uint32_t usedForNextPass : 1;       // true if current feature should be bypassed for current pass and be processed during next pass.
+            uint32_t sfcNotSupported : 1;       // true if sfc cannot be selected.
+            uint32_t veboxNotSupported : 1;     // true if vebox cannot be selected.
+            uint32_t isOutputPipeNeeded : 1;    // true if the feature is used for parameter calculation.
+            uint32_t sfcOnlyFeatureExists : 1;  // The feature exists, which only support sfc.
+            uint32_t bTemperalInputInuse : 1;   // true if replace input
+            uint32_t veboxRGBOutputWithoutLumaKey : 1;
         };
         uint32_t value;
     };

@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020-2021, Intel Corporation
+* Copyright (c) 2020-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -25,7 +25,7 @@
 //!           this file is for the base interface which is shared by all TCC in driver.
 //!
 #include "vp_tcc_filter.h"
-#include "vp_vebox_cmd_packet.h"
+#include "vp_vebox_cmd_packet_base.h"
 #include "hw_filter.h"
 #include "sw_filter_pipe.h"
 
@@ -189,18 +189,21 @@ bool VpVeboxTccParameter::SetPacketParam(VpCmdPacket *pPacket)
 {
     VP_FUNC_CALL();
 
-    VpVeboxCmdPacket *pVeboxPacket = dynamic_cast<VpVeboxCmdPacket *>(pPacket);
-    if (nullptr == pVeboxPacket)
+    VEBOX_TCC_PARAMS *params = m_tccFilter.GetVeboxParams();
+    if (nullptr == params)
     {
+        VP_PUBLIC_ASSERTMESSAGE("Failed to get vebox tcc params");
         return false;
     }
 
-    VEBOX_TCC_PARAMS *pParams = m_tccFilter.GetVeboxParams();
-    if (nullptr == pParams)
+    VpVeboxCmdPacketBase *packet = dynamic_cast<VpVeboxCmdPacketBase *>(pPacket);
+    if (packet)
     {
-        return false;
+        return MOS_SUCCEEDED(packet->SetTccParams(params));
     }
-    return MOS_SUCCEEDED(pVeboxPacket->SetTccParams(pParams));
+
+    VP_PUBLIC_ASSERTMESSAGE("Invalid packet for vebox csc");
+    return false;
 }
 
 MOS_STATUS VpVeboxTccParameter::Initialize(HW_FILTER_TCC_PARAM &params)

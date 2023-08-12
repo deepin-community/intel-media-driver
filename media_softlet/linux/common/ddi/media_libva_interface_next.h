@@ -29,7 +29,9 @@
 
 #include <va/va.h>
 #include <va/va_backend.h>
+#include <va/va_drmcommon.h>
 #include "media_libva_common_next.h"
+#include "ddi_media_functions.h"
 
 class MediaLibvaInterfaceNext
 {
@@ -169,6 +171,22 @@ public:
     );
 
     //!
+    //! \brief  Destroy buffer
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] buf_id
+    //!         VA buffer ID
+    //!
+    //! \return     VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus DestroyBuffer(
+        VADriverContextP    ctx,
+        VABufferID          buf_id
+    );
+
+    //!
     //! \brief  Get ready to decode a picture to a target surface
     //!
     //! \param  [in] ctx
@@ -263,8 +281,8 @@ public:
     //!
     static VAStatus QueryConfigProfiles(
         VADriverContextP  ctx,
-        VAProfile         *profile_list,
-        int32_t           *num_profiles);
+        VAProfile         *profileList,
+        int32_t           *profilesNum);
 
     //!
     //! \brief    Query all attributes for a given configuration
@@ -428,18 +446,18 @@ public:
     static VAStatus SetImagePalette(
         VADriverContextP ctx,
         VAImageID        image,
-        unsigned char   *palette);
+        unsigned char    *palette);
 
     //!
     //! \brief  Query subpicture formats
     //! 
     //! \param  [in] ctx
     //!         Pointer to VA driver context
-    //! \param  [in] format_list
+    //! \param  [in] formatList
     //!         VA image format
     //! \param  [in] flags
     //!         Flags
-    //! \param  [in] num_formats
+    //! \param  [in] formatsNum
     //!         Number of formats
     //!
     //! \return VAStatus
@@ -447,9 +465,9 @@ public:
     //!
     static VAStatus QuerySubpictureFormats(
         VADriverContextP ctx,
-        VAImageFormat   *format_list,
-        uint32_t        *flags,
-        uint32_t        *num_formats);
+        VAImageFormat    *formatList,
+        uint32_t         *flags,
+        uint32_t         *formatsNum);
     
     //!
     //! \brief  Create subpicture
@@ -467,7 +485,7 @@ public:
     static VAStatus CreateSubpicture(
         VADriverContextP ctx,
         VAImageID        image,
-        VASubpictureID  *subpicture);
+        VASubpictureID   *subpicture);
     
     //!
     //! \brief  Destroy subpicture
@@ -509,11 +527,11 @@ public:
     //!         Pointer to VA driver context
     //! \param  [in] subpicture
     //!         VA subpicture ID
-    //! \param  [in] chromakey_min
+    //! \param  [in] chromakeyMin
     //!         Minimum chroma key
-    //! \param  [in] chromakey_max
+    //! \param  [in] chromakeyMax
     //!         Maximum chroma key
-    //! \param  [in] chromakey_mask
+    //! \param  [in] chromakeyMask
     //!         Chromakey mask
     //!
     //! \return VAStatus
@@ -522,9 +540,9 @@ public:
     static VAStatus SetSubpictureChromakey(
         VADriverContextP ctx,
         VASubpictureID   subpicture,
-        uint32_t         chromakey_min,
-        uint32_t         chromakey_max,
-        uint32_t         chromakey_mask);
+        uint32_t         chromakeyMin,
+        uint32_t         chromakeyMax,
+        uint32_t         chromakeyMask);
     
     //!
     //! \brief  set subpicture global alpha
@@ -533,7 +551,7 @@ public:
     //!         Pointer to VA driver context
     //! \param  [in] subpicture
     //!         VA subpicture ID
-    //! \param  [in] global_alpha
+    //! \param  [in] globalAlpha
     //!         Global alpha
     //!
     //! \return VAStatus
@@ -542,7 +560,7 @@ public:
     static VAStatus SetSubpictureGlobalAlpha(
         VADriverContextP ctx,
         VASubpictureID   subpicture,
-        float            global_alpha);
+        float            globalAlpha);
     
     //!
     //! \brief  Associate subpicture
@@ -551,25 +569,25 @@ public:
     //!         Pointer to VA driver context
     //! \param  [in] subpicture
     //!         VA subpicture ID
-    //! \param  [in] target_surfaces
+    //! \param  [in] targetSurfaces
     //!         VA surface ID
-    //! \param  [in] num_surfaces
+    //! \param  [in] surfacesNum
     //!         Number of surfaces
-    //! \param  [in] src_x
+    //! \param  [in] srcX
     //!         Source x of the region
-    //! \param  [in] src_y
+    //! \param  [in] srcY
     //!         Source y of the region
-    //! \param  [in] src_width
+    //! \param  [in] srcWidth
     //!         Source width of the region
-    //! \param  [in] src_height
+    //! \param  [in] srcHeight
     //!         Source height of the region
-    //! \param  [in] dest_x
+    //! \param  [in] destX
     //!         Destination x
-    //! \param  [in] dest_y
+    //! \param  [in] destY
     //!         Destination y
-    //! \param  [in] dest_width
+    //! \param  [in] destWidth
     //!         Destination width
-    //! \param  [in] dest_height
+    //! \param  [in] destHeight
     //!         Destination height
     //! \param  [in] flags
     //!         Flags
@@ -580,16 +598,16 @@ public:
     static VAStatus AssociateSubpicture(
         VADriverContextP ctx,
         VASubpictureID   subpicture,
-        VASurfaceID     *target_surfaces,
-        int32_t          num_surfaces,
-        int16_t          src_x,  /* upper left offset in subpicture */
-        int16_t          src_y,
-        uint16_t         src_width,
-        uint16_t         src_height,
-        int16_t          dest_x, /* upper left offset in surface */
-        int16_t          dest_y,
-        uint16_t         dest_width,
-        uint16_t         dest_height,
+        VASurfaceID      *targetSurfaces,
+        int32_t          surfacesNum,
+        int16_t          srcX,  /* upper left offset in subpicture */
+        int16_t          srcY,
+        uint16_t         srcWidth,
+        uint16_t         srcHeight,
+        int16_t          destX, /* upper left offset in surface */
+        int16_t          destY,
+        uint16_t         destWidth,
+        uint16_t         destHeight,
         uint32_t         flags);
     
     //!
@@ -599,9 +617,9 @@ public:
     //!         Pointer to VA driver context
     //! \param  [in] subpicture
     //!         VA subpicture ID
-    //! \param  [in] target_surfaces
+    //! \param  [in] targetSurfaces
     //!         VA surface ID
-    //! \param  [in] num_surfaces
+    //! \param  [in] surfacesNum
     //!         Number of surfaces
     //!
     //! \return VAStatus
@@ -610,8 +628,8 @@ public:
     static VAStatus DeassociateSubpicture(
         VADriverContextP ctx,
         VASubpictureID   subpicture,
-        VASurfaceID     *target_surfaces,
-        int32_t          num_surfaces);
+        VASurfaceID      *targetSurfaces,
+        int32_t          surfacesNum);
     
     //!
     //! \brief  Set display attributes
@@ -621,9 +639,9 @@ public:
     //! 
     //! \param  [in] ctx
     //!         Pointer to VA driver context
-    //! \param  [in] attr_list
+    //! \param  [in] attrList
     //!         VA display attribute
-    //! \param  [in] num_attributes
+    //! \param  [in] attributesNum
     //!         Number of attributes
     //!
     //! \return VAStatus
@@ -631,8 +649,68 @@ public:
     //!
     static VAStatus SetDisplayAttributes(
         VADriverContextP    ctx,
-        VADisplayAttribute *attr_list,
-        int32_t             num_attributes);
+        VADisplayAttribute  *attrList,
+        int32_t             attributesNum);
+
+    //!
+    //! \brief  Query display attributes
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] attrList
+    //!         VA display attribute
+    //! \param  [in] attributesNum
+    //!         Number of attributes
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus QueryDisplayAttributes(
+        VADriverContextP    ctx,
+        VADisplayAttribute  *attrList,
+        int32_t             *attributesNum);
+
+    //!
+    //! \brief  Get display attributes
+    //! \details    This function returns the current attribute values in "attr_list".
+    //!         Only attributes returned with VA_DISPLAY_ATTRIB_GETTABLE set in the "flags" field
+    //!         from vaQueryDisplayAttributes() can have their values retrieved.
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] attrList
+    //!         VA display attribute
+    //! \param  [in] attributesNum
+    //!         Number of attributes
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_ERROR_UNIMPLEMENTED
+    //!
+    static VAStatus GetDisplayAttributes(
+        VADriverContextP    ctx,
+        VADisplayAttribute  *attrList,
+        int32_t             attributesNum);
+
+    //!
+    //! \brief  Convey to the server how many valid elements are in the buffer
+    //! \details    e.g. if multiple slice parameters are being held in a single buffer,
+    //!             this will communicate to the server the number of slice parameters
+    //!             that are valid in the buffer.
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] bufId
+    //!         VA buffer id
+    //! \param  [in] elementsNum
+    //!         Number of elements in buffer
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus BufferSetNumElements(
+        VADriverContextP ctx,
+        VABufferID       bufId,
+        uint32_t         elementsNum);
 
     //!
     //! \brief    Get process rate for a given config ID
@@ -728,7 +806,50 @@ public:
         VAProcPipelineCaps  *pipelineCaps
     );
 
-#ifdef MEDIA_SOFTLET
+    //!
+    //! \brief  Create an image
+    //!
+    //! \param  [in] ctx
+    //!     Driver context
+    //! \param  [in] format
+    //!     The format of image
+    //! \param  [in] width
+    //!     The width of the image
+    //! \param  [in] height
+    //!     The height of the image
+    //! \param  [out] image
+    //!     The generated image
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus CreateImage (
+        VADriverContextP  ctx,
+        VAImageFormat     *format,
+        int32_t           width,
+        int32_t           height,
+        VAImage           *image
+    );
+
+    //!
+    //! \brief  Derive image
+    //! 
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surface
+    //!         VA surface ID
+    //! \param  [in] image
+    //!         VA image
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus DeriveImage (
+        VADriverContextP  ctx,
+        VASurfaceID       surface,
+        VAImage           *image
+    );
+
     //!
     //! \brief  Create surfaces
     //!
@@ -740,7 +861,7 @@ public:
     //!         Surface height
     //! \param  [in] format
     //!         Surface format
-    //! \param  [in] surfacesName
+    //! \param  [in] surfacesNum
     //!         Number of surfaces
     //! \param  [out] surfaces
     //!         VA created surfaces
@@ -753,8 +874,278 @@ public:
         int32_t           width,
         int32_t           height,
         int32_t           format,
-        int32_t           surfacesName,
+        int32_t           surfacesNum,
         VASurfaceID       *surfaces
+    );
+
+    //!
+    //! \brief  Destroy resources associated with surfaces.
+    //! \details    Surfaces can only be destroyed after the context associated has been
+    //!             destroyed
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surfaces
+    //!         VA array of surfaces to destroy
+    //! \param  [in] surfacesNum
+    //!         Number of surfaces in the array to be destroyed
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus DestroySurfaces (
+        VADriverContextP  ctx,
+        VASurfaceID       *surfaces,
+        int32_t           surfacesNum
+    );
+
+    //!
+    //! \brief  Create surfaces2
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] format
+    //!         Surface format
+    //! \param  [in] width
+    //!         Surface width
+    //! \param  [in] height
+    //!         Surface height
+    //! \param  [out] surfaces
+    //!         VA created surfaces
+    //! \param  [in] surfacesNum
+    //!         Number of surfaces
+    //! \param  [out] attribList
+    //!         VA attrib list
+    //! \param  [in] attribsNum
+    //!         Number of attribs
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus CreateSurfaces2 (
+        VADriverContextP  ctx,
+        uint32_t          format,
+        uint32_t          width,
+        uint32_t          height,
+        VASurfaceID       *surfaces,
+        uint32_t          surfacesNum,
+        VASurfaceAttrib   *attribList,
+        uint32_t          attribsNum
+    );
+
+#if VA_CHECK_VERSION(1, 9, 0)
+    //!
+    //! \brief  Sync Surface
+    //! \details    Sync surface
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surfaceId
+    //!         VA surface id
+    //! \param  [in] timeoutNs
+    //!         time out period
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus SyncSurface2 (
+        VADriverContextP    ctx,
+        VASurfaceID         surfaceId,
+        uint64_t            timeoutNs
+    );
+
+    //!
+    //! \brief  Sync buffer
+    //! \details    This function blocks until all pending operations on the render target
+    //!             have been completed.  Upon return it is safe to use the render target for a
+    //!             different picture
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] bufId
+    //!         VA buffer id
+    //! \param  [in] timeoutNs
+    //!         time out period
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus SyncBuffer (
+        VADriverContextP  ctx,
+        VABufferID        bufId,
+        uint64_t          timeoutNs
+    );
+#endif
+
+    //!
+    //! \brief  Check for buffer info
+    //! 
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] buf_id
+    //!         VA buffer ID
+    //! \param  [out] type
+    //!         VA buffer type
+    //! \param  [out] size
+    //!         Size
+    //! \param  [out] num_elements
+    //!         Number of elements
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus BufferInfo (
+        VADriverContextP ctx,
+        VABufferID       bufId,
+        VABufferType     *type,
+        uint32_t         *size,
+        uint32_t         *elementsNum);
+
+    //!
+    //! \brief  Query surface status
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] renderTarget
+    //!         VA surface ID
+    //! \param  [out] status
+    //!         VA surface status
+    static VAStatus QuerySurfaceStatus (
+        VADriverContextP  ctx,
+        VASurfaceID       renderTarget,
+        VASurfaceStatus   *status);
+
+    //!
+    //! \brief  Get surface attributes for the supplied config.
+    //!
+    //! This function retrieves the surface attributes matching the supplied
+    //! config. The caller shall provide an \c attrib_list with all attributes
+    //! to be retrieved. Upon successful return, the attributes in \c attrib_list
+    //! are updated with the requested value. Unknown attributes or attributes
+    //! that are not supported for the given config will have their \c flags
+    //! field set to \c VA_SURFACE_ATTRIB_NOT_SUPPORTED.
+    //!
+    //! \param  [in]  ctx
+    //!         VA display
+    //! \param  [in]  config
+    //!         the config identifying a codec or a video processing pipeline
+    //! \param  [out] attribList        
+    //!         the list of attributes on output, with at least \c type fields filled in, 
+    //!         and possibly \c value fields whenever necessary.The updated list of attributes and flags on output
+    //! \param  [in] attribsNum       
+    //!         the number of attributes supplied in the \c attrib_list array
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus GetSurfaceAttributes (
+        VADriverContextP   ctx,
+        VAConfigID         config,
+        VASurfaceAttrib    *attribList,
+        uint32_t           attribsNum);
+
+    //!
+    //! \brief  Aquire buffer handle
+    //! 
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] bufId
+    //!         VA buffer ID
+    //! \param  [in] bufInfo
+    //!         VA buffer Info
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus AcquireBufferHandle (
+        VADriverContextP ctx,
+        VABufferID       bufId,
+        VABufferInfo     *bufInfo);
+
+    //!
+    //! \brief  Release buffer handle
+    //! 
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] bufId
+    //!         VA bufferID
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus ReleaseBufferHandle(
+        VADriverContextP ctx,
+        VABufferID       bufId);
+ 
+    //!
+    //! \brief API for export surface handle to other component
+    //!
+    //! \param [in] dpy
+    //!        VA display.
+    //! \param [in] surfaceId
+    //!        Surface to export.
+    //! \param [in] memType
+    //!        Memory type to export to.
+    //! \param [in] flags
+    //!        Combination of flags to apply
+    //! \param [out] descriptor
+    //!        Pointer to the descriptor structure to fill
+    //!        with the handle details.  The type of this structure depends on
+    //!        the value of mem_type.
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus ExportSurfaceHandle(
+        VADriverContextP ctx,
+        VASurfaceID      surfaceId,
+        uint32_t         memType,
+        uint32_t         flags,
+        void             *descriptor);
+
+    //!
+    //! \brief  media copy internal
+    //! 
+    //! \param  [in] mosCtx
+    //!         Pointer to mos context
+    //! \param  [in] src
+    //!         VA copy mos resource src.
+    //! \param  [in] dst
+    //!         VA copy mos resrouce dst.
+    //! \param  [in] option
+    //!         VA copy option, copy mode.
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus CopyInternal(
+        PMOS_CONTEXT    mosCtx,
+        PMOS_RESOURCE   src,
+        PMOS_RESOURCE   dst,
+        uint32_t        copy_mode
+    );
+
+#if VA_CHECK_VERSION(1,10,0)
+    //!
+    //! \brief  media copy
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] dst_obj
+    //!         VA copy object dst.
+    //! \param  [in] src_obj
+    //!         VA copy object src.
+    //! \param  [in] option
+    //!         VA copy option, copy mode.
+    //! \param  [in] sync_handle
+    //!         VA copy sync handle
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus Copy (
+        VADriverContextP  ctx,
+        VACopyObject      *dst_obj,
+        VACopyObject      *src_obj,
+        VACopyOption      option
     );
 #endif
 
@@ -850,7 +1241,314 @@ public:
     );
 #endif
 
+    //!
+    //! \brief  Convert media format to OS format
+    //!
+    //! \param  [in] format
+    //!         Ddi media format
+    //!
+    //! \return Os format if call sucesss,else
+    //!     VA_STATUS_ERROR_UNSUPPORTED_RT_FORMAT if fail
+    //!
+    static int32_t MediaFormatToOsFormat(DDI_MEDIA_FORMAT format);
+
+    //!
+    //! \brief  Destroy buffer from VA buffer ID
+    //!
+    //! \param  [in] mediaCtx
+    //!     Pointer to ddi media context
+    //! \param  [in] bufferID
+    //!     VA buffer ID
+    //!
+    //! \return     bool
+    //!     true if destroy buffer from VA buffer ID, else false
+    //!
+    static bool DestroyBufFromVABufferID(
+        PDDI_MEDIA_CONTEXT mediaCtx,
+        VABufferID         bufferID);
+    
+    //!
+    //! \brief  Sync Surface
+    //! \details    Sync surface
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surfaceId
+    //!         VA surface id
+    //! \param  [in] timeoutNs
+    //!         time out period
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus SyncSurface(
+        VADriverContextP    ctx,
+        VASurfaceID         renderTarget);
+
+    //!
+    //! \brief   Query Surface Error
+    //!
+    //! \param   [in] ctx
+    //!          Pointer to VA driver context
+    //! \param   [in] renderTarget
+    //!          VASurfaceID
+    //! \param   [in] errorStatus
+    //!          error Status
+    //! \param   [in] errorInfo
+    //!          error info
+    //!
+    //! \return  VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus QuerySurfaceError(
+        VADriverContextP ctx,
+        VASurfaceID      renderTarget,
+        VAStatus         errorStatus,
+        void             **errorInfo);
+    
+    //!
+    //! \brief  Copy data from a VAImage to a surface
+    //! \details    Image must be in a format supported by the implementation
+    //!
+    //! \param  [in] ctx
+    //!         Input driver context
+    //! \param  [in] surface
+    //!         Surface ID of destination
+    //! \param  [in] draw
+    //!         Drawable of window system
+    //! \param  [in] image
+    //!         The image ID of the destination image
+    //! \param  [in] srcx
+    //!         Source x offset of the image region
+    //! \param  [in] srcy
+    //!         Source y offset of the image region
+    //! \param  [in] srcw
+    //!         Source width offset of the image region
+    //! \param  [in] srch
+    //!         Source height offset of the image region
+    //! \param  [in] destx
+    //!         Destination x offset of the surface region
+    //! \param  [in] desty
+    //!         Destination y offset of the surface region
+    //! \param  [in] destw
+    //!         Destination width offset of the surface region
+    //! \param  [in] desth
+    //!         Destination height offset of the surface region
+    //! \param  [in] cliprects
+    //!         client supplied clip list
+    //! \param  [in] numberCliprects
+    //!         number of clip rects in the clip list
+    //! \param  [in] flags
+    //!         de-interlacing flags
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus PutSurface(
+        VADriverContextP ctx,
+        VASurfaceID      surface,
+        void             *draw,
+        int16_t          srcx,
+        int16_t          srcy,
+        uint16_t         srcw,
+        uint16_t         srch,
+        int16_t          destx,
+        int16_t          desty,
+        uint16_t         destw,
+        uint16_t         desth,
+        VARectangle      *cliprects,        /* client supplied clip list */
+        uint32_t         numberCliprects, /* number of clip rects in the clip list */
+        uint32_t         flags             /* de-interlacing flags */
+    );
+
+    //!
+    //! \brief  Destroy Image
+    //! \details    Destroy VA Image
+    //!
+    //! \param  [in] ctx
+    //!         Input driver context
+    //! \param  [in] image
+    //!         VA image ID
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus DestroyImage(
+        VADriverContextP ctx,
+        VAImageID        image);
+
+    //!
+    //! \brief  Retrive surface data into a VAImage
+    //! \details    Image must be in a format supported by the implementation
+    //!
+    //! \param  [in] ctx
+    //!         Input driver context
+    //! \param  [in] surface
+    //!         Input surface ID of source
+    //! \param  [in] x
+    //!         X offset of the wanted region
+    //! \param  [in] y
+    //!         Y offset of the wanted region
+    //! \param  [in] width
+    //!         Width of the wanted region
+    //! \param  [in] height
+    //!         Height of the wanted region
+    //! \param  [in] image
+    //!     The image ID of the source image
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus GetImage(
+        VADriverContextP ctx,
+        VASurfaceID      surface,
+        int32_t          x,     /* coordinates of the upper left source pixel */
+        int32_t          y,
+        uint32_t         width, /* width and height of the region */
+        uint32_t         height,
+        VAImageID        image
+    );
+
+    //!
+    //! \brief  Copy data from a VAImage to a surface
+    //! \details    Image must be in a format supported by the implementation
+    //!
+    //! \param  [in] ctx
+    //!         Input driver context
+    //! \param  [in] surface
+    //!         Surface ID of destination
+    //! \param  [in] image
+    //!         The image ID of the destination image
+    //! \param  [in] srcX
+    //!         Source x offset of the image region
+    //! \param  [in] srcY
+    //!         Source y offset of the image region
+    //! \param  [in] srcWidth
+    //!         Source width offset of the image region
+    //! \param  [in] srcHeight
+    //!         Source height offset of the image region
+    //! \param  [in] destX
+    //!         Destination x offset of the surface region
+    //! \param  [in] destY
+    //!         Destination y offset of the surface region
+    //! \param  [in] destWidth
+    //!         Destination width offset of the surface region
+    //! \param  [in] destHeight
+    //!         Destination height offset of the surface region
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus PutImage(
+        VADriverContextP ctx,
+        VASurfaceID      surface,
+        VAImageID        image,
+        int32_t          srcX,
+        int32_t          srcY,
+        uint32_t         srcWidth,
+        uint32_t         srcHeight,
+        int32_t          destX,
+        int32_t          destY,
+        uint32_t         destWidth,
+        uint32_t         destHeight
+    );
+
+    //!
+    //! \brief  Lock surface
+    //! 
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surface
+    //!         VA surface ID
+    //! \param  [out] fourcc
+    //!         FourCC
+    //! \param  [out] lumaStride
+    //!         Luma stride
+    //! \param  [out] chromaUStride
+    //!         Chroma U stride
+    //! \param  [out] chromaVStride
+    //!         Chroma V stride
+    //! \param  [out] lumaOffset
+    //!         Luma offset
+    //! \param  [out] chromaUOffset
+    //!         Chroma U offset
+    //! \param  [out] chromaVOffset
+    //!         Chroma V offset
+    //! \param  [out] bufferName
+    //!         Buffer name
+    //! \param  [out] buffer
+    //!         Buffer
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus LockSurface(
+        VADriverContextP ctx,
+        VASurfaceID      surface,
+        uint32_t        *fourcc,
+        uint32_t        *lumaStride,
+        uint32_t        *chromaUStride,
+        uint32_t        *chromaVStride,
+        uint32_t        *lumaOffset,
+        uint32_t        *chromaUOffset,
+        uint32_t        *chromaVOffset,
+        uint32_t        *bufferName,
+        void           **buffer);
+    
+    //!
+    //! \brief  Unlock surface
+    //! 
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surface
+    //!         VA surface ID
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus UnlockSurface(
+        VADriverContextP   ctx,
+        VASurfaceID        surface);
 private:
+
+    //!
+    //! \brief  Copy Surface To Image
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] surface
+    //!         Input surface
+    //! \param  [in] image
+    //!         Output image
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus CopySurfaceToImage(
+        VADriverContextP  ctx,
+        DDI_MEDIA_SURFACE *surface,
+        VAImage           *image);
+
+    //!
+    //! \brief  Copy plane from src to dst row by row when src and dst strides are different
+    //!
+    //! \param  [in] dst
+    //!         Destination plane
+    //! \param  [in] dstPitch
+    //!         Destination plane pitch
+    //! \param  [in] src
+    //!         Source plane
+    //! \param  [in] srcPitch
+    //!         Source plane pitch
+    //! \param  [in] height
+    //!         Plane hight
+    //!
+    static void CopyPlane(
+        uint8_t  *dst,
+        uint32_t dstPitch,
+        uint8_t  *src,
+        uint32_t srcPitch,
+        uint32_t height);
+
     //!
     //! \brief  Map CompType from entrypoint
     //! 
@@ -914,6 +1612,93 @@ private:
     //!     VA_STATUS_SUCCESS if success, else fail reason
     //!
     static VAStatus HeapInitialize(PDDI_MEDIA_CONTEXT mediaCtx);
+
+    //!
+    //! \brief  Get Plane Num
+    //!
+    //! \param  [in] mediaSurface
+    //!         Pointer to DDI media surface
+    //! \param  [in] hasAuxPlane
+    //!         if has Aus Plane
+    //!
+    //! \return uint32_t
+    //!     Plane num
+    //!
+    static uint32_t GetPlaneNum(PDDI_MEDIA_SURFACE mediaSurface, bool hasAuxPlane);
+
+    //!
+    //! \brief  Get Drm Format Of Separate Plane
+    //!
+    //! \param  [in] fourcc
+    //!         Format
+    //! \param  [in] plane
+    //!         Plane
+    //!
+    //! \return uint32_t
+    //!     Drmformat
+    //!
+    static uint32_t GetDrmFormatOfSeparatePlane(uint32_t fourcc, int plane);
+
+    //!
+    //! \brief  Get Drm Format Of Separate Plane
+    //!
+    //! \param  [in] fourcc
+    //!         Format
+    //!
+    //! \return uint32_t
+    //!     Drmformat
+    //!
+    static uint32_t GetDrmFormatOfCompositeObject(uint32_t fourcc);
+
+    //!
+    //! \brief  Get Chroma Pitch and Height
+    //!
+    //! \param  [in] fourcc
+    //!         Format
+    //! \param  [in] pitch
+    //!         Pitch
+    //! \param  [in] height
+    //!         Height
+    //! \param  [out] chromaPitch
+    //!         ChromaPitch
+    //! \param  [out] chromaHeight
+    //!         ChromaHeight
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus GetChromaPitchHeight(
+        uint32_t fourcc,
+        uint32_t pitch,
+        uint32_t height,
+        uint32_t *chromaPitch,
+        uint32_t *chromaHeight);
+    
+    //!
+    //! \brief  Get VA image from VA image ID
+    //! 
+    //! \param  [in] mediaCtx
+    //!         Pointer to ddi media context
+    //! \param  [in] imageID
+    //!         VA image ID
+    //!
+    //! \return VAImage*
+    //!     Pointer to VAImage
+    //!
+    static VAImage* GetVAImageFromVAImageID (PDDI_MEDIA_CONTEXT mediaCtx, VAImageID imageID);
+
+    //!
+    //! \brief  Destroy image from VA image ID 
+    //! 
+    //! \param  [in] mediaCtx
+    //!         Pointer to ddi media context
+    //! \param  [in] imageID
+    //!     VA image ID
+    //!
+    //! \return bool
+    //!     True if destroy image from VA image ID, else fail
+    //!
+    static bool DestroyImageFromVAImageID (PDDI_MEDIA_CONTEXT mediaCtx, VAImageID imageID);
 
 #ifdef _MMC_SUPPORTED
     //!
@@ -1170,11 +1955,137 @@ private:
     //! \param  [in] ctxID
     //!         context ID
     //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
     static VAStatus DestroyContextCM(
         VADriverContextP ctx,
         VAContextID      ctxID);
 
-#ifdef MEDIA_SOFTLET
+    //!
+    //! \brief  Init SurfaceDescriptor Without AuxTableMgr
+    //!
+    //! \param  [out] desc
+    //!         SurfaceDescriptor
+    //! \param  [in] formats
+    //!         DRM format
+    //! \param  [in] compositeObject
+    //!         compostie layer flag
+    //! \param  [in] planesNum
+    //!         planes num
+    //! \param  [in] offsetY
+    //!         Y channel offset
+    //! \param  [in] offsetU
+    //!         U channel offset
+    //! \param  [in] offsetV
+    //!         V channel offset
+    //! \param  [in] pitch
+    //!         surface pitch
+    //! \param  [in] chromaPitch
+    //!         chromaPitch pitch
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus InitSurfaceDescriptorWithoutAuxTableMgr(
+        VADRMPRIMESurfaceDescriptor *desc,
+        uint32_t                    *formats,
+        int                         compositeObject,
+        uint32_t                    planesNum,
+        uint32_t                    offsetY,
+        uint32_t                    offsetU,
+        uint32_t                    offsetV,
+        uint32_t                    pitch,
+        uint32_t                    chromaPitch);
+
+    //!
+    //! \brief  Init SurfaceDescriptor With AuxTableMgr
+    //!
+    //! \param  [out] desc
+    //!         SurfaceDescriptor
+    //! \param  [in] formats
+    //!         DRM format
+    //! \param  [in] compositeObject
+    //!         compostie layer flag
+    //! \param  [in] planesNum
+    //!         planes num
+    //! \param  [in] offsetY
+    //!         Y channel offset
+    //! \param  [in] offsetU
+    //!         U channel offset
+    //! \param  [in] offsetv
+    //!         U channel offset
+    //! \param  [in] auxOffsetY
+    //!         Y channel aux offset
+    //! \param  [in] auxOffsetUV
+    //!         UV channel aux offset
+    //! \param  [in] pitch
+    //!         surface pitch
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus InitSurfaceDescriptorWithAuxTableMgr(
+        VADRMPRIMESurfaceDescriptor *desc,
+        uint32_t                    *formats,
+        int                         compositeObject,
+        uint32_t                    planesNum,
+        uint32_t                    offsetY,
+        uint32_t                    offsetU,
+        uint32_t                    offsetV,
+        uint32_t                    auxOffsetY,
+        uint32_t                    auxOffsetUV,
+        int32_t                     pitch);
+
+    //!
+    //! \brief  Generate Vaimg From input Media format
+    //!
+    //! \param  [in] mediaSurface
+    //!         Media surface
+    //! \param  [in] mediaCtx
+    //!         Media context
+    //! \param  [out] vaimg
+    //!         vaimg
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus GenerateVaImgFromMediaFormat(
+        DDI_MEDIA_SURFACE  *mediaSurface,
+        PDDI_MEDIA_CONTEXT mediaCtx,
+        VAImage            *vaimg);
+
+    //!
+    //! \brief  Generate Vaimg From input OS format
+    //!
+    //! \param  [in] format
+    //!         Os format type
+    //! \param  [out] vaimg
+    //!         vaimg
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus GenerateVaImgFromOsFormat(
+        VAImageFormat      format,
+        int32_t            width,
+        int32_t            height,
+        GMM_RESOURCE_INFO  *gmmResourceInfo,
+        VAImage            *vaimg);
+
+    //!
+    //! \brief  Convert Rt format to OS format
+    //!
+    //! \param  [in] format
+    //!         RT format type
+    //! \param  [out] expectedFourcc
+    //!         Os format type
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus RtFormatToOsFormat(uint32_t format, int32_t &expectedFourcc);
+
     //!
     //! \brief  Convert Os format to media format
     //!
@@ -1213,14 +2124,84 @@ private:
         DDI_MEDIA_FORMAT              mediaFormat,
         uint32_t                      width,
         uint32_t                      height,
-        DDI_MEDIA_SURFACE_DESCRIPTOR *surfDesc,
+        DDI_MEDIA_SURFACE_DESCRIPTOR  *surfDesc,
         uint32_t                      surfaceUsageHint,
         int                           memType);
-#endif
+
+public:
+    //!
+    //! \brief  Map buffer
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] buf_id
+    //!         VA buffer id
+    //! \param  [in] pbuf
+    //!         Address of buffer
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus MapBuffer(
+        VADriverContextP  ctx,
+        VABufferID        buf_id,
+        void              **pbuf);
+
+    //!
+    //! \brief  Map data store of the buffer into the client's address space
+    //!         vaCreateBuffer() needs to be called with "data" set to nullptr before calling vaMapBuffer()
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] bufId
+    //!         VA buffer ID
+    //! \param  [out] buf
+    //!         Pointer to buffer
+    //! \param  [in] flag
+    //!         Flag
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus MapBufferInternal(
+        VADriverContextP  ctx,
+        VABufferID        bufId,
+        void              **buf,
+        uint32_t          flag);
+
+    //! \brief  Unmap buffer
+    //!
+    //! \param  [in] ctx
+    //!         Pointer to VA driver context
+    //! \param  [in] bufId
+    //!         VA buffer ID
+    //!
+    //! \return VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus UnmapBuffer(
+        VADriverContextP    ctx,
+        VABufferID          bufId);
+
+    //!
+    //! \brief  Decompress a compressed surface.
+    //!
+    //! \param  [in]  mediaCtx
+    //!         Pointer to ddi media context
+    //! \param  [in]  mediaSurface
+    //!         Ddi media surface
+    //!
+    //! \return     VAStatus
+    //!     VA_STATUS_SUCCESS if success, else fail reason
+    //!
+    static VAStatus MediaMemoryDecompress(
+        PDDI_MEDIA_CONTEXT mediaCtx,
+        DDI_MEDIA_SURFACE  *mediaSurface);
 
 public:
     // Global mutex
     static MEDIA_MUTEX_T m_GlobalMutex;
+MEDIA_CLASS_DEFINE_END(MediaLibvaInterfaceNext)
 };
 
 #endif //__MEDIA_LIBVA_INTERFACE_NEXT_H__

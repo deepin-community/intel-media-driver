@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2017, Intel Corporation
+* Copyright (c) 2017-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -147,7 +147,8 @@ CmDeviceRTBase::CmDeviceRTBase(uint32_t options):
     m_hasGpuCopyKernel(false),
     m_hasGpuInitKernel(false),
     m_kernelsLoaded(0),
-    m_preloadKernelEnabled(true)
+    m_preloadKernelEnabled(true),
+    m_queuePriority(CM_DEVICE_CREATE_PRIORITY_DEFAULT)
 {
     //Initialize the structures in the class
     MOS_ZeroMemory(&m_halMaxValues, sizeof(m_halMaxValues));
@@ -347,7 +348,7 @@ void CmDeviceRTBase::DestructCommon()
     //Free DLL handle if it is there
     if (m_hJITDll)
     {
-        MOS_FreeLibrary(m_hJITDll);
+        MosUtilities::MosFreeLibrary(m_hJITDll);
     }
 }
 
@@ -408,7 +409,9 @@ int32_t CmDeviceRTBase::Initialize(MOS_CONTEXT *mosContext)
     }
 
     // prepare GPU predefined queue/kernel/task for surface init
+#if !defined(_FULL_OPEN_SOURCE)
     result = PrepareGPUinitSurface();
+#endif
     // get the last tracker
     PCM_HAL_STATE state = (( PCM_CONTEXT_DATA )m_accelData)->cmHalState;
     m_surfaceMgr->SetLatestVeboxTrackerAddr(state->renderHal->veBoxTrackerRes.data);
@@ -1627,6 +1630,7 @@ CM_RT_API int32_t CmDeviceRTBase::CreateQueue(CmQueue* &queue)
 {
     INSERT_API_CALL_LOG(GetHalState());
     CM_QUEUE_CREATE_OPTION queueCreateOption = CM_DEFAULT_QUEUE_CREATE_OPTION;
+    queueCreateOption.IsRealTimePrioriy = m_queuePriority;
 
     // Check queue type redirect is needed.
     PCM_CONTEXT_DATA cmData = (PCM_CONTEXT_DATA)GetAccelData();
@@ -3590,7 +3594,7 @@ int32_t CmDeviceRTBase::FlushPrintBufferInternal(const char *filename)
     }
     else
     {
-        int err = MOS_SecureFileOpen(&streamOutFile, filename, "wb");
+        int err = MosUtilities::MosSecureFileOpen(&streamOutFile, filename, "wb");
         if (streamOutFile == nullptr)
         {
             CM_ASSERTMESSAGE("Error: Failed to open kernel print dump file.");

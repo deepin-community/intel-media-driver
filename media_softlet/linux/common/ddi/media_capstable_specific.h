@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -32,9 +32,26 @@
 #include <set>
 
 #include "va/va.h"
-#include "media_libva_common.h"
+#include "va/va_drmcommon.h"
 #include "capstable_data_linux_definition.h"
 #include "media_capstable.h"
+
+//!
+//! \class  ConfigInfo
+//! \brief  Component info to create specific component
+//!
+struct ComponentInfo
+{
+    VAProfile       profile       = VAProfileNone;
+    VAEntrypoint    entrypoint    = VAEntrypointVLD;
+    ComponentInfo(
+        VAProfile p,
+        VAEntrypoint e
+        ) : profile(p), entrypoint(e) {};
+    ComponentInfo(){};
+};
+
+bool operator<(const ComponentInfo &lhs, const ComponentInfo &rhs);
 
 //!
 //! \class  ConfigLinux
@@ -63,10 +80,17 @@ typedef std::vector<ConfigLinux> ConfigList;
 
 // This offset is for cap fallback enabling, can be removed when all refactor done
 #define CONFIG_ID_OFFSET 10000
-#define ADD_CONFIG_ID_OFFSET(x) (x) + CONFIG_ID_OFFSET
-#define REMOVE_CONFIG_ID_OFFSET(x) (x) - CONFIG_ID_OFFSET
-#define IS_VALID_CONFIG_ID(x) ((x) > CONFIG_ID_OFFSET)
+#define ADD_CONFIG_ID_OFFSET(x) ((x) + CONFIG_ID_OFFSET)
+#define ADD_CONFIG_ID_DEC_OFFSET(x) (ADD_CONFIG_ID_OFFSET(x) + DDI_CODEC_GEN_CONFIG_ATTRIBUTES_DEC_BASE)
+#define ADD_CONFIG_ID_ENC_OFFSET(x) (ADD_CONFIG_ID_OFFSET(x) + DDI_CODEC_GEN_CONFIG_ATTRIBUTES_ENC_BASE)
+#define ADD_CONFIG_ID_VP_OFFSET(x) (ADD_CONFIG_ID_OFFSET(x) + DDI_VP_GEN_CONFIG_ATTRIBUTES_BASE)
+#define REMOVE_CONFIG_ID_OFFSET(x) ((x) - CONFIG_ID_OFFSET)
+#define REMOVE_CONFIG_ID_DEC_OFFSET(x) (REMOVE_CONFIG_ID_OFFSET(x) - DDI_CODEC_GEN_CONFIG_ATTRIBUTES_DEC_BASE)
+#define REMOVE_CONFIG_ID_ENC_OFFSET(x) (REMOVE_CONFIG_ID_OFFSET(x) - DDI_CODEC_GEN_CONFIG_ATTRIBUTES_ENC_BASE)
+#define REMOVE_CONFIG_ID_VP_OFFSET(x) (REMOVE_CONFIG_ID_OFFSET(x) - DDI_VP_GEN_CONFIG_ATTRIBUTES_BASE)
+#define IS_VALID_CONFIG_ID(x) ((x) >= CONFIG_ID_OFFSET)
 
+class DdiCpCapsInterface;
 //!
 //! \class  MediaLibvaCaps
 //! \brief  Media libva caps
@@ -77,6 +101,7 @@ private:
     PlatformInfo  m_plt;
     ProfileMap    *m_profileMap = nullptr;
     ImgTable      *m_imgTbl     = nullptr;
+    DdiCpCapsInterface *m_cpCaps = nullptr;
 
 public:
     //!
@@ -92,12 +117,15 @@ public:
     //!
     //! \brief    Destructor
     //!
-    ~MediaCapsTableSpecific() {};
+    ~MediaCapsTableSpecific();
 
     //!
     //! \brief    Init configlist
     //!
-    VAStatus Init();
+    //! \param    [in] mediaCtx
+    //!           media context
+    //!
+    VAStatus Init(DDI_MEDIA_CONTEXT *mediaCtx);
 
     //!
     //! \brief    Get configlist, this is for component createConfig
@@ -170,6 +198,36 @@ public:
         VAConfigID      *configId);
 
     //!
+    //! \brief    Check if the configID is a valid decode config
+    //!
+    //! \param    [in] configId
+    //!           Specify the VAConfigID
+    //!
+    //! \return   True if the configID is a valid decode config, otherwise false
+    //!
+    bool IsDecConfigId(VAConfigID configId);
+
+    //!
+    //! \brief    Check if the configID is a valid encode config
+    //!
+    //! \param    [in] configId
+    //!           Specify the VAConfigID
+    //!
+    //! \return   True if the configID is a valid encode config, otherwise false
+    //!
+    bool IsEncConfigId(VAConfigID configId);
+
+    //!
+    //! \brief    Check if the configID is a valid vp config
+    //!
+    //! \param    [in] configId
+    //!           Specify the VAConfigID
+    //!
+    //! \return   True if the configID is a valid vp config, otherwise false
+    //!
+    bool IsVpConfigId(VAConfigID configId);
+
+    //!
     //! \brief    Destory the VAConfigID
     //!
     //! \param    [in] configId
@@ -226,6 +284,8 @@ public:
     //! \return   The maxinum number of supported image formats for current platform ipVersion
     //!
     uint32_t GetImageFormatsMaxNum();
+MEDIA_CLASS_DEFINE_END(MediaCapsTableSpecific)
 };
+
 
 #endif //__MEDIA_CAPSTABLE_LINUX_H__

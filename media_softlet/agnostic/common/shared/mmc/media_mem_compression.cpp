@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018-2021, Intel Corporation
+* Copyright (c) 2018-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -26,18 +26,20 @@
 //! \details  The mmc is to handle mmc operations,
 //!
 
-#include "mos_defs.h"
 #include "media_mem_compression.h"
-#include "mhw_mi_g12_X.h"
+#include "mos_interface.h"
 
-MediaMemComp::MediaMemComp(PMOS_INTERFACE osInterface, MhwMiInterface *miInterface):
+MediaMemComp::MediaMemComp(PMOS_INTERFACE osInterface) :
     m_osInterface(osInterface),
-    m_mhwMiInterface(miInterface),
-    m_mmcEnabled(false),
-    m_mmcFeatureId(__MOS_USER_FEATURE_KEY_MAX_ID),
-    m_mmcInuseFeatureId(__MOS_USER_FEATURE_KEY_MAX_ID)
+    m_mmcEnabled(false)
 {
-
+    if (nullptr == m_osInterface)
+    {
+        return;
+    }
+    MEDIA_FEATURE_TABLE *skuTable = m_osInterface->pfnGetSkuTable(m_osInterface);
+    m_isCompSurfAllocable = m_osInterface->pfnIsCompressibelSurfaceSupported(skuTable);
+    m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
 }
 
 MOS_STATUS MediaMemComp::InitMmcEnabled()
@@ -67,20 +69,22 @@ MOS_STATUS MediaMemComp::DecompressResource(PMOS_RESOURCE resource)
 
 bool MediaMemComp::IsMmcFeatureEnabled()
 {
-    MOS_USER_FEATURE_VALUE_DATA userFeatureData;
-    MOS_ZeroMemory(&userFeatureData, sizeof(userFeatureData));
+    if (m_userSettingPtr != nullptr)
+    {
+        ReadUserSetting(
+            m_userSettingPtr,
+            m_mmcEnabled,
+            m_mmcEnabledKey,
+            MediaUserSetting::Group::Device,
+            m_bComponentMmcEnabled,
+            true);
+    }
+    else
+    {
+        m_mmcEnabled = m_bComponentMmcEnabled;
+    }
 
-    userFeatureData.i32Data = m_bComponentMmcEnabled;
-
-    userFeatureData.i32DataFlag = MOS_USER_FEATURE_VALUE_DATA_FLAG_CUSTOM_DEFAULT_VALUE_TYPE;
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        m_mmcFeatureId,
-        &userFeatureData,
-        m_osInterface->pOsContext);
-    m_mmcEnabled = (userFeatureData.i32Data) ? true : false;
-
-    if (NullHW::IsEnabled())
+    if (m_osInterface && m_osInterface->bNullHwIsEnabled)
     {
         m_mmcEnabled = false;
     }
@@ -91,12 +95,11 @@ bool MediaMemComp::IsMmcFeatureEnabled()
 // For VP, there is no such feature id, if need to add 1?
 MOS_STATUS MediaMemComp::UpdateMmcInUseFeature()
 {
-    MOS_USER_FEATURE_VALUE_WRITE_DATA userFeatureWriteData;
-    MOS_ZeroMemory(&userFeatureWriteData, sizeof(userFeatureWriteData));
-    userFeatureWriteData.Value.i32Data = m_mmcEnabled;
-    userFeatureWriteData.ValueID = m_mmcInuseFeatureId;
-
-    return MOS_UserFeature_WriteValues_ID(nullptr, &userFeatureWriteData, 1, m_osInterface->pOsContext);
+    return ReportUserSetting(
+                m_userSettingPtr,
+                m_mmcInUseKey,
+                m_mmcEnabled,
+                MediaUserSetting::Group::Device);
 }
 
 bool MediaMemComp::IsMmcEnabled()
@@ -107,6 +110,11 @@ bool MediaMemComp::IsMmcEnabled()
 void MediaMemComp::DisableMmc()
 {
     m_mmcEnabled = false;
+}
+
+bool MediaMemComp::IsCompressibelSurfaceSupported()
+{
+    return m_isCompSurfAllocable;
 }
 
 MOS_STATUS MediaMemComp::SetSurfaceMmcMode(
@@ -173,6 +181,22 @@ MOS_STATUS MediaMemComp::GetSurfaceMmcFormat(
         status = m_osInterface->pfnGetMemoryCompressionFormat(m_osInterface, &surface->OsResource, mmcFormat);
     else
         *mmcFormat = 0;
+
+    return status;
+}
+
+MOS_STATUS MediaMemComp::GetResourceMmcFormat(
+    PMOS_RESOURCE resource,
+    uint32_t    &mmcFormat)
+{
+    MOS_STATUS status = MOS_STATUS_SUCCESS;
+    MOS_CHK_NULL_RETURN(MOS_COMPONENT_MMC, MOS_MMC_SUBCOMP_SELF, resource);
+    MOS_CHK_NULL_RETURN(MOS_COMPONENT_MMC, MOS_MMC_SUBCOMP_SELF, m_osInterface);
+
+    if (m_mmcEnabled)
+        status = m_osInterface->pfnGetMemoryCompressionFormat(m_osInterface, resource, &mmcFormat);
+    else
+        mmcFormat = 0;
 
     return status;
 }

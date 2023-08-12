@@ -35,12 +35,13 @@ public:
     template<class _Fun, class... _Types>
     static void MOS_DEVULT_FuncCall(_Fun fun, _Types&&... ags)
     {
-        if (MosUtilities::m_mosUltFlag && fun)
+        if (MosUtilities::m_mosUltFlag && (*MosUtilities::m_mosUltFlag) && fun)
         {
             fun(std::forward<_Types>(ags)...);
         }
     }
 
+MEDIA_CLASS_DEFINE_END(MosUtilDevUltSpecific)
 };
 MOS_EXPORT_DECL extern void (*pfnUltGetCmdBuf)(PMOS_COMMAND_BUFFER pCmdBuffer);
 

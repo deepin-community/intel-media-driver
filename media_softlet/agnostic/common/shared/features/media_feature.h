@@ -25,18 +25,20 @@
 //!
 #ifndef __MEDIA_FEATURE_H__
 #define __MEDIA_FEATURE_H__
-#include "mos_os.h"
-#include "media_feature_manager.h"
-#include "media_utils.h"
 
-class MediaFeatureManager;
+#include "media_user_setting.h"
+#include "mos_defs.h"
+#include "mos_os_specific.h"
+#include "media_feature_manager.h"
 
 class MediaFeature
 {
 public:
+    MediaFeature(){};
     MediaFeature(void *constSettings) : m_constSettings(constSettings){};
-    MediaFeature() {};
-    virtual ~MediaFeature() { }
+    MediaFeature(void *constSettings, PMOS_INTERFACE mosInterface);
+    MediaFeature(PMOS_INTERFACE mosInterface);
+    virtual ~MediaFeature() {}
 
     //!
     //! \brief  Init parameter
@@ -80,6 +82,8 @@ protected:
 
     MediaFeatureManager *m_featureManager = nullptr;
     void                *m_constSettings = nullptr;
+    MediaUserSettingSharedPtr m_userSettingPtr = nullptr;  //!< usersettingInstance
+MEDIA_CLASS_DEFINE_END(MediaFeature)
 };
 
 #endif  // !__ENCODE_FEATURE_H__

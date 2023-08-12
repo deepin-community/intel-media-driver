@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020-2021, Intel Corporation
+* Copyright (c) 2021-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -26,21 +26,19 @@
 //!
 
 #include "media_render_cmd_packet.h"
-#include "mos_oca_interface.h"
 #include "renderhal_platform_interface.h"
-#include "hal_oca_interface.h"
-#include "mos_interface.h"
+#include "hal_oca_interface_next.h"
+#include "mos_os_cp_interface_specific.h"
 
 #define COMPUTE_WALKER_THREAD_SPACE_WIDTH 1
 #define COMPUTE_WALKER_THREAD_SPACE_HEIGHT 1
 #define COMPUTE_WALKER_THREAD_SPACE_DEPTH 1
 
-RenderCmdPacket::RenderCmdPacket(MediaTask* task, PMOS_INTERFACE pOsinterface, RENDERHAL_INTERFACE *renderHal) : CmdPacket(task),
+RenderCmdPacket::RenderCmdPacket(MediaTask* task, PMOS_INTERFACE pOsInterface, RENDERHAL_INTERFACE* renderHal) : CmdPacket(task),
 m_renderHal(renderHal),
-m_cpInterface(nullptr),
-m_osInterface(pOsinterface)
+m_cpInterface(nullptr)
 {
-    Init();
+    m_osInterface = pOsInterface;
 }
 
 RenderCmdPacket::~RenderCmdPacket()
@@ -50,27 +48,17 @@ RenderCmdPacket::~RenderCmdPacket()
 
 MOS_STATUS RenderCmdPacket::Init()
 {
-    if (!m_renderHal)
-    {
-        m_renderHal = (PRENDERHAL_INTERFACE)MOS_AllocAndZeroMemory(sizeof(RENDERHAL_INTERFACE));
-        RENDER_PACKET_CHK_NULL_RETURN(m_renderHal);
-        RENDER_PACKET_CHK_STATUS_RETURN(RenderHal_InitInterface(
-            m_renderHal,
-            &m_cpInterface,
-            m_osInterface));
-
-        RENDERHAL_SETTINGS          RenderHalSettings;
-        RenderHalSettings.iMediaStates = 32; // Init MEdia state values
-        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnInitialize(m_renderHal, &RenderHalSettings));
-    }
-    else
-    {
-        RENDER_PACKET_NORMALMESSAGE("RenderHal Already been created");
-    }
-
-    bool mediaWalkerUsed   = false;
+    bool mediaWalkerUsed = false;
     bool computeWalkerUsed = false;
-    mediaWalkerUsed   = m_renderHal->pfnGetMediaWalkerStatus(m_renderHal) ? true : false;
+
+    if (nullptr == m_renderHal)
+    {
+        // Could not allocate renderhal in packet class 
+        // Because we need to share renderhal for many Packets to reduce memory
+        RENDER_PACKET_ASSERTMESSAGE("renderHal should be passed When doing construction");
+        return MOS_STATUS_INVALID_PARAMETER;
+    }
+    mediaWalkerUsed = m_renderHal->pfnGetMediaWalkerStatus(m_renderHal) ? true : false;
     computeWalkerUsed = m_renderHal->pRenderHalPltInterface->IsComputeContextInUse(m_renderHal);
 
     if (mediaWalkerUsed && !computeWalkerUsed)
@@ -86,6 +74,11 @@ MOS_STATUS RenderCmdPacket::Init()
         m_walkerType = WALKER_TYPE_DISABLED;
     }
 
+    if (m_renderHal->pRenderHalPltInterface)
+    {
+        m_miItf = m_renderHal->pRenderHalPltInterface->GetMhwMiItf();
+    }
+
     return MOS_STATUS_SUCCESS;
 }
 
@@ -96,47 +89,47 @@ MOS_STATUS RenderCmdPacket::Destroy()
     return MOS_STATUS_SUCCESS;
 }
 
-MOS_STATUS RenderCmdPacket::Submit(MOS_COMMAND_BUFFER* commandBuffer, uint8_t packetPhase)
+MOS_STATUS RenderCmdPacket::Submit(MOS_COMMAND_BUFFER *commandBuffer, uint8_t packetPhase)
 {
     PMOS_INTERFACE                      pOsInterface = nullptr;
     MOS_STATUS                          eStatus = MOS_STATUS_SUCCESS;
     uint32_t                            dwSyncTag = 0;
     int32_t                             i = 0, iRemaining = 0;
-    PMHW_MI_INTERFACE                   pMhwMiInterface = nullptr;
-    MhwRenderInterface*                 pMhwRender = nullptr;
     MHW_MEDIA_STATE_FLUSH_PARAM         FlushParam = {};
     bool                                bEnableSLM = false;
     RENDERHAL_GENERIC_PROLOG_PARAMS     GenericPrologParams = {};
     MOS_RESOURCE                        GpuStatusBuffer = {};
-    MediaPerfProfiler*                  pPerfProfiler = nullptr;
     MOS_CONTEXT*                        pOsContext = nullptr;
     PMHW_MI_MMIOREGISTERS               pMmioRegisters = nullptr;
 
     RENDER_PACKET_CHK_NULL_RETURN(m_renderHal);
-    RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pMhwRenderInterface);
-    RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pMhwMiInterface);
-    RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pMhwRenderInterface->GetMmioRegisters());
+    RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pRenderHalPltInterface);
+    RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pRenderHalPltInterface->GetMmioRegisters(m_renderHal));
     RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pOsInterface);
     RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pOsInterface->pOsContext);
+    RENDER_PACKET_CHK_NULL_RETURN(commandBuffer);
 
     eStatus = MOS_STATUS_UNKNOWN;
     pOsInterface = m_renderHal->pOsInterface;
-    pMhwMiInterface = m_renderHal->pMhwMiInterface;
-    pMhwRender = m_renderHal->pMhwRenderInterface;
     iRemaining = 0;
     FlushParam = g_cRenderHal_InitMediaStateFlushParams;
-    pPerfProfiler = m_renderHal->pPerfProfiler;
     pOsContext = pOsInterface->pOsContext;
-    pMmioRegisters = pMhwRender->GetMmioRegisters();
+    pMmioRegisters = m_renderHal->pRenderHalPltInterface->GetMmioRegisters(m_renderHal);
 
     RENDER_PACKET_CHK_STATUS_RETURN(SetPowerMode(0));
+
+    m_renderHal->pRenderHalPltInterface->On1stLevelBBStart(m_renderHal, commandBuffer, pOsContext, pOsInterface->CurrentGpuContextHandle, pMmioRegisters);
+
+    OcaDumpDbgInfo(*commandBuffer, *pOsContext);
+
+    RENDER_PACKET_CHK_STATUS_RETURN(SetMediaFrameTracking(GenericPrologParams));
 
     // Initialize command buffer and insert prolog
     RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnInitCommandBuffer(m_renderHal, commandBuffer, &GenericPrologParams));
 
-    RENDER_PACKET_CHK_STATUS_RETURN(pPerfProfiler->AddPerfCollectStartCmd((void*)m_renderHal, pOsInterface, pMhwMiInterface, commandBuffer));
+    RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddPerfCollectStartCmd(m_renderHal, pOsInterface, commandBuffer));
 
-    RENDER_PACKET_CHK_STATUS_RETURN(NullHW::StartPredicate(pMhwMiInterface, commandBuffer));
+    RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->StartPredicate(m_renderHal, commandBuffer));
 
     // Write timing data for 3P budget
     RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnSendTimingData(m_renderHal, commandBuffer, true));
@@ -146,6 +139,14 @@ MOS_STATUS RenderCmdPacket::Submit(MOS_COMMAND_BUFFER* commandBuffer, uint8_t pa
         m_renderHal,
         &m_renderHal->L3CacheSettings,
         bEnableSLM));
+
+    if (m_renderHal->bCmfcCoeffUpdate)
+    {
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnSendCscCoeffSurface(m_renderHal,
+            commandBuffer,
+            m_renderHal->pCmfcCoeffSurface,
+            m_renderHal->pStateHeap->pKernelAllocation[m_renderHal->iKernelAllocationID].pKernelEntry));
+    }
 
     // Flush media states
     RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnSendMediaStates(
@@ -160,9 +161,9 @@ MOS_STATUS RenderCmdPacket::Submit(MOS_COMMAND_BUFFER* commandBuffer, uint8_t pa
         RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnSendRcsStatusTag(m_renderHal, commandBuffer));
     }
 
-    RENDER_PACKET_CHK_STATUS_RETURN(NullHW::StopPredicate(pMhwMiInterface, commandBuffer));
+    RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->StopPredicate(m_renderHal, commandBuffer));
 
-    RENDER_PACKET_CHK_STATUS_RETURN(pPerfProfiler->AddPerfCollectEndCmd((void*)m_renderHal, pOsInterface, pMhwMiInterface, commandBuffer));
+    RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddPerfCollectEndCmd(m_renderHal, pOsInterface, commandBuffer));
 
     // Write timing data for 3P budget
     RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnSendTimingData(m_renderHal, commandBuffer, false));
@@ -174,13 +175,21 @@ MOS_STATUS RenderCmdPacket::Submit(MOS_COMMAND_BUFFER* commandBuffer, uint8_t pa
     PipeControlParams.bGenericMediaStateClear = true;
     PipeControlParams.bIndirectStatePointersDisable = true;
     PipeControlParams.bDisableCSStall = false;
-    RENDER_PACKET_CHK_STATUS_RETURN(pMhwMiInterface->AddPipeControl(commandBuffer, nullptr, &PipeControlParams));
+
+    RENDER_PACKET_CHK_NULL_RETURN(pOsInterface->pfnGetSkuTable);
+    auto *skuTable = pOsInterface->pfnGetSkuTable(pOsInterface);
+    if (skuTable && MEDIA_IS_SKU(skuTable, FtrEnablePPCFlush))
+    {
+        // Add PPC fulsh
+        PipeControlParams.bPPCFlush = true;
+    }
+    RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMiPipeControl(m_renderHal, commandBuffer, &PipeControlParams));
 
     if (MEDIA_IS_WA(m_renderHal->pWaTable, WaSendDummyVFEafterPipelineSelect))
     {
         MHW_VFE_PARAMS VfeStateParams = {};
         VfeStateParams.dwNumberofURBEntries = 1;
-        RENDER_PACKET_CHK_STATUS_RETURN(pMhwRender->AddMediaVfeCmd(commandBuffer, &VfeStateParams));
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMediaVfeCmd(m_renderHal, commandBuffer, &VfeStateParams));
     }
 
     // Add media flush command in case HW not cleaning the media state
@@ -195,31 +204,32 @@ MOS_STATUS RenderCmdPacket::Submit(MOS_COMMAND_BUFFER* commandBuffer, uint8_t pa
         {
             RENDER_PACKET_ASSERTMESSAGE("ERROR, pWalkerParams is nullptr and cannot get InterfaceDescriptorOffset.");
         }
-        RENDER_PACKET_CHK_STATUS_RETURN(pMhwMiInterface->AddMediaStateFlush(commandBuffer, nullptr, &FlushParam));
+
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMediaStateFlush(m_renderHal, commandBuffer, &FlushParam));
     }
     else if (MEDIA_IS_WA(m_renderHal->pWaTable, WaAddMediaStateFlushCmd))
     {
-        RENDER_PACKET_CHK_STATUS_RETURN(pMhwMiInterface->AddMediaStateFlush(commandBuffer, nullptr, &FlushParam));
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMediaStateFlush(m_renderHal, commandBuffer, &FlushParam));
     }
+
+    HalOcaInterfaceNext::On1stLevelBBEnd(*commandBuffer, *pOsInterface);
 
     if (pBatchBuffer)
     {
         // Send Batch Buffer end command (HW/OS dependent)
-        RENDER_PACKET_CHK_STATUS_RETURN(pMhwMiInterface->AddMiBatchBufferEnd(commandBuffer, nullptr));
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMiBatchBufferEnd(m_renderHal, commandBuffer, nullptr));
     }
     else if (IsMiBBEndNeeded(pOsInterface))
     {
         // Send Batch Buffer end command for 1st level Batch Buffer
-        RENDER_PACKET_CHK_STATUS_RETURN(pMhwMiInterface->AddMiBatchBufferEnd(commandBuffer, nullptr));
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMiBatchBufferEnd(m_renderHal, commandBuffer, nullptr));
     }
     else if (m_renderHal->pOsInterface->bNoParsingAssistanceInKmd)
     {
-        RENDER_PACKET_CHK_STATUS_RETURN(pMhwMiInterface->AddMiBatchBufferEnd(commandBuffer, nullptr));
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pRenderHalPltInterface->AddMiBatchBufferEnd(m_renderHal, commandBuffer, nullptr));
     }
 
-    // Return unused command buffer space to OS
-    pOsInterface->pfnReturnCommandBuffer(pOsInterface, commandBuffer, 0);
-
+    // No need return command buffer here, which will be done in CmdTask::Submit.
     MOS_NULL_RENDERING_FLAGS  NullRenderingFlags;
 
     NullRenderingFlags =
@@ -253,9 +263,14 @@ MOS_STATUS RenderCmdPacket::RenderEngineSetup()
     // Assign media state
     m_renderData.mediaState = m_renderHal->pfnAssignMediaState(m_renderHal, RENDERHAL_COMPONENT_PACKET);
     RENDER_PACKET_CHK_NULL_RETURN(m_renderData.mediaState);
+    RENDER_PACKET_CHK_NULL_RETURN(m_renderHal->pStateHeap);
 
     // Allocate and reset SSH instance
-    RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnAssignSshInstance(m_renderHal));
+    if ((m_isMultiBindingTables == false) || (m_renderHal->pStateHeap->iCurrentBindingTable >= m_renderHal->StateHeapSettings.iBindingTables) ||
+        (m_renderHal->pStateHeap->iCurrentSurfaceState >= m_renderHal->StateHeapSettings.iSurfaceStates) || m_isMultiKernelOneMediaState)
+    {
+        RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnAssignSshInstance(m_renderHal));
+    }
 
     // Assign and Reset binding table
     RENDER_PACKET_CHK_STATUS_RETURN(m_renderHal->pfnAssignBindingTable(
@@ -270,6 +285,7 @@ MOS_STATUS RenderCmdPacket::RenderEngineSetup()
     return MOS_STATUS_SUCCESS;
 }
 
+
 MOS_STATUS RenderCmdPacket::InitKernelEntry()
 {
     if (m_kernelCount == 0)
@@ -283,13 +299,14 @@ MOS_STATUS RenderCmdPacket::InitKernelEntry()
 
 MOS_STATUS RenderCmdPacket::SetPowerMode(uint32_t KernelID)
 {
-    MOS_STATUS                          eStatus = MOS_STATUS_SUCCESS;
-    uint16_t                            wNumRequestedEUSlices = 1;    // Default to 1 slice
-    uint16_t                            wNumRequestedSubSlices = 3;    // Default to 3 subslice
-    uint16_t                            wNumRequestedEUs = 8;    // Default to 8 EUs
-    RENDERHAL_POWEROPTION               PowerOption;
-    bool                                bSetRequestedSlices = false;
-    const SseuSetting* pcSSEUTable = nullptr;
+    MOS_STATUS            eStatus                = MOS_STATUS_SUCCESS;
+    uint16_t              wNumRequestedEUSlices  = 1;  // Default to 1 slice
+    uint16_t              wNumRequestedSubSlices = 3;  // Default to 3 subslice
+    uint16_t              wNumRequestedEUs       = 8;  // Default to 8 EUs
+    RENDERHAL_POWEROPTION PowerOption;
+    bool                  bSetRequestedSlices = false;
+    const SseuSetting *   pcSSEUTable         = nullptr;
+    MediaUserSettingSharedPtr   userSettingPtr  = nullptr;
 
     RENDER_PACKET_CHK_NULL_RETURN(m_renderHal);
 
@@ -307,18 +324,17 @@ MOS_STATUS RenderCmdPacket::SetPowerMode(uint32_t KernelID)
 
     if (m_renderHal->sseuTable)
     {
-        pcSSEUTable = (const SseuSetting*)m_renderHal->sseuTable;
+        pcSSEUTable = (const SseuSetting *)m_renderHal->sseuTable;
     }
     else
     {
         RENDER_PACKET_ASSERTMESSAGE("SSEU Table not valid.");
         return MOS_STATUS_UNKNOWN;
-
     }
 
     RENDER_PACKET_CHK_NULL_RETURN(pcSSEUTable);
     pcSSEUTable += KernelID;
-    if (!bSetRequestedSlices)                        // If num Slices is already programmed, then don't change it
+    if (!bSetRequestedSlices)  // If num Slices is already programmed, then don't change it
     {
         if (wNumRequestedEUSlices < pcSSEUTable->numSlices)
         {
@@ -327,29 +343,29 @@ MOS_STATUS RenderCmdPacket::SetPowerMode(uint32_t KernelID)
     }
 
     wNumRequestedSubSlices = pcSSEUTable->numSubSlices;
-    wNumRequestedEUs = pcSSEUTable->numEUs;
+    wNumRequestedEUs       = pcSSEUTable->numEUs;
 
 #if (_DEBUG || _RELEASE_INTERNAL)
     // User feature key reads
-    MOS_USER_FEATURE_VALUE_DATA UserFeatureData;
-    MOS_ZeroMemory(&UserFeatureData, sizeof(UserFeatureData));
-    MOS_UserFeature_ReadValue_ID(
-        nullptr,
-        __MEDIA_USER_FEATURE_VALUE_SSEU_SETTING_OVERRIDE_ID,
-        &UserFeatureData,
-        m_osInterface->pOsContext);
+    userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
 
-    if (UserFeatureData.u32Data != 0xDEADC0DE)
+    uint32_t value = 0;
+    ReadUserSettingForDebug(
+        userSettingPtr,
+        value,
+        __MEDIA_USER_FEATURE_VALUE_SSEU_SETTING_OVERRIDE,
+        MediaUserSetting::Group::Device);
+    if (value != 0xDEADC0DE)
     {
-        wNumRequestedEUSlices = UserFeatureData.u32Data & 0xFF;               // Bits 0-7
-        wNumRequestedSubSlices = (UserFeatureData.u32Data >> 8) & 0xFF;        // Bits 8-15
-        wNumRequestedEUs = (UserFeatureData.u32Data >> 16) & 0xFFFF;     // Bits 16-31
+        wNumRequestedEUSlices  = value & 0xFF;            // Bits 0-7
+        wNumRequestedSubSlices = (value >> 8) & 0xFF;     // Bits 8-15
+        wNumRequestedEUs       = (value >> 16) & 0xFFFF;  // Bits 16-31
     }
 #endif
 
-    PowerOption.nSlice = wNumRequestedEUSlices;
+    PowerOption.nSlice    = wNumRequestedEUSlices;
     PowerOption.nSubSlice = wNumRequestedSubSlices;
-    PowerOption.nEU = wNumRequestedEUs;
+    PowerOption.nEU       = wNumRequestedEUs;
     m_renderHal->pfnSetPowerOptionMode(m_renderHal, &PowerOption);
 
     return eStatus;
@@ -357,15 +373,15 @@ MOS_STATUS RenderCmdPacket::SetPowerMode(uint32_t KernelID)
 
 uint32_t RenderCmdPacket::SetSurfaceForHwAccess(PMOS_SURFACE surface, PRENDERHAL_SURFACE_NEXT pRenderSurface, PRENDERHAL_SURFACE_STATE_PARAMS pSurfaceParams, bool bWrite)
 {
-    PMOS_INTERFACE                  pOsInterface;
-    PRENDERHAL_SURFACE_STATE_ENTRY  pSurfaceEntries[MHW_MAX_SURFACE_PLANES];
-    int32_t                         iSurfaceEntries;
-    int32_t                         i;
-    MOS_STATUS                      eStatus;
-    RENDERHAL_SURFACE_STATE_PARAMS  surfaceParams;
+    PMOS_INTERFACE                 pOsInterface;
+    PRENDERHAL_SURFACE_STATE_ENTRY pSurfaceEntries[MHW_MAX_SURFACE_PLANES];
+    int32_t                        iSurfaceEntries;
+    int32_t                        i;
+    MOS_STATUS                     eStatus;
+    RENDERHAL_SURFACE_STATE_PARAMS surfaceParams;
 
     // Initialize Variables
-    eStatus = MOS_STATUS_SUCCESS;
+    eStatus      = MOS_STATUS_SUCCESS;
     pOsInterface = m_osInterface;
 
     RENDER_PACKET_CHK_NULL_RETURN(pRenderSurface);
@@ -385,8 +401,8 @@ uint32_t RenderCmdPacket::SetSurfaceForHwAccess(PMOS_SURFACE surface, PRENDERHAL
 
         //set mem object control for cache
         surfaceParams.MemObjCtl = (m_renderHal->pOsInterface->pfnCachePolicyGetMemoryObject(
-            MOS_MP_RESOURCE_USAGE_DEFAULT,
-            m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
+                                       MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_WRITE_RENDER,
+                                       m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
 
         pSurfaceParams = &surfaceParams;
     }
@@ -418,10 +434,21 @@ uint32_t RenderCmdPacket::SetSurfaceForHwAccess(PMOS_SURFACE surface, PRENDERHAL
         pSurfaceEntries,
         nullptr));
 
-    if (m_renderData.bindingTableEntry > 15)
+    if (!m_isLargeSurfaceStateNeeded)
     {
-        RENDER_PACKET_ASSERTMESSAGE("input surface support up to 16 RSS");
-        m_renderData.bindingTableEntry = 0;
+        if (m_renderData.bindingTableEntry > 15)
+        {
+            RENDER_PACKET_ASSERTMESSAGE("input surface support up to 16 RSS");
+            m_renderData.bindingTableEntry = 0;
+        }
+    }
+    else
+    {
+        if (m_renderData.bindingTableEntry > 255)
+        {
+            RENDER_PACKET_ASSERTMESSAGE("input surface support up to 256 RSS");
+            m_renderData.bindingTableEntry = 0;
+        }
     }
 
     uint32_t iBTEntry = m_renderData.bindingTableEntry;
@@ -440,34 +467,34 @@ uint32_t RenderCmdPacket::SetSurfaceForHwAccess(PMOS_SURFACE surface, PRENDERHAL
     return iBTEntry;
 }
 
-uint32_t RenderCmdPacket::SetSurfaceForHwAccess(
-    PMOS_SURFACE                    surface, 
-    PRENDERHAL_SURFACE_NEXT         pRenderSurface, 
-    PRENDERHAL_SURFACE_STATE_PARAMS pSurfaceParams, 
-    uint32_t                        bindingIndex, 
+MOS_STATUS RenderCmdPacket::SetSurfaceForHwAccess(
+    PMOS_SURFACE                    surface,
+    PRENDERHAL_SURFACE_NEXT         pRenderSurface,
+    PRENDERHAL_SURFACE_STATE_PARAMS pSurfaceParams,
+    uint32_t                        &bindingIndex,
     bool                            bWrite,
-    PRENDERHAL_SURFACE_STATE_ENTRY  surfaceEntries,
-    int32_t                         numOfSurfaceEntries)
+    PRENDERHAL_SURFACE_STATE_ENTRY *surfaceEntries,
+    uint32_t *                      numOfSurfaceEntries)
 {
-    PMOS_INTERFACE                  pOsInterface;
-    PRENDERHAL_SURFACE_STATE_ENTRY  surfaceEntriesTmp[MHW_MAX_SURFACE_PLANES];
-    PRENDERHAL_SURFACE_STATE_ENTRY  *pSurfaceEntries = nullptr;
-    int32_t                         iSurfaceEntries;
-    int32_t                         i;
-    MOS_STATUS                      eStatus;
-    RENDERHAL_SURFACE_STATE_PARAMS  surfaceParams;
+    PMOS_INTERFACE                  pOsInterface                              = nullptr;
+    PRENDERHAL_SURFACE_STATE_ENTRY  surfaceEntriesTmp[MHW_MAX_SURFACE_PLANES] = {};
+    PRENDERHAL_SURFACE_STATE_ENTRY *pSurfaceEntries                           = nullptr;
+    int32_t                         iSurfaceEntries                           = 0;
+    int32_t                         i                                         = 0;
+    MOS_STATUS                      eStatus                                   = MOS_STATUS_SUCCESS;
+    RENDERHAL_SURFACE_STATE_PARAMS  surfaceParams                             = {};
 
-    if (nullptr == surfaceEntries || MHW_MAX_SURFACE_PLANES != numOfSurfaceEntries)
+    if (nullptr == surfaceEntries || nullptr == numOfSurfaceEntries)
     {
         pSurfaceEntries = surfaceEntriesTmp;
     }
     else
     {
-        pSurfaceEntries = &surfaceEntries;
+        pSurfaceEntries = surfaceEntries;
     }
 
     // Initialize Variables
-    eStatus = MOS_STATUS_SUCCESS;
+    eStatus      = MOS_STATUS_SUCCESS;
     pOsInterface = m_osInterface;
 
     RENDER_PACKET_CHK_NULL_RETURN(pRenderSurface);
@@ -487,8 +514,8 @@ uint32_t RenderCmdPacket::SetSurfaceForHwAccess(
 
         //set mem object control for cache
         surfaceParams.MemObjCtl = (m_renderHal->pOsInterface->pfnCachePolicyGetMemoryObject(
-            MOS_MP_RESOURCE_USAGE_DEFAULT,
-            m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
+                                       MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_WRITE_RENDER,
+                                       m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
 
         pSurfaceParams = &surfaceParams;
     }
@@ -533,14 +560,20 @@ uint32_t RenderCmdPacket::SetSurfaceForHwAccess(
         pRenderSurface->Index = iBTEntry;
     }
 
-    return bindingIndex;
+    if (numOfSurfaceEntries)
+    {
+        *numOfSurfaceEntries = iSurfaceEntries;
+    }
+
+    return eStatus;
 }
+
 
 uint32_t RenderCmdPacket::SetBufferForHwAccess(PMOS_SURFACE buffer, PRENDERHAL_SURFACE_NEXT pRenderSurface, PRENDERHAL_SURFACE_STATE_PARAMS pSurfaceParams, bool bWrite)
 {
-    RENDERHAL_SURFACE                   RenderHalSurface;
-    RENDERHAL_SURFACE_STATE_PARAMS      SurfaceParam;
-    PRENDERHAL_SURFACE_STATE_ENTRY      pSurfaceEntry;
+    RENDERHAL_SURFACE              RenderHalSurface;
+    RENDERHAL_SURFACE_STATE_PARAMS SurfaceParam;
+    PRENDERHAL_SURFACE_STATE_ENTRY pSurfaceEntry;
 
     RENDER_PACKET_CHK_NULL_RETURN(m_osInterface);
     RENDER_PACKET_CHK_NULL_RETURN(m_osInterface->osCpInterface);
@@ -560,19 +593,9 @@ uint32_t RenderCmdPacket::SetBufferForHwAccess(PMOS_SURFACE buffer, PRENDERHAL_S
     if (pSurfaceParams == nullptr)
     {
         MOS_ZeroMemory(&SurfaceParam, sizeof(SurfaceParam));
-        if (buffer->OsResource.mocsMosResUsageType == MOS_CODEC_RESOURCE_USAGE_BEGIN_CODEC      ||
-            buffer->OsResource.mocsMosResUsageType >= MOS_HW_RESOURCE_USAGE_MEDIA_BATCH_BUFFERS ||
-            buffer->OsResource.memObjCtrlState.DwordValue   == 0)
-        {
-            //set mem object control for cache
-            SurfaceParam.MemObjCtl = (MosInterface::GetCachePolicyMemoryObject(
-                m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface),
-                MOS_MP_RESOURCE_USAGE_DEFAULT)).DwordValue;
-        }
-        else
-        {
-            SurfaceParam.MemObjCtl = buffer->OsResource.memObjCtrlState.DwordValue;
-        }
+
+        auto memObjCtrlState = m_osInterface->pfnGetResourceCachePolicyMemoryObject(m_renderHal->pOsInterface, &buffer->OsResource);
+        SurfaceParam.MemObjCtl = memObjCtrlState.DwordValue;
 
         pSurfaceParams = &SurfaceParam;
     }
@@ -602,9 +625,9 @@ uint32_t RenderCmdPacket::SetBufferForHwAccess(PMOS_SURFACE buffer, PRENDERHAL_S
 
 uint32_t RenderCmdPacket::SetBufferForHwAccess(PMOS_SURFACE buffer, PRENDERHAL_SURFACE_NEXT pRenderSurface, PRENDERHAL_SURFACE_STATE_PARAMS pSurfaceParams, uint32_t bindingIndex, bool bWrite)
 {
-    RENDERHAL_SURFACE                   RenderHalSurface;
-    RENDERHAL_SURFACE_STATE_PARAMS      SurfaceParam;
-    PRENDERHAL_SURFACE_STATE_ENTRY      pSurfaceEntry;
+    RENDERHAL_SURFACE              RenderHalSurface;
+    RENDERHAL_SURFACE_STATE_PARAMS SurfaceParam;
+    PRENDERHAL_SURFACE_STATE_ENTRY pSurfaceEntry;
 
     RENDER_PACKET_CHK_NULL_RETURN(m_osInterface);
     RENDER_PACKET_CHK_NULL_RETURN(m_osInterface->osCpInterface);
@@ -627,8 +650,8 @@ uint32_t RenderCmdPacket::SetBufferForHwAccess(PMOS_SURFACE buffer, PRENDERHAL_S
 
         //set mem object control for cache
         SurfaceParam.MemObjCtl = (m_renderHal->pOsInterface->pfnCachePolicyGetMemoryObject(
-            MOS_MP_RESOURCE_USAGE_DEFAULT,
-            m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
+                                      MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_WRITE_RENDER,
+                                      m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
 
         pSurfaceParams = &SurfaceParam;
     }
@@ -658,9 +681,9 @@ uint32_t RenderCmdPacket::SetBufferForHwAccess(PMOS_SURFACE buffer, PRENDERHAL_S
 
 uint32_t RenderCmdPacket::SetBufferForHwAccess(MOS_BUFFER buffer, PRENDERHAL_SURFACE_NEXT pRenderSurface, PRENDERHAL_SURFACE_STATE_PARAMS pSurfaceParams, bool bWrite)
 {
-    RENDERHAL_SURFACE                   RenderHalSurface;
-    RENDERHAL_SURFACE_STATE_PARAMS      SurfaceParam;
-    PRENDERHAL_SURFACE_STATE_ENTRY      pSurfaceEntry;
+    RENDERHAL_SURFACE              RenderHalSurface;
+    RENDERHAL_SURFACE_STATE_PARAMS SurfaceParam;
+    PRENDERHAL_SURFACE_STATE_ENTRY pSurfaceEntry;
 
     RENDER_PACKET_CHK_NULL_RETURN(m_osInterface);
     RENDER_PACKET_CHK_NULL_RETURN(m_osInterface->osCpInterface);
@@ -688,8 +711,8 @@ uint32_t RenderCmdPacket::SetBufferForHwAccess(MOS_BUFFER buffer, PRENDERHAL_SUR
 
         //set mem object control for cache
         SurfaceParam.MemObjCtl = (m_renderHal->pOsInterface->pfnCachePolicyGetMemoryObject(
-            MOS_MP_RESOURCE_USAGE_DEFAULT,
-            m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
+                                      MOS_HW_RESOURCE_USAGE_VP_INTERNAL_READ_WRITE_RENDER,
+                                      m_renderHal->pOsInterface->pfnGetGmmClientContext(m_renderHal->pOsInterface))).DwordValue;
 
         pSurfaceParams = &SurfaceParam;
     }
@@ -717,7 +740,7 @@ uint32_t RenderCmdPacket::SetBufferForHwAccess(MOS_BUFFER buffer, PRENDERHAL_SUR
     return pRenderSurface->Index;
 }
 
-MOS_STATUS RenderCmdPacket::SetupCurbe(void* pData, uint32_t curbeLength, uint32_t maximumNumberofThreads)
+MOS_STATUS RenderCmdPacket::SetupCurbe(void *pData, uint32_t curbeLength, uint32_t maximumNumberofThreads)
 {
     m_renderData.iCurbeOffset = m_renderHal->pfnLoadCurbeData(
         m_renderHal,
@@ -744,10 +767,10 @@ MOS_STATUS RenderCmdPacket::SetupCurbe(void* pData, uint32_t curbeLength, uint32
     return MOS_STATUS_SUCCESS;
 }
 
-MOS_STATUS RenderCmdPacket::PrepareMediaWalkerParams(KERNEL_WALKER_PARAMS params, MHW_WALKER_PARAMS& mediaWalker)
+MOS_STATUS RenderCmdPacket::PrepareMediaWalkerParams(KERNEL_WALKER_PARAMS params, MHW_WALKER_PARAMS &mediaWalker)
 {
     uint32_t uiMediaWalkerBlockSize;
-    RECT     alignedRect = {};
+    RECT     alignedRect      = {};
     bool     bVerticalPattern = false;
 
     uiMediaWalkerBlockSize = m_renderHal->pHwSizes->dwSizeMediaWalkerBlock;
@@ -756,18 +779,18 @@ MOS_STATUS RenderCmdPacket::PrepareMediaWalkerParams(KERNEL_WALKER_PARAMS params
 
     // Calculate aligned output area in order to determine the total # blocks
     // to process in case of non-16x16 aligned target.
-    alignedRect.right  += uiMediaWalkerBlockSize - 1;
+    alignedRect.right += uiMediaWalkerBlockSize - 1;
     alignedRect.bottom += uiMediaWalkerBlockSize - 1;
-    alignedRect.left   -= alignedRect.left % uiMediaWalkerBlockSize;
-    alignedRect.top    -= alignedRect.top % uiMediaWalkerBlockSize;
-    alignedRect.right  -= alignedRect.right % uiMediaWalkerBlockSize;
+    alignedRect.left -= alignedRect.left % uiMediaWalkerBlockSize;
+    alignedRect.top -= alignedRect.top % uiMediaWalkerBlockSize;
+    alignedRect.right -= alignedRect.right % uiMediaWalkerBlockSize;
     alignedRect.bottom -= alignedRect.bottom % uiMediaWalkerBlockSize;
 
     if (params.calculateBlockXYByAlignedRect)
     {
         // Set number of blocks
-        params.iBlocksX = (alignedRect.right  - alignedRect.left) / uiMediaWalkerBlockSize;
-        params.iBlocksY = (alignedRect.bottom - alignedRect.top ) / uiMediaWalkerBlockSize;
+        params.iBlocksX = (alignedRect.right - alignedRect.left) / uiMediaWalkerBlockSize;
+        params.iBlocksY = (alignedRect.bottom - alignedRect.top) / uiMediaWalkerBlockSize;
     }
 
     // Set walker cmd params - Rasterscan
@@ -826,8 +849,8 @@ MOS_STATUS RenderCmdPacket::PrepareMediaWalkerParams(KERNEL_WALKER_PARAMS params
         mediaWalker.LocalInnerLoopUnit.y = 1;
 
         mediaWalker.dwLocalLoopExecCount = params.iBlocksX - 1;
-        mediaWalker.LocalEnd.x = 0;
-        mediaWalker.LocalEnd.y = params.iBlocksY - 1;
+        mediaWalker.LocalEnd.x           = 0;
+        mediaWalker.LocalEnd.y           = params.iBlocksY - 1;
     }
     else
     {
@@ -838,17 +861,17 @@ MOS_STATUS RenderCmdPacket::PrepareMediaWalkerParams(KERNEL_WALKER_PARAMS params
         mediaWalker.LocalInnerLoopUnit.y = 0;
 
         mediaWalker.dwLocalLoopExecCount = params.iBlocksY - 1;
-        mediaWalker.LocalEnd.x = params.iBlocksX - 1;
-        mediaWalker.LocalEnd.y = 0;
+        mediaWalker.LocalEnd.x           = params.iBlocksX - 1;
+        mediaWalker.LocalEnd.y           = 0;
     }
 
-    mediaWalker.UseScoreboard   = m_renderHal->VfeScoreboard.ScoreboardEnable;
-    mediaWalker.ScoreboardMask  = m_renderHal->VfeScoreboard.ScoreboardMask;
+    mediaWalker.UseScoreboard  = m_renderHal->VfeScoreboard.ScoreboardEnable;
+    mediaWalker.ScoreboardMask = m_renderHal->VfeScoreboard.ScoreboardMask;
 
     return MOS_STATUS_SUCCESS;
 }
 
-MOS_STATUS RenderCmdPacket::PrepareComputeWalkerParams(KERNEL_WALKER_PARAMS params, MHW_GPGPU_WALKER_PARAMS& gpgpuWalker)
+MOS_STATUS RenderCmdPacket::PrepareComputeWalkerParams(KERNEL_WALKER_PARAMS params, MHW_GPGPU_WALKER_PARAMS &gpgpuWalker)
 {
     uint32_t uiMediaWalkerBlockSize;
     RECT     alignedRect = {};
@@ -858,22 +881,22 @@ MOS_STATUS RenderCmdPacket::PrepareComputeWalkerParams(KERNEL_WALKER_PARAMS para
 
     // Calculate aligned output area in order to determine the total # blocks
     // to process in case of non-16x16 aligned target.
-    alignedRect.right  += uiMediaWalkerBlockSize  - 1;
+    alignedRect.right += uiMediaWalkerBlockSize - 1;
     alignedRect.bottom += uiMediaWalkerBlockSize - 1;
-    alignedRect.left   -= alignedRect.left   % uiMediaWalkerBlockSize;
-    alignedRect.top    -= alignedRect.top    % uiMediaWalkerBlockSize;
-    alignedRect.right  -= alignedRect.right  % uiMediaWalkerBlockSize;
+    alignedRect.left -= alignedRect.left % uiMediaWalkerBlockSize;
+    alignedRect.top -= alignedRect.top % uiMediaWalkerBlockSize;
+    alignedRect.right -= alignedRect.right % uiMediaWalkerBlockSize;
     alignedRect.bottom -= alignedRect.bottom % uiMediaWalkerBlockSize;
 
     if (params.calculateBlockXYByAlignedRect)
     {
         // Set number of blocks
-        params.iBlocksX = (alignedRect.right  - alignedRect.left) / uiMediaWalkerBlockSize;
-        params.iBlocksY = (alignedRect.bottom - alignedRect.top ) / uiMediaWalkerBlockSize;
+        params.iBlocksX = (alignedRect.right - alignedRect.left) / uiMediaWalkerBlockSize;
+        params.iBlocksY = (alignedRect.bottom - alignedRect.top) / uiMediaWalkerBlockSize;
     }
 
     // Set walker cmd params - Rasterscan
-    gpgpuWalker.InterfaceDescriptorOffset    = params.iMediaID;
+    gpgpuWalker.InterfaceDescriptorOffset = params.iMediaID;
 
     // Specifies the initial value of the X component of the thread group when walker is started.
     // During the walker operation, when X is incremented to the X Dimension limit, on the next step
@@ -881,21 +904,21 @@ MOS_STATUS RenderCmdPacket::PrepareComputeWalkerParams(KERNEL_WALKER_PARAMS para
     gpgpuWalker.GroupStartingX = (alignedRect.left / uiMediaWalkerBlockSize);
     gpgpuWalker.GroupStartingY = (alignedRect.top / uiMediaWalkerBlockSize);
     // The X dimension of the thread group (maximum X is dimension -1), same as GroupHeight.
-    gpgpuWalker.GroupWidth     = params.iBlocksX;
-    gpgpuWalker.GroupHeight    = params.iBlocksY;
+    gpgpuWalker.GroupWidth  = params.iBlocksX;
+    gpgpuWalker.GroupHeight = params.iBlocksY;
     if (params.isGroupStartInvolvedInGroupSize)
     {
-        gpgpuWalker.GroupWidth  += gpgpuWalker.GroupStartingX;
+        gpgpuWalker.GroupWidth += gpgpuWalker.GroupStartingX;
         gpgpuWalker.GroupHeight += gpgpuWalker.GroupStartingY;
     }
 
-    gpgpuWalker.ThreadWidth  = COMPUTE_WALKER_THREAD_SPACE_WIDTH;
-    gpgpuWalker.ThreadHeight = COMPUTE_WALKER_THREAD_SPACE_HEIGHT;
-    gpgpuWalker.ThreadDepth  = COMPUTE_WALKER_THREAD_SPACE_DEPTH;
+    gpgpuWalker.ThreadWidth              = COMPUTE_WALKER_THREAD_SPACE_WIDTH;
+    gpgpuWalker.ThreadHeight             = COMPUTE_WALKER_THREAD_SPACE_HEIGHT;
+    gpgpuWalker.ThreadDepth              = COMPUTE_WALKER_THREAD_SPACE_DEPTH;
     gpgpuWalker.IndirectDataStartAddress = params.iCurbeOffset;
     // Indirect Data Length is a multiple of 64 bytes (size of L3 cacheline). Bits [5:0] are zero.
-    gpgpuWalker.IndirectDataLength       = MOS_ALIGN_CEIL(params.iCurbeLength, 1 << MHW_COMPUTE_INDIRECT_SHIFT);
-    gpgpuWalker.BindingTableID           = params.iBindingTable;
+    gpgpuWalker.IndirectDataLength = MOS_ALIGN_CEIL(params.iCurbeLength, 1 << MHW_COMPUTE_INDIRECT_SHIFT);
+    gpgpuWalker.BindingTableID     = params.iBindingTable;
 
     return MOS_STATUS_SUCCESS;
 }
@@ -908,9 +931,9 @@ void RenderCmdPacket::UpdateKernelConfigParam(RENDERHAL_KERNEL_PARAM &kernelPara
 
 MOS_STATUS RenderCmdPacket::LoadKernel()
 {
-    int32_t                     iKrnAllocation  = 0;
-    MHW_KERNEL_PARAM            MhwKernelParam  = {};
-    RENDERHAL_KERNEL_PARAM      KernelParam     = m_renderData.KernelParam;
+    int32_t                iKrnAllocation = 0;
+    MHW_KERNEL_PARAM       MhwKernelParam = {};
+    RENDERHAL_KERNEL_PARAM KernelParam    = m_renderData.KernelParam;
     // Load kernel to GSH
     INIT_MHW_KERNEL_PARAM(MhwKernelParam, &m_renderData.KernelEntry);
     UpdateKernelConfigParam(KernelParam);
@@ -972,11 +995,11 @@ MOS_STATUS RenderCmdPacket::InitRenderHalSurface(MOS_SURFACE surface, PRENDERHAL
 MOS_STATUS RenderCmdPacket::InitRenderHalBuffer(MOS_BUFFER surface, PRENDERHAL_SURFACE pRenderSurface)
 {
     RENDER_PACKET_CHK_NULL_RETURN(pRenderSurface);
-    pRenderSurface->OsSurface.OsResource         = surface.OsResource;
-    pRenderSurface->OsSurface.dwWidth            = surface.size;
-    pRenderSurface->OsSurface.dwHeight           = 1;
-    pRenderSurface->OsSurface.dwPitch            = surface.size;
-    pRenderSurface->OsSurface.Format             = Format_RAW;
+    pRenderSurface->OsSurface.OsResource = surface.OsResource;
+    pRenderSurface->OsSurface.dwWidth    = surface.size;
+    pRenderSurface->OsSurface.dwHeight   = 1;
+    pRenderSurface->OsSurface.dwPitch    = surface.size;
+    pRenderSurface->OsSurface.Format     = Format_RAW;
 
     return MOS_STATUS_SUCCESS;
 }

@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2012-2021, Intel Corporation
+* Copyright (c) 2012-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -29,6 +29,7 @@
 #include "vphal_render_vebox_base.h"
 #include "vphal_render_ief.h"
 #include "vphal_render_sfc_base.h"
+#include "vp_hal_ddi_utils.h"
 
 #if __VPHAL_SFC_SUPPORTED
 
@@ -171,6 +172,10 @@ VphalSfcState::VphalSfcState(
     m_renderHal       = renderHal;
     m_sfcInterface    = sfcInterface;
     m_osInterface     = osInterface;
+    if (m_osInterface)
+    {
+        m_userSettingPtr = m_osInterface->pfnGetUserSettingInstance(m_osInterface);
+    }
 
     // Allocate AVS state
     VpHal_RndrCommonInitAVSParams(
@@ -284,6 +289,62 @@ finish:
     return;
 }
 
+bool VphalSfcState::IsSFCUncompressedWriteNeeded(
+    PVPHAL_SURFACE pRenderTarget)
+{
+    if (!pRenderTarget)
+    {
+        return false;
+    }
+
+    if (!MEDIA_IS_SKU(m_renderHal->pSkuTable, FtrE2ECompression))
+    {
+        return false;
+    }
+
+    uint32_t byteInpixel = 1;
+#if !EMUL
+    if (!pRenderTarget->OsResource.pGmmResInfo)
+    {
+        VPHAL_RENDER_NORMALMESSAGE("IsSFCUncompressedWriteNeeded cannot support non GMM info cases");
+        return false;
+    }
+
+    byteInpixel = pRenderTarget->OsResource.pGmmResInfo->GetBitsPerPixel() >> 3;
+#endif // !EMUL
+
+    if (byteInpixel == 0)
+    {
+        VPHAL_RENDER_NORMALMESSAGE("surface format is not a valid format for sfc");
+        return false;
+    }
+    uint32_t writeAlignInWidth  = 32 / byteInpixel;
+    uint32_t writeAlignInHeight = 8;
+
+    if ((pRenderTarget->rcSrc.top % writeAlignInHeight) ||
+        ((pRenderTarget->rcSrc.bottom - pRenderTarget->rcSrc.top) % writeAlignInHeight) ||
+        (pRenderTarget->rcSrc.left % writeAlignInWidth) ||
+        ((pRenderTarget->rcSrc.right - pRenderTarget->rcSrc.left) % writeAlignInWidth))
+    {
+        VPHAL_RENDER_NORMALMESSAGE(
+            "SFC Render Target Uncompressed write needed, \
+            pRenderTarget->rcSrc.top % d, \
+            pRenderTarget->rcSrc.bottom % d, \
+            pRenderTarget->rcSrc.left % d, \
+            pRenderTarget->rcSrc.right % d \
+            pRenderTarget->Format % d",
+            pRenderTarget->rcSrc.top,
+            pRenderTarget->rcSrc.bottom,
+            pRenderTarget->rcSrc.left,
+            pRenderTarget->rcSrc.right,
+            pRenderTarget->Format);
+
+        return true;
+    }
+
+    return false;
+}
+
 bool VphalSfcState::IsOutputPipeSfcFeasible(
     PCVPHAL_RENDER_PARAMS       pcRenderParams,
     PVPHAL_SURFACE              pSrcSurface,
@@ -363,6 +424,8 @@ VPHAL_OUTPUT_PIPE_MODE VphalSfcState::GetOutputPipe(
     uint32_t                    dwSfcMaxHeight;
     uint32_t                    dwSfcMinWidth;
     uint32_t                    dwSfcMinHeight;
+    MOS_SURFACE                 details = {};
+    MOS_STATUS                  eStatus = MOS_STATUS_SUCCESS;
 
     OutputPipe = VPHAL_OUTPUT_PIPE_MODE_COMP;
 
@@ -505,6 +568,39 @@ VPHAL_OUTPUT_PIPE_MODE VphalSfcState::GetOutputPipe(
         OutputPipe = VPHAL_OUTPUT_PIPE_MODE_COMP;
     }
 
+
+    if (OutputPipe == VPHAL_OUTPUT_PIPE_MODE_SFC)
+    {
+        // Decompress resource if surfaces need write from a un-align offset
+        // skip RGB RC as default MC on current platforms, No need these logics
+        if ((pRenderTarget->CompressionMode == MOS_MMC_MC)        &&
+            IsSFCUncompressedWriteNeeded(pRenderTarget))
+        {
+
+            eStatus = m_osInterface->pfnGetResourceInfo(m_osInterface, &pRenderTarget->OsResource, &details);
+
+            if (eStatus != MOS_STATUS_SUCCESS)
+            {
+                VP_RENDER_ASSERTMESSAGE("Get SFC target surface resource info failed.");
+            }
+
+            if (!pRenderTarget->OsResource.bUncompressedWriteNeeded)
+            {
+                eStatus = m_osInterface->pfnDecompResource(m_osInterface, &pRenderTarget->OsResource);
+
+                if (eStatus != MOS_STATUS_SUCCESS)
+                {
+                    VPHAL_RENDER_NORMALMESSAGE("inplace decompression failed for sfc target.");
+                }
+                else
+                {
+                    VPHAL_RENDER_NORMALMESSAGE("inplace decompression enabled for sfc target RECT is not compression block align.");
+                    pRenderTarget->OsResource.bUncompressedWriteNeeded = 1;
+                }
+            }
+        }
+    }
+
 finish:
     return OutputPipe;
 }
@@ -589,7 +685,7 @@ void VphalSfcState::SetRenderingFlags(
     wHeightAlignUnit = 1;
     dwVeboxBottom    = (uint32_t)pSrc->rcSrc.bottom;
     dwVeboxRight     = (uint32_t)pSrc->rcSrc.right;
-    dstColorPack     = VpHal_GetSurfaceColorPack(pRenderTarget->Format);
+    dstColorPack     = VpHalDDIUtils::GetSurfaceColorPack(pRenderTarget->Format);
 
     // Get the SFC input surface size from Vebox
     AdjustBoundary(
@@ -694,7 +790,7 @@ void VphalSfcState::SetRenderingFlags(
     {
         m_renderData.SfcSrcChromaSiting = (CHROMA_SITING_HORZ_LEFT | CHROMA_SITING_VERT_CENTER);
     }
-    switch (VpHal_GetSurfaceColorPack(m_renderData.SfcInputFormat))
+    switch (VpHalDDIUtils::GetSurfaceColorPack(m_renderData.SfcInputFormat))
     {
         case VPHAL_COLORPACK_422:
             m_renderData.SfcSrcChromaSiting = (m_renderData.SfcSrcChromaSiting & 0x7) | CHROMA_SITING_VERT_TOP;
@@ -869,7 +965,7 @@ MOS_STATUS VphalSfcState::AllocateResources()
         MOS_HW_RESOURCE_DEF_MAX,
         MOS_TILE_UNSET_GMM,
         memTypeSurfVideoMem,
-        MOS_MEMPOOL_DEVICEMEMORY == memTypeSurfVideoMem));
+        VPP_INTER_RESOURCE_NOTLOCKABLE));
 
     // Allocate IEF Line Buffer surface----------------------------------------------
     dwWidth  = 1;
@@ -891,7 +987,7 @@ MOS_STATUS VphalSfcState::AllocateResources()
         MOS_HW_RESOURCE_DEF_MAX,
         MOS_TILE_UNSET_GMM,
         memTypeSurfVideoMem,
-        MOS_MEMPOOL_DEVICEMEMORY == memTypeSurfVideoMem));
+        VPP_INTER_RESOURCE_NOTLOCKABLE));
 
     // Allocate SFD Line Buffer surface----------------------------------------------
     if (NEED_SFD_LINE_BUFFER(pSfcStateParams->dwScaledRegionHeight))
@@ -913,7 +1009,7 @@ MOS_STATUS VphalSfcState::AllocateResources()
             MOS_HW_RESOURCE_DEF_MAX,
             MOS_TILE_UNSET_GMM,
             memTypeSurfVideoMem,
-            MOS_MEMPOOL_DEVICEMEMORY == memTypeSurfVideoMem));
+            VPP_INTER_RESOURCE_NOTLOCKABLE));
     }
 
 finish:
@@ -934,7 +1030,7 @@ void VphalSfcState::GetOutputWidthHeightAlignUnit(
     widthAlignUnit  = 1;
     heightAlignUnit = 1;
 
-    switch (VpHal_GetSurfaceColorPack(outputFormat))
+    switch (VpHalDDIUtils::GetSurfaceColorPack(outputFormat))
     {
         case VPHAL_COLORPACK_420:
             widthAlignUnit  = 2;
@@ -990,7 +1086,7 @@ MOS_STATUS VphalSfcState::SetSfcStateParams(
     wInputHeightAlignUnit  = 1;
     dwVeboxBottom          = (uint32_t)pSrcSurface->rcSrc.bottom;
     dwVeboxRight           = (uint32_t)pSrcSurface->rcSrc.right;
-    dstColorPack           = VpHal_GetSurfaceColorPack(pOutSurface->Format);
+    dstColorPack           = VpHalDDIUtils::GetSurfaceColorPack(pOutSurface->Format);
 
     VPHAL_RENDER_CHK_NULL(pSfcStateParams);
     MOS_ZeroMemory(pSfcStateParams, sizeof(*pSfcStateParams));
@@ -1020,12 +1116,12 @@ MOS_STATUS VphalSfcState::SetSfcStateParams(
             pSfcStateParams->dwInputChromaSubSampling = MEDIASTATE_SFC_CHROMA_SUBSAMPLING_420;
             pSfcStateParams->b8tapChromafiltering     = false;
         }
-        else if (VpHal_GetSurfaceColorPack(m_renderData.SfcInputFormat) == VPHAL_COLORPACK_422)
+        else if (VpHalDDIUtils::GetSurfaceColorPack(m_renderData.SfcInputFormat) == VPHAL_COLORPACK_422)
         {
             pSfcStateParams->dwInputChromaSubSampling = MEDIASTATE_SFC_CHROMA_SUBSAMPLING_422H;
             pSfcStateParams->b8tapChromafiltering     = false;
         }
-        else if (VpHal_GetSurfaceColorPack(m_renderData.SfcInputFormat) == VPHAL_COLORPACK_444)
+        else if (VpHalDDIUtils::GetSurfaceColorPack(m_renderData.SfcInputFormat) == VPHAL_COLORPACK_444)
         {
             pSfcStateParams->dwInputChromaSubSampling = MEDIASTATE_SFC_CHROMA_SUBSAMPLING_444;
             pSfcStateParams->b8tapChromafiltering     = true;
@@ -1190,6 +1286,11 @@ MOS_STATUS VphalSfcState::SetSfcStateParams(
     {
         pSfcStateParams->bBypassXAdaptiveFilter = false;
         pSfcStateParams->bBypassYAdaptiveFilter = false;
+
+        if (MEDIASTATE_SFC_AVS_FILTER_BILINEAR == pSfcStateParams->dwAVSFilterMode)
+        {
+            VPHAL_RENDER_NORMALMESSAGE("Legacy Check: bBypassXAdaptiveFilter/bBypassYAdaptiveFilter are set to false for bilinear scaling.");
+        }
     }
     else
     {
@@ -1251,7 +1352,7 @@ MOS_STATUS VphalSfcState::SetSfcStateParams(
             (m_colorFillRTCspace           != dst_cspace))
         {
             // Clean history Dst BG Color if hit unsupported format
-            if (!VpHal_CSC_8(&m_colorFillColorDst, &Src, src_cspace, dst_cspace))
+            if (!VpUtils::GetCscMatrixForRender8Bit(&m_colorFillColorDst, &Src, src_cspace, dst_cspace))
             {
                 MOS_ZeroMemory(&m_colorFillColorDst, sizeof(m_colorFillColorDst));
             }
@@ -1457,7 +1558,7 @@ MOS_STATUS VphalSfcState::SetAvsStateParams()
         {
             m_renderData.SfcSrcChromaSiting = MHW_CHROMA_SITING_HORZ_LEFT | MHW_CHROMA_SITING_VERT_TOP;
 
-            if (VpHal_GetSurfaceColorPack(m_renderData.SfcInputFormat) == VPHAL_COLORPACK_420)  // For 420, default is Left & Center, else default is Left & Top
+            if (VpHalDDIUtils::GetSurfaceColorPack(m_renderData.SfcInputFormat) == VPHAL_COLORPACK_420)  // For 420, default is Left & Center, else default is Left & Top
             {
                 pMhwAvsState->dwInputVerticalSitting = SFC_AVS_INPUT_SITING_COEF_4_OVER_8;
             }
@@ -1689,6 +1790,12 @@ MOS_STATUS VphalSfcState::SendSfcCmd(
         pCmdBuffer,
         m_renderData.SfcStateParams,
         &OutSurfaceParam));
+#if (_DEBUG || _RELEASE_INTERNAL)
+    if ((&OutSurfaceParam)->pOsResource)
+    {
+        (m_renderData.pSfcPipeOutSurface)->oldCacheSetting = ((&OutSurfaceParam)->pOsResource->memObjCtrlState.DwordValue >> 1) & 0x0000003f;
+    }
+#endif
 
     // Send SFC_AVS_STATE command
     VPHAL_RENDER_CHK_STATUS(pSfcInterface->AddSfcAvsState(

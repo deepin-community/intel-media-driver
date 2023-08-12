@@ -29,8 +29,17 @@
 #ifndef __DECODE_ALLOCATOR_H__
 #define __DECODE_ALLOCATOR_H__
 
-#include "media_allocator.h"
-#include "mhw_utilities.h"
+#include "media_class_trace.h"
+#include "mhw_utilities_next.h"
+#include "mos_defs.h"
+#include "mos_os.h"
+#include "mos_os_hw.h"
+#include "mos_os_specific.h"
+#include "mos_resource_defs.h"
+#include "External/Common/GmmCachePolicyExt.h"
+#include <stdint.h>
+#include <vector>
+class Allocator;
 
 namespace decode {
 
@@ -179,7 +188,6 @@ public:
         const uint32_t numberOfSurface, MOS_FORMAT format = Format_NV12, bool isCompressed = false,
         ResourceUsage resUsageType = resourceDefault, ResourceAccessReq accessReq = lockableVideoMem);
 
-#if (_DEBUG || _RELEASE_INTERNAL)
     //!
     //! \brief  Allocate Linear Output Surface
     //! \param  [in] width
@@ -202,7 +210,7 @@ public:
         MOS_FORMAT format = Format_NV12, bool isCompressible = false,
         ResourceUsage resUsageType = resourceDefault, ResourceAccessReq accessReq = lockableVideoMem,
         MOS_TILE_MODE_GMM gmmTileMode = MOS_TILE_UNSET_GMM);
-#endif
+
     //!
     //! \brief  Allocate batch buffer
     //! \param  [in] sizeOfBuffer
@@ -548,6 +556,7 @@ protected:
     bool m_forceLockable = false;
 #endif
 
+MEDIA_CLASS_DEFINE_END(decode__DecodeAllocator)
 };
 }
 #endif // !__DECODE_ALLOCATOR_H__

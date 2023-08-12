@@ -28,13 +28,13 @@
 #ifndef __VPHAL_RENDER_VEBOX_MEMDECOMP_H__
 #define __VPHAL_RENDER_VEBOX_MEMDECOMP_H__
 
-#include "mhw_render.h"
+#include "mhw_render_legacy.h"
 #include "mos_os.h"
 #include "vphal_debug.h"
 #include "mediamemdecomp.h"
 #include "vphal_common.h"
 #include "mhw_vebox.h"
-#include "renderhal.h"
+#include "renderhal_legacy.h"
 
 //------------------------------------------------------------------------------
 // Macros specific to MOS_VP_SUBCOMP_RENDER sub-comp
@@ -351,6 +351,9 @@ protected:
     PMHW_MI_INTERFACE           m_mhwMiInterface;
     MhwCpInterface             *m_cpInterface;
     bool                        m_veboxMMCResolveEnabled;
+
+    MediaUserSettingSharedPtr m_userSettingPtr = nullptr;  //!< UserSettingInstance
+
 #if (_DEBUG || _RELEASE_INTERNAL)
     VphalSurfaceDumper         *m_surfaceDumper = nullptr;
     uint32_t                    m_surfaceDumpCounter = 0;

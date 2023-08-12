@@ -3696,7 +3696,7 @@ public:
     };
 };
 
-class KernelHeader
+class KernelHeaderAvcG11
 {
 public:
     int m_kernelCount;
@@ -3907,7 +3907,7 @@ MOS_STATUS CodechalEncodeAvcEncG11::GetKernelHeaderAndSize(void *binary, EncOper
     CODECHAL_ENCODE_CHK_NULL_RETURN(krnHeader);
     CODECHAL_ENCODE_CHK_NULL_RETURN(krnSize);
 
-    auto kernelHeaderTable = (KernelHeader *)binary;
+    auto kernelHeaderTable = (KernelHeaderAvcG11 *)binary;
     auto                    invalidEntry      = &(kernelHeaderTable->m_avcWeightedPrediction) + 1;
     auto nextKrnOffset = *krnSize;
     PCODECHAL_KERNEL_HEADER currKrnHeader = nullptr;
@@ -3982,7 +3982,7 @@ CodechalEncodeAvcEncG11::CodechalEncodeAvcEncG11(
 
     m_vdboxOneDefaultUsed = true;
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, false, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, false, true);
 
     CODECHAL_DEBUG_TOOL(
         CODECHAL_ENCODE_CHK_NULL_NO_STATUS_RETURN(m_encodeParState = MOS_New(CodechalDebugEncodeParG11, this));
@@ -4553,8 +4553,8 @@ MOS_STATUS CodechalEncodeAvcEncG11::MbEncKernel(bool mbEncIFrameDistInUse)
             &walkerParams,
             &walkerCodecParams));
 
-        HalOcaInterface::TraceMessage(cmdBuffer, *m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
-        HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface->pOsContext, *m_miInterface, *m_renderEngineInterface->GetMmioRegisters());
+        HalOcaInterface::TraceMessage(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
+        HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *m_miInterface, *m_renderEngineInterface->GetMmioRegisters());
 
         CODECHAL_ENCODE_CHK_STATUS_RETURN(m_renderEngineInterface->AddMediaObjectWalkerCmd(
             &cmdBuffer,
@@ -7232,9 +7232,9 @@ MOS_STATUS CodechalEncodeAvcEncG11::SendAvcMbEncSurfaces(PMOS_COMMAND_BUFFER cmd
         ss << "MV Data buffer ( size == 0x" << std::hex << m_mvDataSize << " ) is too large to fit into the OCA buffer. "
             "Put only 0x" << std::hex << ocaMvDataBufferMaxSize << " bytes - max allowed size";
         std::string ocaLog = ss.str();
-        HalOcaInterface::TraceMessage(*cmdBuffer, *m_osInterface->pOsContext, ocaLog.c_str(), ocaLog.length());
+        HalOcaInterface::TraceMessage(*cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, ocaLog.c_str(), ocaLog.length());
     }
-    HalOcaInterface::OnIndirectState(*cmdBuffer, *m_osInterface->pOsContext, mvDataBuffer, 0, false, MOS_MIN(m_mvDataSize, ocaMvDataBufferMaxSize));
+    HalOcaInterface::OnIndirectState(*cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, mvDataBuffer, 0, false, MOS_MIN(m_mvDataSize, ocaMvDataBufferMaxSize));
 
     // Current Picture Y
     MOS_ZeroMemory(&surfaceCodecParams, sizeof(CODECHAL_SURFACE_CODEC_PARAMS));

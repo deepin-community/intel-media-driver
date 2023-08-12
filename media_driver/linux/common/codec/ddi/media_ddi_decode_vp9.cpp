@@ -178,6 +178,21 @@ VAStatus DdiDecodeVP9::ParsePicParams(
     MOS_SecureMemcpy(picVp9Params->SegTreeProbs, 7, picParam->mb_segment_tree_probs, 7);
     MOS_SecureMemcpy(picVp9Params->SegPredProbs, 3, picParam->segment_pred_probs, 3);
 
+#if MOS_EVENT_TRACE_DUMP_SUPPORTED
+    // Picture Info
+    uint32_t subSamplingSum = picVp9Params->subsampling_x + picVp9Params->subsampling_y;
+    DECODE_EVENTDATA_INFO_PICTUREVA eventData = {0};
+    eventData.CodecFormat                   = m_ddiDecodeCtx->wMode;
+    eventData.FrameType                     = picVp9Params->PicFlags.fields.frame_type == 0 ? I_TYPE : MIXED_TYPE;
+    eventData.PicStruct                     = FRAME_PICTURE;
+    eventData.Width                         = picVp9Params->FrameWidthMinus1 + 1;
+    eventData.Height                        = picVp9Params->FrameHeightMinus1 + 1;
+    eventData.Bitdepth                      = picVp9Params->BitDepthMinus8 + 8;
+    eventData.ChromaFormat                  = (subSamplingSum == 2) ? 1 : (subSamplingSum == 1 ? 2 : 3);  // 1-4:2:0; 2-4:2:2; 3-4:4:4
+    eventData.EnabledSegment                = picVp9Params->PicFlags.fields.segmentation_enabled;
+    MOS_TraceEvent(EVENT_DECODE_INFO_PICTUREVA, EVENT_TYPE_INFO, &eventData, sizeof(eventData), NULL, 0);
+#endif
+
     return VA_STATUS_SUCCESS;
 }
 
@@ -196,6 +211,14 @@ VAStatus DdiDecodeVP9::SetDecodeParams()
         procParams->m_inputSurface->dwHeight = procParams->m_inputSurface->OsResource.iHeight;
         procParams->m_inputSurface->dwPitch  = procParams->m_inputSurface->OsResource.iPitch;
         procParams->m_inputSurface->Format   = procParams->m_inputSurface->OsResource.Format;
+
+        if(m_requireInputRegion)
+        {
+            procParams->m_inputSurfaceRegion.m_x = 0;
+            procParams->m_inputSurfaceRegion.m_y = 0;
+            procParams->m_inputSurfaceRegion.m_width = procParams->m_inputSurface->dwWidth;
+            procParams->m_inputSurfaceRegion.m_height = procParams->m_inputSurface->dwHeight;
+        }
     }
 #endif
      return VA_STATUS_SUCCESS;
@@ -253,6 +276,7 @@ VAStatus DdiDecodeVP9::RenderPicture(
             DdiMedia_MediaBufferToMosResource(m_ddiDecodeCtx->BufMgr.pBitStreamBuffObject[index], &m_ddiDecodeCtx->BufMgr.resBitstreamBuffer);
             m_ddiDecodeCtx->DecodeParams.m_dataSize += dataSize;
             slcFlag = true;
+
             break;
         }
         case VASliceParameterBufferType:

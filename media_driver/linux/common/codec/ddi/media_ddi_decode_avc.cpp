@@ -31,7 +31,7 @@
 #include "codechal_memdecomp.h"
 #include "media_ddi_decode_const.h"
 #include "media_ddi_factory.h"
-#include "media_interfaces.h"
+#include "media_factory.h"
 
 VAStatus DdiDecodeAVC::ParseSliceParams(
     DDI_MEDIA_CONTEXT           *mediaCtx,
@@ -172,26 +172,7 @@ VAStatus DdiDecodeAVC::ParseSliceParams(
         avcSliceParams->slice_id = 0;
         avcSliceParams++;
     }
-#if (_DEBUG || _RELEASE_INTERNAL)
-    {
-        auto pPP = avcPicParams;
-        int32_t data[4] = { 0, 0, pPP->CurrFieldOrderCnt[0], pPP->CurrFieldOrderCnt[1]};
-        uint8_t data2[CODEC_AVC_MAX_NUM_REF_FRAME];
-        data[0] = pPP->CurrPic.FrameIdx & 0xff;
-        data[0] |= pPP->seq_fields.log2_max_frame_num_minus4 << 8;
-        data[0] |= pPP->seq_fields.pic_order_cnt_type << 16;
-        data[0] |= pPP->seq_fields.log2_max_pic_order_cnt_lsb_minus4 << 24;
-        data[1] = pPP->frame_num;
-        data[1] |= pPP->pic_fields.field_pic_flag << 16;
-        data[1] |= pPP->pic_fields.reference_pic_flag << 22;
-        data[1] |= pPP->pic_fields.IntraPicFlag << 31;
-        for (int i = 0; i<CODEC_AVC_MAX_NUM_REF_FRAME; i++)
-        {
-            data2[i] = pPP->RefFrameList[i].FrameIdx;
-        }
-        MOS_TraceEvent(EVENT_PIC_PARAM_AVC, EVENT_TYPE_INFO, &data, sizeof(data), data2, sizeof(data2));
-    }
-#endif
+
     return VA_STATUS_SUCCESS;
 }
 
@@ -268,7 +249,7 @@ VAStatus DdiDecodeAVC::ParsePicParams(
 
     //Accoding to RecList, if the surface id is invalid, set PicFlags equal to PICTURE_INVALID
     for (i = 0; i < CODEC_MAX_NUM_REF_FRAME; i++)
-    {
+    {     
         //Check the surface id of reference list
         if (VA_INVALID_ID == m_ddiDecodeCtx->RecListSurfaceID[avcPicParams->RefFrameList[i].FrameIdx])
         {
@@ -324,6 +305,19 @@ VAStatus DdiDecodeAVC::ParsePicParams(
     }
 
     avcPicParams->frame_num = picParam->frame_num;
+
+#if MOS_EVENT_TRACE_DUMP_SUPPORTED
+    // Picture Info
+    DECODE_EVENTDATA_INFO_PICTUREVA eventData = {0};
+    eventData.CodecFormat                   = m_ddiDecodeCtx->wMode;
+    eventData.FrameType                     = avcPicParams->pic_fields.IntraPicFlag == 1 ? I_TYPE : MIXED_TYPE;
+    eventData.PicStruct                     = avcPicParams->CurrPic.PicFlags;  // 1-Top; 2-Bottom; 3-Frame
+    eventData.Width                         = (avcPicParams->pic_width_in_mbs_minus1 + 1) * MACROBLOCK_WIDTH;
+    eventData.Height                        = (avcPicParams->pic_height_in_mbs_minus1 + 1) * MACROBLOCK_HEIGHT;
+    eventData.Bitdepth                      = avcPicParams->bit_depth_luma_minus8 + 8;
+    eventData.ChromaFormat                  = avcPicParams->seq_fields.chroma_format_idc;  // 0-4:0:0; 1-4:2:0; 2-4:2:2; 3-4:4:4
+    MOS_TraceEvent(EVENT_DECODE_INFO_PICTUREVA, EVENT_TYPE_INFO, &eventData, sizeof(eventData), NULL, 0);
+#endif
 
     return VA_STATUS_SUCCESS;
 }
@@ -429,6 +423,7 @@ VAStatus DdiDecodeAVC::RenderPicture(
 
             DdiMedia_MediaBufferToMosResource(m_ddiDecodeCtx->BufMgr.pBitStreamBuffObject[index], &m_ddiDecodeCtx->BufMgr.resBitstreamBuffer);
             m_ddiDecodeCtx->DecodeParams.m_dataSize += dataSize;
+
             break;
         }
         case VASliceParameterBufferType:
@@ -498,6 +493,14 @@ VAStatus DdiDecodeAVC::SetDecodeParams()
         procParams->m_inputSurface->dwHeight = procParams->m_inputSurface->OsResource.iHeight;
         procParams->m_inputSurface->dwPitch  = procParams->m_inputSurface->OsResource.iPitch;
         procParams->m_inputSurface->Format   = procParams->m_inputSurface->OsResource.Format;
+
+        if(m_requireInputRegion)
+        {
+            procParams->m_inputSurfaceRegion.m_x = 0;
+            procParams->m_inputSurfaceRegion.m_y = 0;
+            procParams->m_inputSurfaceRegion.m_width = procParams->m_inputSurface->dwWidth;
+            procParams->m_inputSurfaceRegion.m_height = procParams->m_inputSurface->dwHeight;
+        }
     }
 #endif
 
@@ -869,8 +872,15 @@ void DdiDecodeAVC::SetupCodecPicture(
     if(vaPic.picture_id != DDI_CODEC_INVALID_FRAME_INDEX)
     {
         DDI_MEDIA_SURFACE *surface = DdiMedia_GetSurfaceFromVASurfaceID(mediaCtx, vaPic.picture_id);
-        vaPic.frame_idx    = GetRenderTargetID(rtTbl, surface);
-        codecHalPic->FrameIdx = (uint8_t)vaPic.frame_idx;
+        vaPic.frame_idx    = GetRenderTargetID(rtTbl, surface);    
+        if(vaPic.frame_idx == DDI_CODEC_INVALID_FRAME_INDEX)
+        {
+            codecHalPic->FrameIdx = CODEC_AVC_NUM_UNCOMPRESSED_SURFACE - 1;
+        }
+        else
+        {
+            codecHalPic->FrameIdx = (uint8_t)vaPic.frame_idx;
+        }
     }
     else
     {

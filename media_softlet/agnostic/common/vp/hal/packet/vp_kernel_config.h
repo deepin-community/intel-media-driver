@@ -23,9 +23,10 @@
 #define __VP_KERNEL_CONFIG_H__
 
 #include <map>
+#include "mos_defs.h"
 #include "renderhal.h"
-#include "vphal.h"
-#include "hal_kerneldll.h"
+#include "hal_kerneldll_next.h"
+#include "media_class_trace.h"
 
 #define VP_USE_MEDIA_THREADS_MAX    0
 // Compositing Block size
@@ -37,6 +38,15 @@
             RENDERHAL_KERNEL_PARAM{ (grfCount), (btCount), (samplerCount), (threadCount), (grfStartReg), (curbeLen), (blockWidth), (blockHeight), (blocksX), (blocksY)}))
 
 #define VP_ADV_KERNEL_BINARY_ID(kernelId)   ((IDR_VP_TOTAL_NUM_KERNELS) + (kernelId))
+
+enum DelayLoadedKernelType
+{
+    KernelNone = 0,
+    KernelFDFB,
+    KernelSEG,
+    KernelSR,
+    //If more kernels need to load delayed, can add to list
+};
 
 namespace vp {
 class VpKernelConfig
@@ -63,6 +73,8 @@ public:
 
 protected:
     std::map<VpKernelID, RENDERHAL_KERNEL_PARAM> m_kernelParams;    // Kernel params.
+
+MEDIA_CLASS_DEFINE_END(vp__VpKernelConfig)
 };
 }
 #endif // __VP_KERNEL_CONFIG_H__

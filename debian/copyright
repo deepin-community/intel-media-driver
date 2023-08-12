@@ -3,6 +3,16 @@ Source: https://github.com/intel/media-driver
 Comment:
  This package contains intel-media-driver without its non-free kernels.
 Files-Excluded: Tools/MediaDriverTools/UMDPerfProfiler/*
+                media_driver/agnostic/Xe_M/Xe_HPM/codec/kernel/XE_HPM_VC1_OLP.c
+                media_driver/agnostic/Xe_M/Xe_HPM/codec/kernel/Xe_Hpm_Film_Grain.c
+                media_driver/agnostic/Xe_M/Xe_XPM/codec/kernelisa/Xe_XPM_Film_Grain.c
+                media_driver/agnostic/Xe_M/Xe_XPM/codec/kernelisa/Xe_XPM_VC1_OLP.c
+                media_driver/agnostic/Xe_M/Xe_XPM/vp/kernel/cmfcpatch/igvpkrn_xe_xpm_cmfcpatch.c
+                media_driver/agnostic/Xe_M/Xe_XPM/vp/kernel/igvpkrn_isa_xe_xpm.c
+                media_driver/agnostic/Xe_M/Xe_XPM/vp/kernel/igvpkrn_xe_xpm.c
+                media_driver/agnostic/Xe_M/Xe_XPM_plus/codec/kernel/Xe_XPM_plus_Film_Grain.c
+                media_driver/agnostic/Xe_M/Xe_XPM_plus/vp/kernel/cmfcpatch/igvpkrn_xe_xpm_plus_cmfcpatch.c
+                media_driver/agnostic/Xe_M/Xe_XPM_plus/vp/kernel/igvpkrn_xe_xpm_plus.c
                 media_driver/agnostic/gen10/codec/kernel/igcodeckrn_g10.c
                 media_driver/agnostic/gen10/vp/kernel/igvpkrn_g10.c
                 media_driver/agnostic/gen11/codec/kernel/igcodeckrn_g11.c
@@ -27,6 +37,9 @@ Files-Excluded: Tools/MediaDriverTools/UMDPerfProfiler/*
                 media_driver/agnostic/gen9_cml/vp/kernel/tgp/igvpkrn_g9_cml_tgp.c
                 media_driver/agnostic/gen9_cmpv/vp/kernel/igvpkrn_g9_cmpv.c
                 media_driver/agnostic/gen9_kbl/codec/kernel/igcodeckrn_g9_kbl.c
+                media_softlet/agnostic/Xe_R/Xe_HPG_Base/vp/kernel/cmfcpatch/igvpkrn_xe_hpg_cmfcpatch.c
+                media_softlet/agnostic/Xe_R/Xe_HPG_Base/vp/kernel/igvpkrn_isa_xe_hpg.c
+                media_softlet/agnostic/Xe_R/Xe_HPG_Base/vp/kernel/igvpkrn_xe_hpg.c
 
 Files: *
 Copyright: 2007-2008, Dave Airlie

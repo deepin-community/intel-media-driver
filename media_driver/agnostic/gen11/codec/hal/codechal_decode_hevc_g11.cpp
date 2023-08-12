@@ -257,6 +257,7 @@ MOS_STATUS CodechalDecodeHevcG11::SetFrameStates ()
         (((m_decodeStatusBuf.m_decodeStatus->m_hucErrorStatus2 >> 32) & m_hucInterface->GetHucStatus2ImemLoadedMask()) == 0))
     {
         CODECHAL_DECODE_ASSERTMESSAGE("HuC IMEM Loaded fails");
+        MT_ERR1(MT_DEC_HEVC, MT_DEC_HUC_ERROR_STATUS2, (m_decodeStatusBuf.m_decodeStatus->m_hucErrorStatus2 >> 32));
         return MOS_STATUS_UNKNOWN;
     }
 
@@ -412,6 +413,18 @@ MOS_STATUS CodechalDecodeHevcG11::SetFrameStates ()
         // B, so in order to avoid this, declare all other pictures MIXED_TYPE.
         m_perfType = MIXED_TYPE;
     }
+    if (m_pCodechalOcaDumper)
+    {
+        m_pCodechalOcaDumper->SetHevcDecodeParam(
+            m_hevcPicParams,
+            m_hevcExtPicParams,
+            nullptr,
+            m_hevcSliceParams,
+            m_hevcExtSliceParams,
+            m_numSlices,
+            m_shortFormatInUse);
+    }
+
 
     m_crrPic = m_hevcPicParams->CurrPic;
     m_secondField =
@@ -1632,10 +1645,12 @@ MOS_STATUS CodechalDecodeHevcG11::DecodePrimitiveLevel()
     {
         submitCommand = CodecHalDecodeScalabilityIsToSubmitCmdBuffer(m_scalabilityState);
 
+        HalOcaInterface::DumpCodechalParam(scdryCmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, m_pCodechalOcaDumper, CODECHAL_HEVC);
         HalOcaInterface::On1stLevelBBEnd(scdryCmdBuffer, *m_osInterface);
     }
     else
     {
+        HalOcaInterface::DumpCodechalParam(primCmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, m_pCodechalOcaDumper, CODECHAL_HEVC);
         HalOcaInterface::On1stLevelBBEnd(primCmdBuffer, *m_osInterface);
     }
     if (submitCommand)
@@ -1835,7 +1850,7 @@ CodechalDecodeHevcG11::CodechalDecodeHevcG11(
 
     CODECHAL_DECODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
-     Mos_CheckVirtualEngineSupported(m_osInterface, true, true);
+     m_osInterface->pfnVirtualEngineSupported(m_osInterface, true, true);
 }
 
 #if USE_CODECHAL_DEBUG_TOOL

@@ -25,6 +25,7 @@
 
 #include "igfxfmid.h"
 #include "stdint.h"
+#include "media_class_trace.h"
 
 // This struct is designed to store common information
 
@@ -51,7 +52,7 @@ template <typename _attributeCapsTable>
 class MediaCapsTable
 {
 public:
-    typedef typename std::map<PlatformInfo, _attributeCapsTable> OsCapsTable;
+    typedef typename std::map<PlatformInfo, const _attributeCapsTable> OsCapsTable;
     typedef typename OsCapsTable::iterator                       Iterator;
 
     //!
@@ -64,6 +65,13 @@ public:
     //!
     virtual ~MediaCapsTable() {}
 
+    // pltCaps: map to store the captable information
+    static OsCapsTable &GetOsCapsTable()
+    {
+        static OsCapsTable pltCaps = {};
+        return pltCaps;
+    }
+
     //!
     // \brief     caps register for different Platform
     //! \para     [in] KeyType
@@ -73,22 +81,22 @@ public:
     //! \return   bool
     //!           return fail if insert pair fail
     //!
-    static bool RegisterCaps(PlatformInfo pltInfo, _attributeCapsTable attrCapsTable , bool forceReplace = false)
+    static bool RegisterCaps(PlatformInfo pltInfo, const _attributeCapsTable attrCapsTable , bool forceReplace = false)
     {
-        Iterator attrCapsTableItem = m_pltCaps.find(pltInfo);
-        if (attrCapsTableItem == m_pltCaps.end())
+        Iterator attrCapsTableItem = GetOsCapsTable().find(pltInfo);
+        if (attrCapsTableItem == GetOsCapsTable().end())
         {
             std::pair<Iterator, bool> result =
-                m_pltCaps.insert(std::make_pair(pltInfo, attrCapsTable));
+                GetOsCapsTable().insert(std::make_pair(pltInfo, attrCapsTable));
             return result.second;
         }
         else
         {
             if (forceReplace)
             {
-                m_pltCaps.erase(attrCapsTableItem);
+                GetOsCapsTable().erase(attrCapsTableItem);
                 std::pair<Iterator, bool> result =
-                    m_pltCaps.insert(std::make_pair(pltInfo, attrCapsTable));
+                    GetOsCapsTable().insert(std::make_pair(pltInfo, attrCapsTable));
                 return result.second;
             }
             return true;
@@ -98,7 +106,7 @@ public:
     bool IsLastIterator(Iterator iterator)
     {
         //DDI_FUNCTION_ENTER;
-        return (iterator == m_pltCaps.end());
+        return (iterator == GetOsCapsTable().end());
     }
 
     //!
@@ -116,10 +124,10 @@ public:
         //DDI_FUNCTION_ENTER;
 
         //get the table item w/ (table.ipversion == request.ipversion, table.revision <= request.request)
-        iter = m_pltCaps.lower_bound(pltInfo);
-        if (iter == m_pltCaps.end())
+        iter = GetOsCapsTable().lower_bound(pltInfo);
+        if (iter == GetOsCapsTable().end())
         {
-            //DDI_NORMALMESSAGE("can't find expected PlatformInfo in m_pltCaps");
+            //DDI_NORMALMESSAGE("can't find expected PlatformInfo in GetOsCapsTable()");
             return false;
         }
         if (iter->first.ipVersion != pltInfo.ipVersion)
@@ -130,9 +138,7 @@ public:
         return true;
     }
 
-private:
-    // m_plt_caps: map to store the captable information
-    static OsCapsTable m_pltCaps;
+MEDIA_CLASS_DEFINE_END(MediaCapsTable)
 };
 
 #endif

@@ -1305,8 +1305,8 @@ MOS_STATUS CodecHalEncodeSfcBase::RenderStart(
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(AddSfcCommands(sfcInterface, &cmdBuffer));
 
-    HalOcaInterface::TraceMessage(cmdBuffer, *pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
-    HalOcaInterface::OnDispatch(cmdBuffer, *pOsContext, *miInterface, *mmioVeboxRegisters);
+    HalOcaInterface::TraceMessage(cmdBuffer, (MOS_CONTEXT_HANDLE)pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
+    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *miInterface, *mmioVeboxRegisters);
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(veboxInterface->AddVeboxDiIecp(&cmdBuffer, &veboxDiIecpCmdParams));
 

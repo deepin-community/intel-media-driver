@@ -330,19 +330,19 @@ MOS_STATUS CM_HAL_G11_X::SubmitCommands(
     PCM_HAL_KERNEL_PARAM    *kernelParam,
     void                    **cmdBuffer)
 {
-    MOS_STATUS                   eStatus = MOS_STATUS_SUCCESS;
-    PCM_HAL_STATE                state = m_cmState;
-    PRENDERHAL_INTERFACE         renderHal = state->renderHal;
+    MOS_STATUS                   eStatus        = MOS_STATUS_SUCCESS;
+    PCM_HAL_STATE                state          = m_cmState;
+    PRENDERHAL_INTERFACE_LEGACY  renderHal      = state->renderHal;
     PMOS_INTERFACE               osInterface    = renderHal->pOsInterface;
     MhwRenderInterface           *mhwRender     = renderHal->pMhwRenderInterface;
     PMHW_MI_INTERFACE            mhwMiInterface = renderHal->pMhwMiInterface;
     PRENDERHAL_STATE_HEAP        stateHeap      = renderHal->pStateHeap;
-    MHW_PIPE_CONTROL_PARAMS      pipeCtlParams   = g_cRenderHal_InitPipeControlParams;
-    MHW_MEDIA_STATE_FLUSH_PARAM  flushParam      = g_cRenderHal_InitMediaStateFlushParams;
+    MHW_PIPE_CONTROL_PARAMS      pipeCtlParams  = g_cRenderHal_InitPipeControlParams;
+    MHW_MEDIA_STATE_FLUSH_PARAM  flushParam     = g_cRenderHal_InitMediaStateFlushParams;
     MHW_ID_LOAD_PARAMS           idLoadParams;
     int32_t                      remaining      = 0;
-    bool                         enableWalker    = state->walkerParams.CmWalkerEnable;
-    bool                         enableGpGpu     = state->taskParam->blGpGpuWalkerEnabled;
+    bool                         enableWalker   = state->walkerParams.CmWalkerEnable;
+    bool                         enableGpGpu    = state->taskParam->blGpGpuWalkerEnabled;
     PCM_HAL_TASK_PARAM           taskParam      = state->taskParam;
     PCM_HAL_BB_ARGS              bbCmArgs;
     MOS_COMMAND_BUFFER           mosCmdBuffer;
@@ -592,7 +592,7 @@ MOS_STATUS CM_HAL_G11_X::SubmitCommands(
     // Send Interface Descriptor Load
     if ( state->dshEnabled )
     {
-        PRENDERHAL_DYNAMIC_STATE dynamicState = stateHeap->pCurMediaState->pDynamicState;
+        PRENDERHAL_DYNAMIC_STATE dynamicState = ((PRENDERHAL_MEDIA_STATE_LEGACY)stateHeap->pCurMediaState)->pDynamicState;
         idLoadParams.dwInterfaceDescriptorStartOffset = dynamicState->memoryBlock.GetOffset() +
             dynamicState->MediaID.dwOffset;
         idLoadParams.dwInterfaceDescriptorLength = dynamicState->MediaID.iCount * stateHeap->dwSizeMediaID;
@@ -605,7 +605,7 @@ MOS_STATUS CM_HAL_G11_X::SubmitCommands(
     idLoadParams.pKernelState = nullptr;
     CM_CHK_MOSSTATUS_GOTOFINISH( mhwRender->AddMediaIDLoadCmd(&mosCmdBuffer, &idLoadParams ) );
 
-    HalOcaInterface::OnDispatch(mosCmdBuffer, *pOsContext, *renderHal->pMhwMiInterface, *pMmioRegisters);
+    HalOcaInterface::OnDispatch(mosCmdBuffer, *osInterface, *renderHal->pMhwMiInterface, *pMmioRegisters);
 
     if ( enableWalker )
     {
@@ -748,7 +748,7 @@ MOS_STATUS CM_HAL_G11_X::SubmitCommands(
                 &mosSurface));
             mosSurface.OsResource = state->bufferTable[i].osResource;
 
-            CM_CHK_HRESULT_GOTOFINISH_MOSERROR(HalCm_SurfaceSync(state, &mosSurface, false));
+            CM_CHK_HRESULT_GOTOFINISH_MOSERROR(state->pfnSurfaceSync(state, &mosSurface, false));
         }
     }
 

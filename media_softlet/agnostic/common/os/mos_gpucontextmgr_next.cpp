@@ -27,6 +27,8 @@
 #include "mos_gpucontextmgr_next.h"
 #include "mos_gpucontext_specific_next.h"
 #include "mos_graphicsresource_specific_next.h"
+#include "mos_context_next.h"
+#include "mos_oca_rtlog_mgr.h"
 
 GpuContextMgrNext::GpuContextMgrNext(OsContextNext *osContext)
 {
@@ -147,7 +149,7 @@ GpuContextNext *GpuContextMgrNext::CreateGpuContext(
         reusedContext = SelectContextToReuse();
     }
 
-    GpuContextNext *gpuContext = GpuContextNext::Create(gpuNode, cmdBufMgr, reusedContext);
+    GpuContextNext *gpuContext = GpuContextNext::Create(gpuNode, cmdBufMgr, reusedContext, m_osContext);
     if (gpuContext == nullptr)
     {
         MOS_OS_ASSERTMESSAGE("nullptr returned by GpuContext::Create.");
@@ -190,6 +192,9 @@ GpuContextNext *GpuContextMgrNext::CreateGpuContext(
     }
     m_gpuContextCount++;
 
+    MT_LOG5(MT_MOS_GPUCXT_CREATE, MT_NORMAL, MT_MOS_GPUCXT_MGR_PTR, (int64_t)this, MT_MOS_GPUCXT_PTR, (int64_t)gpuContext,
+        MT_MOS_GPUCXT_COUNT, m_gpuContextCount, MT_MOS_GPU_NODE, gpuNode, MT_MOS_GPUCXT_HANDLE, gpuContextHandle);
+
     MosUtilities::MosUnlockMutex(m_gpuContextArrayMutex);
 
     return gpuContext;
@@ -205,15 +210,20 @@ GpuContextNext *GpuContextMgrNext::GetGpuContext(GPU_CONTEXT_HANDLE gpuContextHa
         return nullptr;
     }
 
+    GpuContextNext *gpuContext = nullptr;
+    MosUtilities::MosLockMutex(m_gpuContextArrayMutex);
     if (!m_gpuContextArray.empty() && gpuContextHandle < m_gpuContextArray.size())
     {
-        return m_gpuContextArray.at(gpuContextHandle);
+        gpuContext = m_gpuContextArray.at(gpuContextHandle);
     }
     else
     {
         MOS_OS_ASSERTMESSAGE("GPU context array is empty or got invalid index, something must be wrong!");
-        return nullptr;
+        MT_ERR2(MT_MOS_GPUCXT_GET, MT_MOS_GPUCXT_MGR_PTR, (int64_t)this, MT_MOS_GPUCXT_HANDLE, gpuContextHandle);
+        gpuContext = nullptr;
     }
+    MosUtilities::MosUnlockMutex(m_gpuContextArrayMutex);
+    return gpuContext;
 }
 
 void GpuContextMgrNext::DestroyGpuContext(GpuContextNext *gpuContext)
@@ -231,7 +241,7 @@ void GpuContextMgrNext::DestroyGpuContext(GpuContextNext *gpuContext)
         {
             found = true;
             // to keep original order, here should not erase gpucontext, replace with nullptr in array.
-            MOS_Delete(curGpuContext);  // delete gpu context.
+            curGpuContext = nullptr;
             m_gpuContextCount--;
             break;
         }
@@ -242,11 +252,20 @@ void GpuContextMgrNext::DestroyGpuContext(GpuContextNext *gpuContext)
         m_gpuContextArray.clear();  // clear whole array
     }
 
+    MT_LOG3(MT_MOS_GPUCXT_DESTROY, MT_NORMAL, MT_MOS_GPUCXT_MGR_PTR, (int64_t)this, MT_MOS_GPUCXT_PTR, (int64_t)gpuContext, MT_MOS_GPUCXT_COUNT, m_gpuContextCount);
+
+    MosStreamState streamState = {};
+    streamState.osDeviceContext = m_osContext;
     MosUtilities::MosUnlockMutex(m_gpuContextArrayMutex);
 
-    if (!found)
+    if (found)
+    {
+        MOS_Delete(gpuContext);  // delete gpu context.
+    }
+    else
     {
         MOS_OS_ASSERTMESSAGE("cannot find specified gpuContext in the gpucontext pool, something must be wrong");
+        MT_ERR3(MT_MOS_GPUCXT_DESTROY, MT_MOS_GPUCXT_MGR_PTR, (int64_t)this, MT_MOS_GPUCXT_PTR, (int64_t)gpuContext, MT_CODE_LINE, __LINE__);
     }
 }
 
@@ -261,6 +280,7 @@ void GpuContextMgrNext::DestroyAllGpuContexts()
     // delete each instance in m_gpuContextArray
     for (auto &curGpuContext : m_gpuContextArray)
     {
+        MT_LOG2(MT_MOS_GPUCXT_DESTROY, MT_NORMAL, MT_MOS_GPUCXT_MGR_PTR, (int64_t)this, MT_MOS_GPUCXT_PTR, (int64_t)curGpuContext);
         MOS_Delete(curGpuContext);
     }
 

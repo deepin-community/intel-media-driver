@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2018, Intel Corporation
+* Copyright (c) 2018-2021, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -26,10 +26,13 @@
 //!
 
 #include "media_scalability_factory.h"
-#include "media_scalability_singlepipe.h"
-#include "media_scalability_mdf.h"
-#include "vp_scalability_singlepipe.h"
-#include "decode_scalability_singlepipe.h"
+#if !EMUL
+#include "encode_scalability_singlepipe.h"
+#include "encode_scalability_multipipe.h"
+#include "decode_scalability_option.h"
+#endif
+#include "vp_scalability_multipipe_next.h"
+#include "vp_scalability_singlepipe_next.h"
 
 template<typename T>
 MediaScalability *MediaScalabilityFactory<T>::CreateScalability(uint8_t componentType, T params, void *hwInterface, MediaContext *mediaContext, MOS_GPUCTX_CREATOPTIONS *gpuCtxCreateOption)
@@ -39,26 +42,8 @@ MediaScalability *MediaScalabilityFactory<T>::CreateScalability(uint8_t componen
         return nullptr;
     }
 
-    if (std::is_same<decltype(params), ScalabilityPars*>::value)
-    {
-        auto scalabPars = reinterpret_cast<ScalabilityPars *>(params);
-        if (scalabPars->enableMdf)
-        {
-            return CreateScalabilityMdf(params);
-        }
-    }
-
     //Create SinglePipe/MultiPipe scalability.
     return CreateScalabilityCmdBuf(componentType, params, hwInterface, mediaContext, gpuCtxCreateOption);
-}
-
-template<typename T>
-MediaScalability *MediaScalabilityFactory<T>::CreateScalabilityMdf(T params)
-{
-    MediaScalability *scalabilityHandle = nullptr;
-    scalabilityHandle = MOS_New(MediaScalabilityMdf);
-
-    return scalabilityHandle;
 }
 
 template<typename T>
@@ -66,21 +51,90 @@ MediaScalability *MediaScalabilityFactory<T>::CreateScalabilityCmdBuf(uint8_t co
 {
     switch (componentType)
     {
+#if !EMUL
     case scalabilityEncoder:
         return CreateEncodeScalability(params, hwInterface, mediaContext, gpuCtxCreateOption);
     case scalabilityDecoder:
         return CreateDecodeScalability(params, hwInterface, mediaContext, gpuCtxCreateOption);
+#endif
     case scalabilityVp:
         return CreateVpScalability(params, hwInterface, mediaContext, gpuCtxCreateOption);
     default:
         return nullptr;
     }
 }
-
+#if !EMUL
 template<typename T>
 MediaScalability *MediaScalabilityFactory<T>::CreateEncodeScalability(T params, void *hwInterface, MediaContext *mediaContext, MOS_GPUCTX_CREATOPTIONS *gpuCtxCreateOption)
 {
-    return nullptr;
+    MediaScalability *scalabilityHandle = nullptr;
+    if (params == nullptr || hwInterface == nullptr)
+    {
+        return nullptr;
+    }
+
+    encode::EncodeScalabilityOption *option = nullptr;
+    if (std::is_same<decltype(params), ScalabilityPars*>::value)
+    {
+        option = MOS_New(encode::EncodeScalabilityOption);
+        if (option != nullptr)
+        {
+            auto scalabPars = reinterpret_cast<ScalabilityPars *>(params);
+            option->SetScalabilityOption(scalabPars);
+        }
+    }
+    else
+    {
+        auto scalabOption = reinterpret_cast<MediaScalabilityOption *>(params);
+        option = dynamic_cast<encode::EncodeScalabilityOption *>(scalabOption);
+    }
+
+    if (option == nullptr)
+    {
+        return nullptr;
+    }
+
+    //Create scalability handle refer to scalability option.
+
+    if (option->GetNumPipe() == 1)
+    {
+        scalabilityHandle = MOS_New(encode::EncodeScalabilitySinglePipe, hwInterface, mediaContext, scalabilityEncoder);
+    }
+    else
+    {
+        scalabilityHandle = MOS_New(encode::EncodeScalabilityMultiPipe, hwInterface, mediaContext, scalabilityEncoder);
+    }
+
+    if (scalabilityHandle == nullptr)
+    {
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
+        return nullptr;
+    }
+
+    if (MOS_STATUS_SUCCESS != scalabilityHandle->Initialize(*option))
+    {
+        SCALABILITY_ASSERTMESSAGE("Scalability Initialize failed!");
+        MOS_Delete(scalabilityHandle);
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
+        return nullptr;
+    }
+    if (gpuCtxCreateOption)
+    {
+        scalabilityHandle->GetGpuCtxCreationOption(gpuCtxCreateOption);
+    }
+
+    if (std::is_same<decltype(params), ScalabilityPars *>::value)
+    {
+        MOS_Delete(option);
+    }
+
+    return scalabilityHandle;
 }
 
 template<typename T>
@@ -114,17 +168,49 @@ MediaScalability *MediaScalabilityFactory<T>::CreateDecodeScalability(T params, 
 
     //Create scalability handle refer to scalability option.
     MediaScalability *scalabilityHandle = nullptr;
+    CodechalHwInterfaceNext *codecHwInterface  = ((CodechalHwInterfaceNext *)hwInterface);
+    if (codecHwInterface->pfnCreateDecodeSinglePipe == nullptr || codecHwInterface->pfnCreateDecodeMultiPipe == nullptr)
+    {
+        SCALABILITY_ASSERTMESSAGE("Scalability pointer is null!");
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
+        return nullptr;
+    }
     if (option->GetNumPipe() == 1)
     {
-        scalabilityHandle = MOS_New(decode::DecodeScalabilitySinglePipe, hwInterface, mediaContext, scalabilityDecoder);
+        if ((codecHwInterface->pfnCreateDecodeSinglePipe(hwInterface, mediaContext, scalabilityDecoder)) != MOS_STATUS_SUCCESS)
+        {
+            SCALABILITY_ASSERTMESSAGE("Scalability Creation failed!");
+            if (std::is_same<decltype(params), ScalabilityPars *>::value)
+            {
+                MOS_Delete(option);
+            }
+            return nullptr;
+        }
+        scalabilityHandle = codecHwInterface->m_singlePipeScalability;
     }
     else
     {
-        SCALABILITY_ASSERTMESSAGE("Scalability Initialize Failed!");
+        if ((codecHwInterface->pfnCreateDecodeMultiPipe(hwInterface, mediaContext, scalabilityDecoder)) != MOS_STATUS_SUCCESS)
+        {
+            SCALABILITY_ASSERTMESSAGE("Scalability Creation failed!");
+            if (std::is_same<decltype(params), ScalabilityPars *>::value)
+            {
+                MOS_Delete(option);
+            }
+            return nullptr;
+        }
+        scalabilityHandle = codecHwInterface->m_multiPipeScalability;
     }
 
     if (scalabilityHandle == nullptr)
     {
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
         return nullptr;
     }
 
@@ -132,6 +218,10 @@ MediaScalability *MediaScalabilityFactory<T>::CreateDecodeScalability(T params, 
     {
         SCALABILITY_ASSERTMESSAGE("Scalability Initialize failed!");
         MOS_Delete(scalabilityHandle);
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
         return nullptr;
     }
     if (gpuCtxCreateOption)
@@ -139,14 +229,14 @@ MediaScalability *MediaScalabilityFactory<T>::CreateDecodeScalability(T params, 
         scalabilityHandle->GetGpuCtxCreationOption(gpuCtxCreateOption);
     }
 
-    if (std::is_same<decltype(params), ScalabilityPars*>::value)
+    if (std::is_same<decltype(params), ScalabilityPars *>::value)
     {
         MOS_Delete(option);
     }
 
     return scalabilityHandle;
 }
-
+#endif
 template<typename T>
 MediaScalability *MediaScalabilityFactory<T>::CreateVpScalability(T params, void *hwInterface, MediaContext *mediaContext, MOS_GPUCTX_CREATOPTIONS *gpuCtxCreateOption)
 {
@@ -178,17 +268,52 @@ MediaScalability *MediaScalabilityFactory<T>::CreateVpScalability(T params, void
 
     // will add scalability multi-pipe when 2 or more Vebox/SFC are supported
     MediaScalability *scalabilityHandle = nullptr;
+    PVP_MHWINTERFACE  vphwInterface     = (PVP_MHWINTERFACE)hwInterface;
+
+    // Check CreateMultiPipe/CreateSinglePipe pointer
+    if (vphwInterface->pfnCreateSinglePipe == nullptr || vphwInterface->pfnCreateMultiPipe == nullptr)
+    {
+        SCALABILITY_ASSERTMESSAGE("Scalability pointer is null!");
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
+        return nullptr;
+    }
+
     if (option->GetNumPipe() == 1)
     {
-        scalabilityHandle = MOS_New(vp::VpScalabilitySinglePipe, hwInterface, mediaContext, scalabilityVp);
+        if ((vphwInterface->pfnCreateSinglePipe(hwInterface, mediaContext, scalabilityVp)) != MOS_STATUS_SUCCESS)
+        {
+            SCALABILITY_ASSERTMESSAGE("Scalability Creation failed!");
+            if (std::is_same<decltype(params), ScalabilityPars *>::value)
+            {
+                MOS_Delete(option);
+            }
+            return nullptr;
+        }
+        scalabilityHandle = vphwInterface->m_singlePipeScalability;
     }
     else
     {
-        SCALABILITY_ASSERTMESSAGE("Scalability Initialize failed! Current platform only support SinglePipe Scalability");
+        if ((vphwInterface->pfnCreateMultiPipe(hwInterface, mediaContext, scalabilityVp)) != MOS_STATUS_SUCCESS)
+        {
+            SCALABILITY_ASSERTMESSAGE("Scalability Creation failed!");
+            if (std::is_same<decltype(params), ScalabilityPars *>::value)
+            {
+                MOS_Delete(option);
+            }
+            return nullptr;
+        }
+        scalabilityHandle = vphwInterface->m_multiPipeScalability;
     }
 
     if (scalabilityHandle == nullptr)
     {
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
         return nullptr;
     }
 
@@ -196,6 +321,10 @@ MediaScalability *MediaScalabilityFactory<T>::CreateVpScalability(T params, void
     {
         SCALABILITY_ASSERTMESSAGE("Scalability Initialize failed!");
         MOS_Delete(scalabilityHandle);
+        if (std::is_same<decltype(params), ScalabilityPars *>::value)
+        {
+            MOS_Delete(option);
+        }
         return nullptr;
     }
 
@@ -204,7 +333,7 @@ MediaScalability *MediaScalabilityFactory<T>::CreateVpScalability(T params, void
         scalabilityHandle->GetGpuCtxCreationOption(gpuCtxCreateOption);
     }
 
-    if (std::is_same<decltype(params), ScalabilityPars*>::value)
+    if (std::is_same<decltype(params), ScalabilityPars *>::value)
     {
         MOS_Delete(option);
     }
@@ -213,4 +342,5 @@ MediaScalability *MediaScalabilityFactory<T>::CreateVpScalability(T params, void
 }
 
 template class MediaScalabilityFactory<ScalabilityPars*>;
+template class MediaScalabilityFactory<MediaScalabilityOption*>;
 

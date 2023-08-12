@@ -29,9 +29,20 @@
 
 #ifndef __MEDIA_PACKET_H__
 #define __MEDIA_PACKET_H__
+#include <stdint.h>
+#include <memory>
+#include <string>
+#include "media_user_setting.h"
+#include "mhw_itf.h"
+#include "mhw_utilities_next.h"
+#include "mos_defs.h"
+#include "mos_os_specific.h"
 #include "mos_os.h"
-#include "mhw_mi.h"
-#include "media_status_report.h"
+#include "mhw_cmdpar.h"
+#include "mhw_mi_itf.h"
+class MediaStatusReport;
+class MhwMiInterface;
+namespace mhw{namespace mi{class Itf;}}  // namespace mhw
 
 #define __SETPAR(CMD, itf)                                                              \
                                                                                         \
@@ -197,7 +208,33 @@ protected:
         uint32_t srType,
         MOS_COMMAND_BUFFER *cmdBuffer);
 
+    //!
+    //! \brief  Start Status Report - Refactor Version
+    //! \param  [in] srType
+    //!         status report type for send cmds
+    //! \param  [in, out] cmdBuffer
+    //!         cmdbuffer to send cmds
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS StartStatusReportNext(
+        uint32_t srType,
+        MOS_COMMAND_BUFFER *cmdBuffer);
+
     virtual MOS_STATUS UpdateStatusReport(
+        uint32_t srType,
+        MOS_COMMAND_BUFFER *cmdBuffer);
+
+    //!
+    //! \brief  Update Status Report - Refactor Version
+    //! \param  [in] srType
+    //!         status report type for send cmds
+    //! \param  [in, out] cmdBuffer
+    //!         cmdbuffer to send cmds
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS UpdateStatusReportNext(
         uint32_t srType,
         MOS_COMMAND_BUFFER *cmdBuffer);
 
@@ -215,6 +252,19 @@ protected:
         MOS_COMMAND_BUFFER *cmdBuffer);
 
     //!
+    //! \brief  End Status Report - Refactor Version
+    //! \param  [in] srType
+    //!         status report type for send cmds
+    //! \param  [in, out] cmdBuffer
+    //!         cmdbuffer to send cmds
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS EndStatusReportNext(
+        uint32_t srType,
+        MOS_COMMAND_BUFFER *cmdBuffer);
+
+    //!
     //! \brief  Set the start tag in the command buffer
     //! \param  [in] osResource
     //!         reource used in the cmd
@@ -228,6 +278,25 @@ protected:
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
     virtual MOS_STATUS SetStartTag(
+        MOS_RESOURCE *osResource,
+        uint32_t offset,
+        uint32_t srType,
+        MOS_COMMAND_BUFFER *cmdBuffer);
+
+    //!
+    //! \brief  Set the start tag in the command buffer - Refactor Version
+    //! \param  [in] osResource
+    //!         reource used in the cmd
+    //! \param  [in] offset
+    //!         reource offset used the cmd
+    //! \param  [in] srType
+    //!         status report type
+    //! \param  [in, out] cmdBuffer
+    //!         cmdbuffer to send cmds
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS SetStartTagNext(
         MOS_RESOURCE *osResource,
         uint32_t offset,
         uint32_t srType,
@@ -252,10 +321,33 @@ protected:
         uint32_t srType,
         MOS_COMMAND_BUFFER *cmdBuffer);
 
-protected:
-    MediaTask         *m_task         = nullptr;        //!< MediaTask associated with current packet
-    MhwMiInterface    *m_miInterface  = nullptr;
-    MediaStatusReport *m_statusReport = nullptr;
-};
+    //!
+    //! \brief  Set the end tag in the command buffer - Refactor Version
+    //! \param  [in] osResource
+    //!         reource used in the cmd
+    //! \param  [in] offset
+    //!         reource offset used the cmd
+    //! \param  [in] srType
+    //!         status report type
+    //! \param  [in, out] cmdBuffer
+    //!         cmdbuffer to send cmds
+    //! \return MOS_STATUS
+    //!         MOS_STATUS_SUCCESS if success, else fail reason
+    //!
+    virtual MOS_STATUS SetEndTagNext(
+        MOS_RESOURCE *osResource,
+        uint32_t offset,
+        uint32_t srType,
+        MOS_COMMAND_BUFFER *cmdBuffer);
 
+protected:
+    MediaTask                     *m_task         = nullptr;        //!< MediaTask associated with current packet
+    PMOS_INTERFACE                m_osInterface   = nullptr;
+    MhwMiInterface                *m_miInterface  = nullptr;
+    MediaStatusReport             *m_statusReport = nullptr;
+    std::shared_ptr<mhw::mi::Itf> m_miItf         = nullptr;
+    MediaUserSettingSharedPtr     m_userSettingPtr = nullptr;  //!< usersettingInstance
+MEDIA_CLASS_DEFINE_END(MediaPacket)
+};
+ 
 #endif // !__MEDIA_PACKET_H__

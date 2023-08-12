@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2021, Intel Corporation
+* Copyright (c) 2019-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 
 #include "decode_av1_basic_feature.h"
 #include "decode_utils.h"
-#include "codechal_utilities.h"
+#include "codec_utilities_next.h"
 #include "decode_av1_reference_frames.h"
 #include "codec_def_decode_av1.h"
 
@@ -46,7 +46,7 @@ namespace decode
         m_allocator = &allocator;
         DECODE_CHK_NULL(m_allocator);
         DECODE_CHK_STATUS(
-            CodecHalAllocateDataList((CODEC_REF_LIST_AV1 **)m_refList, CODECHAL_MAX_DPB_NUM_LST_AV1));
+            CodecUtilities::CodecHalAllocateDataList((CODEC_REF_LIST_AV1 **)m_refList, CODECHAL_MAX_DPB_NUM_LST_AV1));
 
         return MOS_STATUS_SUCCESS;
     }
@@ -55,7 +55,7 @@ namespace decode
     {
         DECODE_FUNC_CALL();
 
-        CodecHalFreeDataList(m_refList, CODECHAL_MAX_DPB_NUM_LST_AV1);
+        CodecUtilities::CodecHalFreeDataList(m_refList, CODECHAL_MAX_DPB_NUM_LST_AV1);
         m_activeReferenceList.clear();
     }
 
@@ -158,6 +158,36 @@ namespace decode
         }
 
         return &(m_basicFeature->m_destSurface.OsResource);
+    }
+
+    MOS_STATUS Av1ReferenceFrames::GetValidReferenceIndex(uint8_t *validRefIndex)
+    {
+        DECODE_FUNC_CALL();
+
+        if (m_basicFeature->m_av1PicParams == nullptr)
+        {
+            return MOS_STATUS_INVALID_PARAMETER;
+        }
+        auto m_picParams = m_basicFeature->m_av1PicParams;
+
+        for (auto i = 0; i < av1NumInterRefFrames; i++)
+        {
+            auto    index    = m_picParams->m_refFrameIdx[i];
+            uint8_t frameIdx = m_picParams->m_refFrameMap[index].FrameIdx;
+            if (frameIdx >= m_basicFeature->m_maxFrameIndex)
+            {
+                continue;
+            }
+            PMOS_RESOURCE buffer = GetReferenceByFrameIndex(frameIdx);
+            if (buffer != nullptr)
+            {
+                *validRefIndex = frameIdx;
+                return MOS_STATUS_SUCCESS;
+            }
+        }
+
+        *validRefIndex = m_basicFeature->m_av1PicParams->m_currPic.FrameIdx;
+        return MOS_STATUS_SUCCESS;
     }
 
     MOS_STATUS Av1ReferenceFrames::InsertAnchorFrame(CodecAv1PicParams & picParams)
@@ -432,7 +462,7 @@ namespace decode
 
         //Calculate active reference bit mask for motion field
         uint8_t refPicIndex = picParams.m_refFrameIdx[ref - lastFrame];//0 corresponds to LAST_FRAME
-        int8_t refFrameIdx = -1;
+        uint8_t refFrameIdx = m_basicFeature->m_invalidFrameIndex;
         uint32_t miCols = 0, miRows = 0, refFrameType = 0;
 
         if (!CodecHal_PictureIsInvalid(picParams.m_refFrameMap[refPicIndex]))
@@ -443,7 +473,7 @@ namespace decode
             refFrameType    = m_refList[refFrameIdx]->m_frameType;
         }
 
-        if ((refFrameIdx < 0) || (refFrameType == intraOnlyFrame || refFrameType == keyFrame) ||
+        if ((refFrameIdx == m_basicFeature->m_invalidFrameIndex) || (refFrameType == intraOnlyFrame || refFrameType == keyFrame) ||
             (m_basicFeature->m_tileCoding.m_miCols != miCols) || (m_basicFeature->m_tileCoding.m_miRows != miRows))
         {
             picParams.m_activeRefBitMaskMfmv[ref - lastFrame] = 0;
@@ -456,7 +486,7 @@ namespace decode
         return picParams.m_activeRefBitMaskMfmv[ref - lastFrame];
     }
 
-    bool Av1ReferenceFrames::CheckSegForPrimFrame(CodecAv1PicParams & picParams)
+    bool Av1ReferenceFrames::CheckSegForPrimFrame(CodecAv1PicParams &picParams)
     {
         DECODE_FUNC_CALL();
 
@@ -476,4 +506,40 @@ namespace decode
         return isMatched;
     }
 
-}  // namespace decode
+    MOS_STATUS Av1ReferenceFrames::ErrorConcealment(CodecAv1PicParams &picParams)
+    {
+        DECODE_FUNC_CALL();
+        MOS_STATUS             hr           = MOS_STATUS_SUCCESS;
+        Av1ReferenceFrames     &refFrames    = m_basicFeature->m_refFrames;
+        PCODEC_PICTURE         refFrameList = &(picParams.m_refFrameMap[0]);
+
+        uint8_t validfPicIndex   = 0;
+        bool    hasValidRefIndex = false;
+
+        for (auto i = 0; i < av1NumInterRefFrames; i++)
+        {
+            uint8_t refPicIndex = picParams.m_refFrameIdx[i];
+            if (refPicIndex >= av1TotalRefsPerFrame)
+            {
+                continue;
+            }
+            uint8_t frameIdx = refFrameList[refPicIndex].FrameIdx;
+            auto    curframe = refFrames.GetReferenceByFrameIndex(frameIdx);
+            if (curframe == nullptr)
+            {
+                if (hasValidRefIndex == false)
+                {
+                    uint8_t validfPicIndex = 0;
+                    //Get valid reference frame index
+                    hr               = GetValidReferenceIndex(&validfPicIndex);
+                    hasValidRefIndex = true;
+                }
+                //Use validfPicIndex to replace invalid Reference index for non-key frame
+                refFrameList[refPicIndex].FrameIdx = validfPicIndex;
+                DECODE_ASSERTMESSAGE("Hit invalid refFrameList[%d].FrameIdx=%d\n", refPicIndex, refFrameList[refPicIndex].FrameIdx);
+            }
+        }
+
+        return hr;
+    }
+    }  // namespace decode

@@ -30,15 +30,15 @@
 #ifndef __DECODE_HUC_H__
 #define __DECODE_HUC_H__
 
-#include "codechal_hw.h"
-#include "mhw_vdbox_huc_interface.h"
-#include "mhw_vdbox_hcp_interface.h"
+#include "codec_hw_next.h"
 #include "mos_defs.h"
 #include "media_cmd_packet.h"
 #include "media_pipeline.h"
 #include "decode_basic_feature.h"
 #include "decodecp_interface.h"
 #include "decode_status_report.h"
+#include "mhw_vdbox_huc_cmdpar.h"
+#include "mhw_vdbox_huc_itf.h"
 
 
 namespace decode
@@ -51,7 +51,7 @@ namespace decode
         //!
         //! \brief  Decode huc basic constructor
         //!
-        DecodeHucBasic(MediaPipeline *pipeline, MediaTask *task, CodechalHwInterface *hwInterface);
+        DecodeHucBasic(MediaPipeline *pipeline, MediaTask *task, CodechalHwInterfaceNext *hwInterface);
 
         //!
         //! \brief  Decode huc basic destructor
@@ -143,16 +143,18 @@ namespace decode
         DecodePipeline *         m_pipeline            = nullptr;
         MediaFeatureManager *    m_featureManager      = nullptr;
         DecodeAllocator *        m_allocator           = nullptr;
-        PMOS_INTERFACE           m_osInterface         = nullptr;
-        CodechalHwInterface *    m_hwInterface         = nullptr;
-        MhwVdboxHucInterface *   m_hucInterface        = nullptr;
-        MhwVdboxVdencInterface * m_vdencInterface      = nullptr;
+        CodechalHwInterfaceNext *m_hwInterface         = nullptr;
         DecodeBasicFeature *     m_basicFeature        = nullptr;
         DecodeCpInterface*       m_decodecp            = nullptr;
+
+        std::shared_ptr<mhw::vdbox::huc::Itf>   m_hucItf   = nullptr;
+        std::shared_ptr<mhw::vdbox::vdenc::Itf> m_vdencItf = nullptr;
 
         static const uint32_t m_hucStatusInvalidMask = 0;         //!< Invalid mask of Huc status MMIO
         uint32_t       m_hucStatusMask = m_hucStatusInvalidMask;  //!< MMIO mask for HuC status
         uint32_t       m_hucStatus2Mask = m_hucStatusInvalidMask; //!< MMIO mask for HuC status2
+
+    MEDIA_CLASS_DEFINE_END(decode__DecodeHucBasic)
     };
 }
 #endif  // !__DECODE_HUC_H__

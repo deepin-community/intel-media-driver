@@ -36,42 +36,6 @@ namespace mhw
 {
 namespace mi
 {
-    static const uint32_t MHW_MI_WATCHDOG_ENABLE_COUNTER                  = 0x0;
-    static const uint32_t MHW_MI_WATCHDOG_DISABLE_COUNTER                 = 0x1;
-    static const uint32_t MHW_MI_DEFAULT_WATCHDOG_THRESHOLD_IN_MS         = 60;
-    static const uint32_t MHW_MI_ENCODER_16K_WATCHDOG_THRESHOLD_IN_MS     = 2000;
-    static const uint32_t MHW_MI_ENCODER_8K_WATCHDOG_THRESHOLD_IN_MS      = 500;
-    static const uint32_t MHW_MI_ENCODER_4K_WATCHDOG_THRESHOLD_IN_MS      = 100;
-    static const uint32_t MHW_MI_ENCODER_FHD_WATCHDOG_THRESHOLD_IN_MS     = 50;
-    static const uint32_t MHW_MI_DECODER_720P_WATCHDOG_THRESHOLD_IN_MS    = 10;
-    static const uint32_t MHW_MI_DECODER_16K_WATCHDOG_THRESHOLD_IN_MS     = 180;
-    static const uint32_t MHW_MI_DECODER_16Kx16K_WATCHDOG_THRESHOLD_IN_MS = 256;
-    static const uint32_t MHW_MI_WATCHDOG_COUNTS_PER_MILLISECOND          = (19200123 / 1000);   // Time stamp counts per millisecond
-
-    static uint32_t m_mmioRcsAuxTableBaseLow = M_MMIO_RCS_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioRcsAuxTableBaseHigh = M_MMIO_RCS_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioRcsAuxTableInvalidate = M_MMIO_RCS_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioVd0AuxTableBaseLow = M_MMIO_VD0_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioVd0AuxTableBaseHigh = M_MMIO_VD0_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioVd0AuxTableInvalidate = M_MMIO_VD0_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioVd1AuxTableBaseLow = M_MMIO_VD1_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioVd1AuxTableBaseHigh = M_MMIO_VD1_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioVd1AuxTableInvalidate = M_MMIO_VD1_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioVd2AuxTableBaseLow = M_MMIO_VD2_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioVd2AuxTableBaseHigh = M_MMIO_VD2_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioVd2AuxTableInvalidate = M_MMIO_VD2_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioVd3AuxTableBaseLow = M_MMIO_VD3_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioVd3AuxTableBaseHigh = M_MMIO_VD3_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioVd3AuxTableInvalidate = M_MMIO_VD3_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioVe0AuxTableBaseLow = M_MMIO_VE0_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioVe0AuxTableBaseHigh = M_MMIO_VE0_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioVe0AuxTableInvalidate = M_MMIO_VE0_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioVe1AuxTableBaseLow = M_MMIO_VE1_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioVe1AuxTableBaseHigh = M_MMIO_VE1_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioVe1AuxTableInvalidate = M_MMIO_VE1_AUX_TABLE_INVALIDATE;
-    static uint32_t m_mmioCcs0AuxTableBaseLow = M_MMIO_CCS0_AUX_TABLE_BASE_LOW;
-    static uint32_t m_mmioCcs0AuxTableBaseHigh = M_MMIO_CCS0_AUX_TABLE_BASE_HIGH;
-    static uint32_t m_mmioCcs0AuxTableInvalidate = M_MMIO_CCS0_AUX_TABLE_INVALIDATE;
 
     enum MHW_COMMON_MI_SEMAPHORE_COMPARE_OPERATION
     {
@@ -130,6 +94,35 @@ namespace mi
         MHW_FLUSH_WRITE_CACHE,           // Flush write cache
         MHW_FLUSH_READ_CACHE,            // Flush read cache
         MHW_FLUSH_CUSTOM                 // Flush with custom parameters
+    };
+
+    enum MHW_MMIO_REGISTER_OPCODE
+    {
+        MHW_MMIO_RCS_AUX_TABLE_NONE        = 0,
+        MHW_MMIO_RCS_AUX_TABLE_BASE_LOW    = 1,
+        MHW_MMIO_RCS_AUX_TABLE_BASE_HIGH   = 2,
+        MHW_MMIO_RCS_AUX_TABLE_INVALIDATE  = 3,
+        MHW_MMIO_VD0_AUX_TABLE_BASE_LOW    = 4,
+        MHW_MMIO_VD0_AUX_TABLE_BASE_HIGH   = 5,
+        MHW_MMIO_VD0_AUX_TABLE_INVALIDATE  = 6,
+        MHW_MMIO_VD1_AUX_TABLE_BASE_LOW    = 7,
+        MHW_MMIO_VD1_AUX_TABLE_BASE_HIGH   = 8,
+        MHW_MMIO_VD1_AUX_TABLE_INVALIDATE  = 9,
+        MHW_MMIO_VD2_AUX_TABLE_BASE_LOW    = 10,
+        MHW_MMIO_VD2_AUX_TABLE_BASE_HIGH   = 11,
+        MHW_MMIO_VD2_AUX_TABLE_INVALIDATE  = 12,
+        MHW_MMIO_VD3_AUX_TABLE_BASE_LOW    = 13,
+        MHW_MMIO_VD3_AUX_TABLE_BASE_HIGH   = 14,
+        MHW_MMIO_VD3_AUX_TABLE_INVALIDATE  = 15,
+        MHW_MMIO_VE0_AUX_TABLE_BASE_LOW    = 16,
+        MHW_MMIO_VE0_AUX_TABLE_BASE_HIGH   = 17,
+        MHW_MMIO_VE0_AUX_TABLE_INVALIDATE  = 18,
+        MHW_MMIO_VE1_AUX_TABLE_BASE_LOW    = 19,
+        MHW_MMIO_VE1_AUX_TABLE_BASE_HIGH   = 20,
+        MHW_MMIO_VE1_AUX_TABLE_INVALIDATE  = 21,
+        MHW_MMIO_CCS0_AUX_TABLE_BASE_LOW   = 22,
+        MHW_MMIO_CCS0_AUX_TABLE_BASE_HIGH  = 23,
+        MHW_MMIO_CCS0_AUX_TABLE_INVALIDATE = 24,
     };
 
     struct MHW_MI_ALU_PARAMS
@@ -197,6 +190,7 @@ namespace mi
         bool                    bIndirectStatePointersDisable = false;
         bool                    bHdcPipelineFlush             = false;
         bool                    bKernelFenceEnabled           = false;
+        bool                    bPPCFlush                     = false;
     };
 
     struct _MHW_PAR_T(MI_BATCH_BUFFER_START)
@@ -281,6 +275,7 @@ namespace mi
         bool                        bVideoPipelineCacheInvalidate = false;
         uint32_t                    postSyncOperation             = 0;
         uint32_t                    bQWordEnable                  = 0;
+        bool                        bEnablePPCFlush               = false;
     };
 
     struct _MHW_PAR_T(VD_CONTROL_STATE)
@@ -296,6 +291,33 @@ namespace mi
 
     struct _MHW_PAR_T(MI_BATCH_BUFFER_END)
     {
+        MOS_RESOURCE                OsResource              = {};
+        int32_t                     iRemaining              = 0;       //!< Remaining space in the BB
+        int32_t                     iSize                   = 0;       //!< Command buffer size
+        uint32_t                    count                   = 0;       //!< Actual batch count in this resource. If larger than 1, multiple buffer has equal size and resource size count * size.
+        int32_t                     iCurrent                = 0;       //!< Current offset in CB
+        bool                        bLocked                 = false;   //!< True if locked in memory (pData must be valid)
+        uint8_t                     *pData                  = nullptr; //!< Pointer to BB data
+#if (_DEBUG || _RELEASE_INTERNAL)
+        int32_t                     iLastCurrent            = 0;       //!< Save offset in CB (for debug plug-in/out)
+#endif
+
+        // User defined
+        bool                        bSecondLevel            = false;   //!< REMOVE REMOVE
+        uint32_t                    dwOffset                = 0;       //!< Offset to the data in the OS resource
+
+        // Batch Buffer synchronization logic
+        bool                        bBusy                   = false;   //!< Busy flag (clear when Sync Tag is reached)
+        uint32_t                    dwCmdBufId              = 0;       //!< Command Buffer ID for the workload
+        PMHW_BATCH_BUFFER           pNext                   = nullptr; //!< Next BB in the sync list
+        PMHW_BATCH_BUFFER           pPrev                   = nullptr; //!< Prev BB in the sync list
+
+        // Batch Buffer Client Private Data
+        uint32_t                    dwSyncTag               = 0;
+        bool                        bMatch                  = false;
+        int32_t                     iPrivateType            = 0;       //!< Indicates the BB client
+        int32_t                     iPrivateSize            = 0;       //!< Size of the current render args
+        void                        *pPrivateData           = nullptr; //!< Pointer to private BB data
     };
 
     struct _MHW_PAR_T(MI_NOOP)
@@ -326,6 +348,20 @@ namespace mi
         MHW_MI_ALU_PARAMS           *pAluPayload   = nullptr;
         uint32_t                    dwNumAluParams = 0;
     };
+
+    struct _MHW_PAR_T(MI_COPY_MEM_MEM)
+    {
+        PMOS_RESOURCE               presSrc        = nullptr;
+        uint32_t                    dwSrcOffset    = 0;
+        PMOS_RESOURCE               presDst        = nullptr;
+        uint32_t                    dwDstOffset    = 0;
+    };
+    
+    struct _MHW_PAR_T(MFX_WAIT)
+    {
+        bool                        iStallVdboxPipeline = false;
+    };
+    
 
 }  // namespace mi
 }  // namespace mhw

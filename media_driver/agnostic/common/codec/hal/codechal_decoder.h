@@ -32,6 +32,7 @@
 #include "codechal_setting.h"
 #include "codechal_hw.h"
 #include "codechal_debug.h"
+#include "codechal_oca_debug.h"
 #include "codechal_decode_downsampling.h"
 #include "codechal_decode_sfc.h"
 #include "codechal_mmc.h"
@@ -263,10 +264,10 @@ public:
     //!
     enum CodechalHcpDecodePhase
     {
-        CodechalHcpDecodePhaseInitialized = 0x00,   //!< Initial phase
-        CodechalHcpDecodePhaseLegacyLong,           //!< Legacy long format phase
-        CodechalHcpDecodePhaseLegacyS2L,            //!< Legacy short to long phase
-        CodechalHcpDecodePhaseMax                   //!< Maximal phases
+        CodechalHcpDecodePhaseInitialized = 0x00,  //!< Initial phase
+        CodechalHcpDecodePhaseLegacyLong,          //!< Legacy long format phase
+        CodechalHcpDecodePhaseLegacyS2L,           //!< Legacy short to long phase
+        CodechalHcpDecodePhaseMax                  //!< Maximal phases
     };
 
     //!
@@ -275,10 +276,10 @@ public:
     //!
     enum CodechalDecodeMotionType
     {
-        CodechalDecodeMcField   = 1,    //!< Field motion type
-        CodechalDecodeMcFrame   = 2,    //!< Frame motion type
-        CodechalDecodeMc16x8    = 2,    //!< 16x8 motion type
-        CodechalDecodeMcDmv     = 3     //!< DMV motion type
+        CodechalDecodeMcField = 1,  //!< Field motion type
+        CodechalDecodeMcFrame = 2,  //!< Frame motion type
+        CodechalDecodeMc16x8  = 2,  //!< 16x8 motion type
+        CodechalDecodeMcDmv   = 3   //!< DMV motion type
     };
 
     //!
@@ -287,14 +288,14 @@ public:
     //!
     enum CodechalDecodeMvPacking
     {
-        CodechalDecodeRstFirstForwHorz = 0, //!< first forward horizontal
-        CodechalDecodeRstFirstForwVert = 1, //!< first forward vertical
-        CodechalDecodeRstFirstBackHorz = 2, //!< first backward horizontal
-        CodechalDecodeRstFirstBackVert = 3, //!< first backward vertical
-        CodechalDecodeRstSecndForwHorz = 4, //!< second forward horizontal
-        CodechalDecodeRstSecndForwVert = 5, //!< second forward vertical
-        CodechalDecodeRstSecndBackHorz = 6, //!< second backward horizontal
-        CodechalDecodeRstSecndBackVert = 7  //!< second backward vertical
+        CodechalDecodeRstFirstForwHorz = 0,  //!< first forward horizontal
+        CodechalDecodeRstFirstForwVert = 1,  //!< first forward vertical
+        CodechalDecodeRstFirstBackHorz = 2,  //!< first backward horizontal
+        CodechalDecodeRstFirstBackVert = 3,  //!< first backward vertical
+        CodechalDecodeRstSecndForwHorz = 4,  //!< second forward horizontal
+        CodechalDecodeRstSecndForwVert = 5,  //!< second forward vertical
+        CodechalDecodeRstSecndBackHorz = 6,  //!< second backward horizontal
+        CodechalDecodeRstSecndBackVert = 7   //!< second backward vertical
     };
 
     //!
@@ -304,14 +305,14 @@ public:
     enum CodechalDecodeRefAddrIndex
     {
         // MPEG2/VC1 reference address indexes
-        CodechalDecodeFwdRefTop     = 0,    //!< forward reference top field
-        CodechalDecodeBwdRefTop     = 1,    //!< backward reference top field
-        CodechalDecodeFwdRefBottom  = 2,    //!< forward reference bottom field
-        CodechalDecodeBwdRefBottom  = 3,    //!< backward reference bottom field
+        CodechalDecodeFwdRefTop    = 0,  //!< forward reference top field
+        CodechalDecodeBwdRefTop    = 1,  //!< backward reference top field
+        CodechalDecodeFwdRefBottom = 2,  //!< forward reference bottom field
+        CodechalDecodeBwdRefBottom = 3,  //!< backward reference bottom field
         // VP8/VP9 reference address indexes
-        CodechalDecodeLastRef       = 0,    //!< last reference
-        CodechalDecodeGoldenRef     = 1,    //!< golden reference
-        CodechalDecodeAlternateRef  = 2     //!< alternate reference
+        CodechalDecodeLastRef      = 0,  //!< last reference
+        CodechalDecodeGoldenRef    = 1,  //!< golden reference
+        CodechalDecodeAlternateRef = 2   //!< alternate reference
     };
 
     //!
@@ -324,19 +325,19 @@ public:
     //!           The information of decode standard for this instance
     //!
     CodechalDecode(
-        CodechalHwInterface   *hwInterface,
-        CodechalDebugInterface* debugInterface,
+        CodechalHwInterface    *hwInterface,
+        CodechalDebugInterface *debugInterface,
         PCODECHAL_STANDARD_INFO standardInfo);
 
     //!
     //! \brief    Copy constructor
     //!
-    CodechalDecode(const CodechalDecode&) = delete;
+    CodechalDecode(const CodechalDecode &) = delete;
 
     //!
     //! \brief    Copy assignment operator
     //!
-    CodechalDecode& operator=(const CodechalDecode&) = delete;
+    CodechalDecode &operator=(const CodechalDecode &) = delete;
 
     //!
     //! \brief  Destructor
@@ -354,6 +355,11 @@ public:
     //! \return Height value
     //!
     virtual uint32_t GetHeight() { return m_height; }
+
+    CodechalHwInterface *GetHwInterface()
+    {
+        return m_hwInterface;
+    }
 
     //!
     //! \brief  Help function to allocate a 1D linear buffer for each decode standard
@@ -506,7 +512,7 @@ public:
     //! \return   MOS_STATUS
     //!           MOS_STATUS_SUCCESS if success, else fail reason
     //!
-    MOS_STATUS HucCopy(
+    virtual MOS_STATUS HucCopy(
         PMOS_COMMAND_BUFFER cmdBuffer,
         PMOS_RESOURCE src,
         PMOS_RESOURCE dst,
@@ -1103,6 +1109,8 @@ protected:
 
     MOS_RESOURCE               m_crcBuf = { 0 };
 
+    CodechalOcaDumper          *m_pCodechalOcaDumper = nullptr;
+
 #if (_DEBUG || _RELEASE_INTERNAL)
     //! \brief Downsampled surfaces
     PMOS_SURFACE                m_downsampledSurfaces = nullptr;
@@ -1126,6 +1134,8 @@ protected:
 
     //! \brief Indicate the status of dummy reference
     CODECHAL_DUMMY_REFERENCE_STATUS m_dummyReferenceStatus = CODECHAL_DUMMY_REFERENCE_INVALID;
+
+    CodechalHwInterface* m_hwInterface = nullptr;
 };
 
 #endif  // __CODECHAL_DECODER_H__

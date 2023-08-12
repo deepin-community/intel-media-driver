@@ -51,6 +51,9 @@
 #define SCALABILITY_ASSERT(_expr) \
     MOS_ASSERT(MOS_COMPONENT_SCALABILITY, 0, _expr)
 
+#define SCALABILITY_COND_CHECK(_expr, _message, ...) \
+    MOS_CHK_COND_RETURN(MOS_COMPONENT_SCALABILITY, 0, _expr, _message, ##__VA_ARGS__)
+
 enum ScalabilityComponentType
 {
     scalabilityEncoder = 0,
@@ -68,18 +71,17 @@ enum ScalabilitySyncType
 
 struct ScalabilityPars : public ContextRequirement
 {
-    bool    enableMdf;
-    bool    enableVE;
-    bool    forceMultiPipe;
+    bool    enableVE       = false;
+    bool    forceMultiPipe = false;
 
     uint32_t frameWidth  = 0;
     uint32_t frameHeight = 0;
 
-    uint8_t numVdbox;
-    uint16_t numTileRows;
-    uint16_t numTileColumns;
+    uint8_t numVdbox     = 0;
+    uint16_t numTileRows = 0;
+    uint16_t numTileColumns = 0;
 
-    uint8_t numVebox;
+    uint8_t numVebox = 0;
     bool    enableTileReplay = false;
     uint32_t raMode = 0;
     uint32_t protectMode = 0;

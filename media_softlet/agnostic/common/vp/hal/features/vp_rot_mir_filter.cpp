@@ -26,7 +26,7 @@
 //!
 
 #include "vp_rot_mir_filter.h"
-#include "vp_vebox_cmd_packet.h"
+#include "vp_vebox_cmd_packet_base.h"
 #include "hw_filter.h"
 #include "sw_filter_pipe.h"
 
@@ -248,18 +248,21 @@ bool VpSfcRotMirParameter::SetPacketParam(VpCmdPacket *pPacket)
 {
     VP_FUNC_CALL();
 
-    VpVeboxCmdPacket *pVeboxPacket = dynamic_cast<VpVeboxCmdPacket *>(pPacket);
-    if (nullptr == pVeboxPacket)
-    {
-        return false;
-    }
-
     SFC_ROT_MIR_PARAMS *pParams = m_RotMirFilter.GetSfcParams();
     if (nullptr == pParams)
     {
+        VP_PUBLIC_ASSERTMESSAGE("Failed to get sfc rotation/mirror params");
         return false;
     }
-    return MOS_SUCCEEDED(pVeboxPacket->SetSfcRotMirParams(pParams));
+
+    VpVeboxCmdPacketBase *packet = dynamic_cast<VpVeboxCmdPacketBase *>(pPacket);
+    if (packet)
+    {
+        return MOS_SUCCEEDED(packet->SetSfcRotMirParams(pParams));
+    }
+
+    VP_PUBLIC_ASSERTMESSAGE("Invalid packet for sfc rotation/mirror");
+    return false;
 }
 
 MOS_STATUS VpSfcRotMirParameter::Initialize(HW_FILTER_ROT_MIR_PARAM & params)
@@ -353,6 +356,7 @@ MOS_STATUS PolicySfcRotMirHandler::UpdateFeaturePipe(VP_EXECUTE_CAPS caps, SwFil
     {
         SwFilterRotMir *filter2ndPass = featureRotMir;
         SwFilterRotMir *filter1ndPass = (SwFilterRotMir *)feature.Clone();
+        VP_PUBLIC_CHK_NULL_RETURN(filter1ndPass);
         FeatureParamRotMir &params1stPass = filter1ndPass->GetSwFilterParams();
 
         // No rotation in 1st pass.

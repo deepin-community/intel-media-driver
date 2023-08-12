@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2020, Intel Corporation
+* Copyright (c) 2020-2022, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -59,7 +59,8 @@ static struct LinuxCodecInfo iclCodecInfo =
 
 static bool InitIclMediaSku(struct GfxDeviceInfo *devInfo,
                              MediaFeatureTable *skuTable,
-                             struct LinuxDriverInfo *drvInfo)
+                             struct LinuxDriverInfo *drvInfo,
+                             MediaUserSettingSharedPtr userSettingPtr)
 {
     if ((devInfo == nullptr) || (skuTable == nullptr) || (drvInfo == nullptr))
     {
@@ -110,8 +111,8 @@ static bool InitIclMediaSku(struct GfxDeviceInfo *devInfo,
 
         /* HEVC VDENC Main8/10 422/444 Encoding. */
         MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain444, codecInfo->hevcVdenc);
-        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10, codecInfo->hevcVdenc);
-        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10bit422, codecInfo->hevcVdenc);
+        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain422, 0);
+        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10bit422, 0);
         MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10bit444, codecInfo->hevcVdenc);
 
         /* VP9 Dec 8 bit 444 */
@@ -190,6 +191,8 @@ static bool InitIclMediaSku(struct GfxDeviceInfo *devInfo,
 
     MEDIA_WR_SKU(skuTable, FtrUseSwSwizzling, 1);
 
+    MEDIA_WR_SKU(skuTable, FtrHDR, 1);
+
     return true;
 }
 
@@ -219,6 +222,11 @@ static bool InitIclMediaWa(struct GfxDeviceInfo *devInfo,
 
     MEDIA_WR_WA(waTable, Wa16KInputHeightNV12Planar420, 1);
     MEDIA_WR_WA(waTable, WaDisableCodecMmc, 1);
+
+    /*software wa to prevent error propagation for vertical intra refresh on H264 VDEnc*/
+    MEDIA_WR_WA(waTable, Wa_18011246551, 1);
+
+    MEDIA_WR_WA(waTable, WaDisableSetObjectCapture, 0);
 
     return true;
 }
@@ -261,7 +269,8 @@ static struct LinuxCodecInfo ehlCodecInfo =
 
 static bool InitEhlMediaSku(struct GfxDeviceInfo *devInfo,
                              MediaFeatureTable *skuTable,
-                             struct LinuxDriverInfo *drvInfo)
+                             struct LinuxDriverInfo *drvInfo,
+                             MediaUserSettingSharedPtr userSettingPtr)
 {
     if ((devInfo == nullptr) || (skuTable == nullptr) || (drvInfo == nullptr))
     {
@@ -309,8 +318,8 @@ static bool InitEhlMediaSku(struct GfxDeviceInfo *devInfo,
 
         /* HEVC VDENC Main8/10 422/444 Encoding. */
         MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain444, codecInfo->hevcVdenc);
-        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10, codecInfo->hevcVdenc);
-        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10bit422, codecInfo->hevcVdenc);
+        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain422, 0);
+        MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10bit422, 0);
         MEDIA_WR_SKU(skuTable, FtrEncodeHEVCVdencMain10bit444, codecInfo->hevcVdenc);
 
         /* VP9 Dec 8 bit 444 */

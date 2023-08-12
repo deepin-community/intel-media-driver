@@ -29,6 +29,7 @@
 #define _MHW_VDBOX_HCP_GENERIC_H_
 
 #include "mhw_vdbox_hcp_interface.h"
+#include "mhw_cp_interface.h"
 
 //!  MHW Vdbox Hcp generic interface
 /*!
@@ -69,6 +70,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(params);
         MHW_ASSERT(params->Mode != CODECHAL_UNSUPPORTED_MODE);
 
@@ -92,7 +94,7 @@ protected:
         cmd.DW2.YOffsetForUCbInPixel =
             MOS_ALIGN_CEIL(params->psSurface->UPlaneOffset.iYOffset, uvPlaneAlignment);
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -105,6 +107,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(params);
         MHW_ASSERT(params->Mode != CODECHAL_UNSUPPORTED_MODE);
 
@@ -126,7 +129,7 @@ protected:
 
         cmd.DW2.YOffsetForUCbInPixel = params->psSurface->UPlaneOffset.iYOffset;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -139,6 +142,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(params);
 
         MHW_RESOURCE_PARAMS resourceParams;
@@ -172,7 +176,7 @@ protected:
                 &resourceParams));
         }
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -185,6 +189,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(cmdBuffer);
         MHW_MI_CHK_NULL(params);
 
@@ -265,7 +270,7 @@ protected:
                             }
                         }
 
-                        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+                        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
                     }
                 }
             }
@@ -286,6 +291,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(params);
         MHW_MI_CHK_NULL(params->pHevcPicParams);
 
@@ -293,7 +299,7 @@ protected:
 
         auto hevcPicParams = params->pHevcPicParams;
 
-        cmd.DW1.Framewidthinmincbminus1 = hevcPicParams->PicWidthInMinCbsY - 1;
+        cmd.DW1.Framewidthinmincbminus1  = hevcPicParams->PicWidthInMinCbsY - 1;
         cmd.DW1.Frameheightinmincbminus1 = hevcPicParams->PicHeightInMinCbsY - 1;
 
         cmd.DW2.Mincusize = (hevcPicParams->log2_min_luma_coding_block_size_minus3) & 0x3;
@@ -312,34 +318,34 @@ protected:
         cmd.DW3.Colpicisi = 0;
         cmd.DW3.Curpicisi = 0;
 
-        cmd.DW4.SampleAdaptiveOffsetEnabledFlag = hevcPicParams->sample_adaptive_offset_enabled_flag;
-        cmd.DW4.PcmEnabledFlag = hevcPicParams->pcm_enabled_flag;
-        cmd.DW4.CuQpDeltaEnabledFlag = hevcPicParams->cu_qp_delta_enabled_flag;
-        cmd.DW4.DiffCuQpDeltaDepthOrNamedAsMaxDqpDepth = hevcPicParams->diff_cu_qp_delta_depth;
-        cmd.DW4.PcmLoopFilterDisableFlag = hevcPicParams->pcm_loop_filter_disabled_flag;
-        cmd.DW4.ConstrainedIntraPredFlag = hevcPicParams->constrained_intra_pred_flag;
-        cmd.DW4.Log2ParallelMergeLevelMinus2 = hevcPicParams->log2_parallel_merge_level_minus2;
-        cmd.DW4.SignDataHidingFlag = hevcPicParams->sign_data_hiding_enabled_flag;
-        cmd.DW4.LoopFilterAcrossTilesEnabledFlag = hevcPicParams->loop_filter_across_tiles_enabled_flag;
-        cmd.DW4.EntropyCodingSyncEnabledFlag = hevcPicParams->entropy_coding_sync_enabled_flag;
-        cmd.DW4.TilesEnabledFlag = hevcPicParams->tiles_enabled_flag;
-        cmd.DW4.WeightedPredFlag = hevcPicParams->weighted_pred_flag;
-        cmd.DW4.WeightedBipredFlag = hevcPicParams->weighted_bipred_flag;
-        cmd.DW4.Fieldpic = (hevcPicParams->RefFieldPicFlag >> 15) & 0x01;
-        cmd.DW4.Bottomfield = ((hevcPicParams->RefBottomFieldFlag >> 15) & 0x01) ? 0 : 1;
-        cmd.DW4.TransformSkipEnabledFlag = hevcPicParams->transform_skip_enabled_flag;
-        cmd.DW4.AmpEnabledFlag = hevcPicParams->amp_enabled_flag;
-        cmd.DW4.TransquantBypassEnableFlag = hevcPicParams->transquant_bypass_enabled_flag;
-        cmd.DW4.StrongIntraSmoothingEnableFlag = hevcPicParams->strong_intra_smoothing_enabled_flag;
+        cmd.DW4.SampleAdaptiveOffsetEnabledFlag         = hevcPicParams->sample_adaptive_offset_enabled_flag;
+        cmd.DW4.PcmEnabledFlag                          = hevcPicParams->pcm_enabled_flag;
+        cmd.DW4.CuQpDeltaEnabledFlag                    = hevcPicParams->cu_qp_delta_enabled_flag;
+        cmd.DW4.DiffCuQpDeltaDepthOrNamedAsMaxDqpDepth  = hevcPicParams->diff_cu_qp_delta_depth;
+        cmd.DW4.PcmLoopFilterDisableFlag                = hevcPicParams->pcm_loop_filter_disabled_flag;
+        cmd.DW4.ConstrainedIntraPredFlag                = hevcPicParams->constrained_intra_pred_flag;
+        cmd.DW4.Log2ParallelMergeLevelMinus2            = hevcPicParams->log2_parallel_merge_level_minus2;
+        cmd.DW4.SignDataHidingFlag                      = hevcPicParams->sign_data_hiding_enabled_flag;
+        cmd.DW4.LoopFilterAcrossTilesEnabledFlag        = hevcPicParams->loop_filter_across_tiles_enabled_flag;
+        cmd.DW4.EntropyCodingSyncEnabledFlag            = hevcPicParams->entropy_coding_sync_enabled_flag;
+        cmd.DW4.TilesEnabledFlag                        = hevcPicParams->tiles_enabled_flag;
+        cmd.DW4.WeightedPredFlag                        = hevcPicParams->weighted_pred_flag;
+        cmd.DW4.WeightedBipredFlag                      = hevcPicParams->weighted_bipred_flag;
+        cmd.DW4.Fieldpic                                = (hevcPicParams->RefFieldPicFlag >> 15) & 0x01;
+        cmd.DW4.Bottomfield                             = ((hevcPicParams->RefBottomFieldFlag >> 15) & 0x01) ? 0 : 1;
+        cmd.DW4.TransformSkipEnabledFlag                = hevcPicParams->transform_skip_enabled_flag;
+        cmd.DW4.AmpEnabledFlag                          = hevcPicParams->amp_enabled_flag;
+        cmd.DW4.TransquantBypassEnableFlag              = hevcPicParams->transquant_bypass_enabled_flag;
+        cmd.DW4.StrongIntraSmoothingEnableFlag          = hevcPicParams->strong_intra_smoothing_enabled_flag;
 
         cmd.DW5.PicCbQpOffset = hevcPicParams->pps_cb_qp_offset & 0x1f;
         cmd.DW5.PicCrQpOffset = hevcPicParams->pps_cr_qp_offset & 0x1f;
         cmd.DW5.MaxTransformHierarchyDepthIntraOrNamedAsTuMaxDepthIntra = hevcPicParams->max_transform_hierarchy_depth_intra & 0x7;
         cmd.DW5.MaxTransformHierarchyDepthInterOrNamedAsTuMaxDepthInter = hevcPicParams->max_transform_hierarchy_depth_inter & 0x7;
         cmd.DW5.PcmSampleBitDepthChromaMinus1 = hevcPicParams->pcm_sample_bit_depth_chroma_minus1;
-        cmd.DW5.PcmSampleBitDepthLumaMinus1 = hevcPicParams->pcm_sample_bit_depth_luma_minus1;
+        cmd.DW5.PcmSampleBitDepthLumaMinus1   = hevcPicParams->pcm_sample_bit_depth_luma_minus1;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -352,12 +358,13 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         typename THcpCmds::HCP_BSD_OBJECT_CMD   cmd;
 
         cmd.DW1.IndirectBsdDataLength = params->dwBsdDataLength;
         cmd.DW2.IndirectDataStartAddress = params->dwBsdDataStartOffset;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, sizeof(cmd)));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, sizeof(cmd)));
 
         return eStatus;
     }
@@ -372,6 +379,7 @@ protected:
 
         typename THcpCmds::HCP_TILE_STATE_CMD cmd;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(params);
         MHW_MI_CHK_NULL(params->pTileColWidth);
         MHW_MI_CHK_NULL(params->pTileRowHeight);
@@ -462,7 +470,7 @@ protected:
             cmd.CtbRowPositionOfTileRow[5].DW0.Ctbpos1I = rowCumulativeValue;
         }
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -526,7 +534,7 @@ protected:
             return MOS_STATUS_INVALID_PARAMETER;
         }
 
-        MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -571,7 +579,7 @@ protected:
             return MOS_STATUS_INVALID_PARAMETER;
         }
 
-        MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(cmdBuffer, batchBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(Mhw_AddCommandCmdOrBB(m_osInterface, cmdBuffer, batchBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -584,6 +592,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(hevcSliceState);
 
         typename THcpCmds::HCP_SLICE_STATE_CMD cmd;
@@ -740,7 +749,7 @@ protected:
 
         cmd.DW5.Sliceheaderlength = hevcSliceParams->ByteOffsetToSliceData;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }
@@ -753,6 +762,7 @@ protected:
 
         MHW_FUNCTION_ENTER;
 
+        MHW_MI_CHK_NULL(m_osInterface);
         MHW_MI_CHK_NULL(hevcSliceState);
 
         typename THcpCmds::HCP_SLICE_STATE_CMD      cmd;
@@ -925,7 +935,7 @@ protected:
 
         cmd.DW5.Sliceheaderlength = hevcSliceParams->ByteOffsetToSliceData;
 
-        MHW_MI_CHK_STATUS(Mos_AddCommand(cmdBuffer, &cmd, cmd.byteSize));
+        MHW_MI_CHK_STATUS(m_osInterface->pfnAddCommand(cmdBuffer, &cmd, cmd.byteSize));
 
         return eStatus;
     }

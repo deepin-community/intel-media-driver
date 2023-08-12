@@ -30,18 +30,18 @@
 #ifndef __MEDIA_PIPELINE_H__
 #define __MEDIA_PIPELINE_H__
 #include <map>
+#include <functional>
 #include "mos_defs.h"
 #include "mos_os.h"
 #include "media_task.h"
 #include "media_context.h"
-#include "codechal_debug.h"
 #include "media_status_report.h"
 #include "media_feature_manager.h"
-#include "codechal_utilities.h"
 #include "media_perf_profiler.h"
-#include "media_copy.h"
-
+#include "media_copy_wrapper.h"
+#include "media_user_setting.h"
 class MediaPacket;
+class CodechalDebugInterface;
 class MediaPipeline
 {
 public:
@@ -116,11 +116,12 @@ public:
 
     MediaContext *GetMediaContext() { return m_mediaContext; }
     virtual MediaFeatureManager *GetFeatureManager() { return m_featureManager; };
-    virtual MediaCopyBaseState* GetMediaCopy() {return m_mediaCopy;}
 
     std::shared_ptr<MediaFeatureManager::ManagerLite> GetPacketLevelFeatureManager(int packetId) { return m_featureManager->GetPacketLevelFeatureManager(packetId); }
 
     MediaScalability* &GetMediaScalability() { return m_scalability; }
+
+    MediaUserSettingSharedPtr GetUserSetting() { return m_userSettingPtr; }
 
     //!
     //! \brief  Get if frame tracking is enabled from scalability
@@ -145,6 +146,15 @@ protected:
     virtual MOS_STATUS InitPlatform();
 
     //!
+    //! \brief  Get or create packet based on packet ID
+    //! \param  [in] packetId
+    //!         Packet Id
+    //! \return MediaPacket *
+    //!         Pointer to packet
+    //!
+    MediaPacket *GetOrCreate(uint32_t packetId);
+
+    //!
     //! \brief  Register packets into packet pool
     //! \param  [in] packetId
     //!         Packet Id
@@ -154,6 +164,20 @@ protected:
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
     MOS_STATUS RegisterPacket(uint32_t packetId, MediaPacket* packet);
+
+    //!
+    //! \brief  Register packets into packet pool
+    //! \param  [in] packetId
+    //!         Packet Id
+    //! \param  [in] creator
+    //!         Packet creator
+    //! \return void
+    //!         No return value
+    //!
+    void RegisterPacket(uint32_t packetId, std::function<MediaPacket *()> &&creator)
+    {
+        m_packetCreators[packetId] = creator;  // insert if key does not exist
+    }
 
     //!
     //! \brief  Retrieve the task with given Id
@@ -218,18 +242,18 @@ protected:
     virtual MOS_STATUS CreateFeatureManager();
 
     //!
-    //! \brief  create media copy
+    //! \brief  Create media copy wrapper
     //! \return MOS_STATUS
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
-    virtual MOS_STATUS CreateMediaCopy();
+    virtual MOS_STATUS CreateMediaCopyWrapper();
 
     //!
     //! \brief  media user setting
     //! \return MOS_STATUS
     //!         MOS_STATUS_SUCCESS if success, else fail reason
     //!
-    virtual MOS_STATUS InitUserSetting();
+    virtual MOS_STATUS InitUserSetting(MediaUserSettingSharedPtr userSettingPtr);
 
 protected:
     PMOS_INTERFACE                   m_osInterface = nullptr;      //!< OS interface
@@ -239,15 +263,17 @@ protected:
     MEDIA_WA_TABLE                   *m_waTable      = nullptr;    //!< WA table
     MEDIA_SYSTEM_INFO                *m_gtSystemInfo = nullptr;    //!< GT system infomation
  
-    MediaScalability    *m_scalability = nullptr;
-    MediaContext        *m_mediaContext = nullptr;
-    MediaStatusReport   *m_statusReport = nullptr;
-    MediaFeatureManager *m_featureManager = nullptr;
-    MediaCopyBaseState  *m_mediaCopy = nullptr;
+    MediaScalability    *m_scalability      = nullptr;
+    MediaContext        *m_mediaContext     = nullptr;
+    MediaStatusReport   *m_statusReport     = nullptr;
+    MediaFeatureManager *m_featureManager   = nullptr;
+    MediaCopyWrapper    *m_mediaCopyWrapper = nullptr;
 
-    std::map<uint32_t, MediaPacket *>               m_packetList;        //!< Packets list
-    std::vector<PacketProperty>               m_activePacketList;  //!< Active packets property list
-    std::map<MediaTask::TaskType, MediaTask *>      m_taskList;          //!< Task list
-
+    std::map<uint32_t, MediaPacket *>                  m_packetList;        //!< Packets list
+    std::map<uint32_t, std::function<MediaPacket *()>> m_packetCreators;    //!< Packets creators
+    std::vector<PacketProperty>                        m_activePacketList;  //!< Active packets property list
+    std::map<MediaTask::TaskType, MediaTask *>         m_taskList;          //!< Task list
+    MediaUserSettingSharedPtr                          m_userSettingPtr = nullptr;     //!< usersettingInstance
+MEDIA_CLASS_DEFINE_END(MediaPipeline)
 };
 #endif // !__MEDIA_PIPELINE_H__

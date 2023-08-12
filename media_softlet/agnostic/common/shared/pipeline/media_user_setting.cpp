@@ -24,24 +24,19 @@
 //! \brief    Initialize user setting of media
 //!
 #include "media_pipeline.h"
-MOS_STATUS MediaPipeline::InitUserSetting()
+MOS_STATUS MediaPipeline::InitUserSetting(MediaUserSettingSharedPtr userSettingPtr)
 {
     DeclareUserSettingKey(
+        userSettingPtr,
         "Lockable Resource",
         MediaUserSetting::Group::Sequence,
         (int32_t)0,
         false);
     DeclareUserSettingKey(
-        "Enable Codec MMC",
+        userSettingPtr,
+        "DisableTlbPrefetch",
         MediaUserSetting::Group::Sequence,
-        int32_t(0),
+        int32_t(1),
         false);
-#if (_DEBUG || _RELEASE_INTERNAL)
-    DeclareUserSettingKeyForDebug(
-        "Simulation In Use",
-        MediaUserSetting::Group::Sequence,
-        int32_t(0),
-        true);
-#endif
     return MOS_STATUS_SUCCESS;
 }

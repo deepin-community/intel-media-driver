@@ -28,9 +28,9 @@
 #define __DECODE_AV1_PICTURE_PACKET_G12_BASE_H__
 
 #include "media_cmd_packet.h"
-#include "decode_av1_pipeline.h"
+#include "decode_av1_pipeline_g12_base.h"
 #include "decode_utils.h"
-#include "decode_av1_basic_feature.h"
+#include "decode_av1_basic_feature_g12.h"
 
 namespace decode
 {
@@ -40,11 +40,14 @@ namespace decode
         //!
         //! \brief  Av1DecodePicPkt_G12_Base constructor
         //!
-        Av1DecodePicPkt_G12_Base(Av1Pipeline *pipeline, CodechalHwInterface *hwInterface)
-            : DecodeSubPacket(pipeline, hwInterface), m_av1Pipeline(pipeline)
+        Av1DecodePicPkt_G12_Base(Av1PipelineG12_Base *pipeline, CodechalHwInterface *hwInterface)
+            : DecodeSubPacket(pipeline, *hwInterface), m_av1Pipeline(pipeline)
         {
+            m_hwInterface = hwInterface;
             if (m_hwInterface != nullptr)
             {
+                m_miInterface  = m_hwInterface->GetMiInterface();
+                m_osInterface  = m_hwInterface->GetOsInterface();
                 m_avpInterface = hwInterface->GetAvpInterface();
             }
         }
@@ -146,14 +149,16 @@ namespace decode
         //! \return MOS_STATUS
         //!         MOS_STATUS_SUCCESS if success, else fail reason
         //!
-        MOS_STATUS DumpResources(MhwVdboxAvpPipeBufAddrParams& pipeBufAddrParams);
+        MOS_STATUS DumpResources(MhwVdboxAvpPipeBufAddrParams& pipeBufAddrParams, uint32_t refSize);
 
         //Interfaces
-        Av1Pipeline                *m_av1Pipeline     = nullptr;
+        Av1PipelineG12_Base        *m_av1Pipeline     = nullptr;
         MhwVdboxAvpInterface       *m_avpInterface    = nullptr;
-        Av1BasicFeature            *m_av1BasicFeature = nullptr;
+        Av1BasicFeatureG12         *m_av1BasicFeature = nullptr;
         DecodeAllocator            *m_allocator       = nullptr;
         DecodeMemComp              *m_mmcState        = nullptr;
+        CodechalHwInterface        *m_hwInterface     = nullptr;
+        MhwMiInterface             *m_miInterface     = nullptr;
 
         CodecAv1PicParams          *m_av1PicParams    = nullptr; //!< Pointer to picture parameter
         MOS_SURFACE                 refSurface[av1TotalRefsPerFrame];
@@ -234,6 +239,7 @@ namespace decode
         uint16_t chromaSamplingFormat   = 0;    //!< Chroma sampling fromat
         uint32_t m_widthInSb            = 0;    //!< Width in unit of SB
         uint32_t m_heightInSb           = 0;    //!< Height in unit of SB
+    MEDIA_CLASS_DEFINE_END(decode__Av1DecodePicPkt_G12_Base)
     };
 
 }  // namespace decode

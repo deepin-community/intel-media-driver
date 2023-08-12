@@ -320,7 +320,7 @@ public:
 
     // External components
     PMOS_INTERFACE              m_pOsInterface;
-    PRENDERHAL_INTERFACE        m_pRenderHal;
+    PRENDERHAL_INTERFACE_LEGACY m_pRenderHal;
 
 protected:
     // External tables
@@ -341,6 +341,9 @@ protected:
 
     // Status Buffer, Video Pre-Processing Only
     STATUS_TABLE_UPDATE_PARAMS  m_StatusTableUpdateParams = { 0 };
+
+    // Media user setting instance
+    MediaUserSettingSharedPtr m_userSettingPtr = nullptr;
 
 };
 

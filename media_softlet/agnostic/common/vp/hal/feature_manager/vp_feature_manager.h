@@ -34,6 +34,7 @@
 #include "vp_pipeline_common.h"
 #include "vp_allocator.h"
 #include "vp_obj_factories.h"
+#include "vp_user_feature_control.h"
 
 namespace vp
 {
@@ -89,6 +90,7 @@ protected:
         PVPHAL_SURFACE              pSrc,
         PVPHAL_SURFACE              pRenderTarget);
 
+    virtual bool IsCroppingNeeded(PVPHAL_SURFACE pSrc);
     //!
     //! \brief    Check if 2 passes CSC are needed
     //! \param    [in] pSrc
@@ -163,8 +165,11 @@ protected:
     virtual bool IsVeboxSurfaceHeightAligned(VPHAL_SURFACE &surf);
 
 protected:
-    PVP_MHWINTERFACE        m_hwInterface       = nullptr;
-    PMOS_INTERFACE          m_pOsInterface      = nullptr;
+    PVP_MHWINTERFACE           m_hwInterface       = nullptr;
+    PMOS_INTERFACE             m_pOsInterface      = nullptr;
+    vp::VpUserFeatureControl   *m_vpUserFeatureControl = nullptr;
+
+MEDIA_CLASS_DEFINE_END(vp__VPFeatureManager)
 };
 
 class VpFeatureManagerNext : public MediaFeatureManager
@@ -189,6 +194,11 @@ public:
     //!
     bool IsVeboxSfcFormatSupported(MOS_FORMAT formatInput, MOS_FORMAT formatOutput);
 
+    Policy *GetPolicy()
+    {
+        return m_policy;
+    }
+
 protected:
     MOS_STATUS CreateHwFilterPipe(SwFilterPipe& swFilterPipe, HwFilterPipe*& pHwFilterPipe);
     MOS_STATUS UpdateResources(HwFilterPipe& hwFilterPipe);
@@ -196,10 +206,12 @@ protected:
     virtual MOS_STATUS RegisterFeatures();
     MOS_STATUS UnregisterFeatures();
 
-    VpInterface         & m_vpInterface;
-    Policy              * m_policy = nullptr;
+    VpInterface          &m_vpInterface;
+    Policy               *m_policy = nullptr;
     std::map<FeatureType, SwFilterFeatureHandler*> m_featureHandler;
-    uint32_t           m_isFeatureRegistered = false;
+    uint32_t             m_isFeatureRegistered = false;
+
+MEDIA_CLASS_DEFINE_END(vp__VpFeatureManagerNext)
 };
 }
 #endif // !__VP_FEATURE_MANAGER_H__

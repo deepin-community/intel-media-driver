@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2019-2020, Intel Corporation
+* Copyright (c) 2019-2023, Intel Corporation
 *
 * Permission is hereby granted, free of charge, to any person obtaining a
 * copy of this software and associated documentation files (the "Software"),
@@ -28,11 +28,18 @@
 #define __DECODE_STATUS_REPORT_H__
 
 #include "media_status_report.h"
-#include "decode_utils.h"
-#include "decode_allocator.h"
 #include "decode_status_report_defs.h"
+#include "codec_def_common.h"
+#include "media_class_trace.h"
+#include "mos_defs.h"
+#include "mos_os_specific.h"
+#include "decode_utils.h"
+#include <stdint.h>
+
+#define CODECHAL_DECODE_STATUS_NUM 512
 
 namespace decode {
+    class DecodeAllocator;
 
     //!
     //! \struct DecodeStatusReportData
@@ -59,7 +66,7 @@ namespace decode {
 
 #if (_DEBUG || _RELEASE_INTERNAL)
         //! \brief Applies when debug dumps are enabled, pointer to SFC output resource for the picture associated with this status report
-        PMOS_RESOURCE           currSfcOutputPicRes = nullptr;
+        PMOS_SURFACE            currSfcOutputSurface = nullptr;
         //! \brief Applies when debug dumps are enabled, pointer to histogram output resource for the picture associated with this status report
         PMOS_RESOURCE           currHistogramOutBuf = nullptr;
         //! \brief Applies when debug dumps are enabled, pointer to AV1 film grain output resource for the picture associated with this status report
@@ -80,7 +87,7 @@ namespace decode {
     class DecodeStatusReport : public MediaStatusReport
     {
     public:
-        DecodeStatusReport(DecodeAllocator *alloc, bool enableRcs);
+        DecodeStatusReport(DecodeAllocator *alloc, bool enableRcs, PMOS_INTERFACE osInterface = nullptr);
         virtual ~DecodeStatusReport();
 
         //!
@@ -187,6 +194,9 @@ namespace decode {
         PMOS_BUFFER            m_statusBufRcs = nullptr;
         uint8_t               *m_dataStatusMfx = nullptr;
         uint8_t               *m_dataStatusRcs = nullptr;
+        PMOS_INTERFACE        m_osInterface = nullptr;
+
+    MEDIA_CLASS_DEFINE_END(decode__DecodeStatusReport)
     };
 }
 

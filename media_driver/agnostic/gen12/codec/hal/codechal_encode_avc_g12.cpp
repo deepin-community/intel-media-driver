@@ -31,7 +31,6 @@
 #include "mhw_render_g12_X.h"
 #include "codeckrnheader.h"
 #include "igcodeckrn_g12.h"
-#include "media_user_settings_mgr_g12.h"
 #include "hal_oca_interface.h"
 #if USE_CODECHAL_DEBUG_TOOL
 #include "codechal_debug_encode_par_g12.h"
@@ -1203,9 +1202,9 @@ CodechalEncodeAvcEncG12::CodechalEncodeAvcEncG12(
 {
     CODECHAL_ENCODE_FUNCTION_ENTER;
 
-    CODECHAL_ENCODE_ASSERT(m_osInterface);
+    CODECHAL_ENCODE_CHK_NULL_NO_STATUS_RETURN(m_osInterface);
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, false, true);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, false, true);
 
     // Virtual Engine is enabled in default.
     Mos_SetVirtualEngineSupported(m_osInterface, true);
@@ -1230,7 +1229,7 @@ CodechalEncodeAvcEncG12::CodechalEncodeAvcEncG12(
 
     m_vdboxOneDefaultUsed = true;
 
-    Mos_CheckVirtualEngineSupported(m_osInterface, false, false);
+    m_osInterface->pfnVirtualEngineSupported(m_osInterface, false, false);
 
     CODECHAL_DEBUG_TOOL(
         CODECHAL_ENCODE_CHK_NULL_NO_STATUS_RETURN(m_encodeParState = MOS_New(CodechalDebugEncodeParG12, this));
@@ -1687,8 +1686,8 @@ MOS_STATUS CodechalEncodeAvcEncG12::MbEncKernel(bool mbEncIFrameDistInUse)
         &walkerParams,
         &walkerCodecParams));
 
-    HalOcaInterface::TraceMessage(cmdBuffer, *m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
-    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface->pOsContext, *m_miInterface, *m_renderEngineInterface->GetMmioRegisters());
+    HalOcaInterface::TraceMessage(cmdBuffer, (MOS_CONTEXT_HANDLE)m_osInterface->pOsContext, __FUNCTION__, sizeof(__FUNCTION__));
+    HalOcaInterface::OnDispatch(cmdBuffer, *m_osInterface, *m_miInterface, *m_renderEngineInterface->GetMmioRegisters());
 
     CODECHAL_ENCODE_CHK_STATUS_RETURN(m_renderEngineInterface->AddMediaObjectWalkerCmd(
         &cmdBuffer,

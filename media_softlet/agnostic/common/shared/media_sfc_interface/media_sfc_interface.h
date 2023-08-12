@@ -27,9 +27,14 @@
 #ifndef __MEDIA_SFC_INTERFACE_H__
 #define __MEDIA_SFC_INTERFACE_H__
 
+#include <stdint.h>
 #include "mos_os_specific.h"
-#include "codec_def_decode_jpeg.h"
+#include "media_defs.h"
 #include "media_common_defs.h"
+#include "mos_defs.h"
+#include "mos_defs_specific.h"
+#include "mos_os.h"
+#include "mos_resource_defs.h"
 
 class MediaSfcRender;
 class MediaMemComp;
@@ -140,8 +145,8 @@ struct VDBOX_SFC_PARAMS
         RECT                        rcDst;              //!< rectangle on output surface after scaling.
     } output;
 
-    VIDEO_PARAMS                    videoParams;        //!< standard related params.
-    CODECHAL_SCALING_MODE           scalingMode;
+    VIDEO_PARAMS                    videoParams = {};        //!< standard related params.
+    CODECHAL_SCALING_MODE           scalingMode = CODECHAL_SCALING_BILINEAR;
 };
 
 union MEDIA_SFC_INTERFACE_MODE
@@ -223,10 +228,13 @@ public:
     //!
     virtual MOS_STATUS Initialize(MEDIA_SFC_INTERFACE_MODE mode);
 
+    bool IsRenderInitialized();
+
 protected:
     PMOS_INTERFACE m_osInterface    = nullptr;
     MediaSfcRender *m_sfcRender     = nullptr;
     MediaMemComp   *m_mmc           = nullptr;
+MEDIA_CLASS_DEFINE_END(MediaSfcInterface)
 };
 
 #endif // __MEDIA_SFC_INTERFACE_H__

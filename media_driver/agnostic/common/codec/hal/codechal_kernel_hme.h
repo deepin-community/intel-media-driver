@@ -210,17 +210,17 @@ public:
     //!
     struct CurbeParam
     {
-        bool          brcEnable = false;
-        uint8_t       subPelMode = 3;
-        uint8_t       sumMVThreshold = 0;
-        CODEC_PICTURE currOriginalPic;
-        uint32_t      qpPrimeY;
-        uint32_t      targetUsage;
-        uint32_t      maxMvLen;
-        uint32_t      numRefIdxL1Minus1;
-        uint32_t      numRefIdxL0Minus1;
-        uint8_t*      meMethodTable = nullptr;
-        uint8_t*      bmeMethodTable = nullptr;
+        bool          brcEnable         = false;
+        uint8_t       subPelMode        = 3;
+        uint8_t       sumMVThreshold    = 0;
+        CODEC_PICTURE currOriginalPic   = {};
+        uint32_t      qpPrimeY          = 0;
+        uint32_t      targetUsage       = 0;
+        uint32_t      maxMvLen          = 0;
+        uint32_t      numRefIdxL1Minus1 = 0;
+        uint32_t      numRefIdxL0Minus1 = 0;
+        uint8_t*      meMethodTable     = nullptr;
+        uint8_t*      bmeMethodTable    = nullptr;
 
         uint32_t list0RefID0FieldParity : MOS_BITFIELD_BIT(0);
         uint32_t list0RefID1FieldParity : MOS_BITFIELD_BIT(1);
@@ -240,26 +240,26 @@ public:
     //!
     struct SurfaceParams
     {
-        bool                  mbaffEnabled;
-        bool                  vdencStreamInEnabled;
-        uint32_t              numRefIdxL0ActiveMinus1;
-        uint32_t              numRefIdxL1ActiveMinus1;
-        uint32_t              downScaledWidthInMb;
-        uint32_t              downScaledHeightInMb;
-        uint32_t              downScaledBottomFieldOffset;
-        uint32_t              vdencStreamInSurfaceSize;
-        uint32_t              verticalLineStride;
-        uint32_t              verticalLineStrideOffset;
-        uint32_t              meBrcDistortionBottomFieldOffset;
-        PCODEC_REF_LIST *     refList;
-        PCODEC_PIC_ID         picIdx;
-        PCODEC_PICTURE        currOriginalPic;
-        PCODEC_PICTURE        refL0List;
-        PCODEC_PICTURE        refL1List;
-        PMOS_SURFACE          meBrcDistortionBuffer;
-        PMOS_RESOURCE         meVdencStreamInBuffer;
-        CODECHAL_ENCODE_BUFFER meSumMvandDistortionBuffer;
-        CmSurface2D          *meBrcDistortionSurface;
+        bool                  mbaffEnabled                      = false;
+        bool                  vdencStreamInEnabled              = false;
+        uint32_t              numRefIdxL0ActiveMinus1           = 0;
+        uint32_t              numRefIdxL1ActiveMinus1           = 0;
+        uint32_t              downScaledWidthInMb               = 0;
+        uint32_t              downScaledHeightInMb              = 0;
+        uint32_t              downScaledBottomFieldOffset       = 0;
+        uint32_t              vdencStreamInSurfaceSize          = 0;
+        uint32_t              verticalLineStride                = 0;
+        uint32_t              verticalLineStrideOffset          = 0;
+        uint32_t              meBrcDistortionBottomFieldOffset  = 0;
+        PCODEC_REF_LIST *     refList                           = nullptr;
+        PCODEC_PIC_ID         picIdx                            = nullptr;
+        PCODEC_PICTURE        currOriginalPic                   = nullptr;
+        PCODEC_PICTURE        refL0List                         = nullptr;
+        PCODEC_PICTURE        refL1List                         = nullptr;
+        PMOS_SURFACE          meBrcDistortionBuffer             = nullptr;
+        PMOS_RESOURCE         meVdencStreamInBuffer             = nullptr;
+        CODECHAL_ENCODE_BUFFER meSumMvandDistortionBuffer       = {};
+        CmSurface2D          *meBrcDistortionSurface            = nullptr;
     };
 
     //!
@@ -381,8 +381,8 @@ protected:
     uint32_t      m_meDistortionBottomFieldOffset = 0;      //!< ME distortion bottom field offset
     uint8_t *     m_bmeMethodTable = genericBMEMethod;      //!< pointer to BME method table
     uint8_t *     m_meMethodTable  = genericMEMethod;       //!< pointer to ME method table
-    CurbeParam    m_curbeParam;                             //!< curbe paramters
-    SurfaceParams m_surfaceParam;                           //! surface parameters
+    CurbeParam    m_curbeParam                    = {};     //!< curbe paramters
+    SurfaceParams m_surfaceParam                  = {};     //! surface parameters
 
     static const uint32_t scalingFactor4X  = 4;
     static const uint32_t scalingFactor16X = 16;
